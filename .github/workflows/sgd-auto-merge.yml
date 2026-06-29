@@ -1,0 +1,188 @@
+name: SGD Auto-Approve & Merge
+
+# Standing automation for WealthTech Pros' Model-B autonomous review loop.
+#
+# When a PR carries the `pr-reviewed` label (the recorded SGD review verdict),
+# has no human-hold label, touches no sensitive path, and all its checks pass,
+# the wtp-automation GitHub App approves it — satisfying branch protection's
+# required review, which a self-authored PR cannot do — and squash-merges it.
+#
+# COMMIT BINDING (the security core). The job binds to the EXACT commit that was
+# present when the trusted `labeled`/event fired (github.event.pull_request.head.sha).
+# It only ever approves and merges THAT sha (`--match-head-commit`), and aborts if
+# the live head has drifted. `synchronize` is deliberately NOT a trigger, so a
+# commit pushed AFTER the label cannot ride the existing label into main — it
+# requires the reviewer to re-apply `pr-reviewed` (i.e. re-review). This closes
+# the "label a benign PR, then push malicious code" fork-exploit.
+#
+# SENSITIVITY GATE (Model B), enforced two ways:
+#   1. Label: the reviewer applies `pr-reviewed` only to clean, non-sensitive PRs;
+#      sensitive ones get `hold` (also do-not-merge / needs-human / blocked) and
+#      wait for a human (Dave). Hold is re-checked immediately before the merge.
+#   2. Path deny (defence-in-depth, not just trust in labelling): a PR touching
+#      .github/** , infra/IaC, Dockerfiles, auth/security, or secrets is REFUSED
+#      auto-merge regardless of label — it must be reviewed and merged by a human.
+#      (So this very workflow, and any workflow/IaC change, always has a human gate.)
+#
+# SAFETY: never checks out or runs PR code (no RCE surface under
+# pull_request_target). All PR-derived values reach the shell only via `env:` as
+# `$VARS`, never interpolated through `${{ }}` into `run:`. The app token does
+# every write; GITHUB_TOKEN stays read-only. Approval shows as wtp-automation[bot].
+# Creds are ORG secrets WTP_AUTOMATION_APP_ID / WTP_AUTOMATION_PRIVATE_KEY.
+
+on:
+  pull_request_target:
+    # `labeled` ONLY — and deliberately so (see COMMIT BINDING above).
+    # `synchronize` is excluded so a push after labelling can't ride the stale label.
+    # `reopened`/`ready_for_review` are ALSO excluded: their event head is already the
+    # current (possibly changed) commit, so EVENT_SHA would match the live head and the
+    # drift check would pass — letting a close→push→reopen sequence merge unreviewed code
+    # on a surviving label. Re-applying `pr-reviewed` (remove+add) is the re-review signal
+    # and fires a fresh `labeled` event bound to the correct EVENT_SHA.
+    types: [labeled]
+
+# The app token does every write; GITHUB_TOKEN stays read-only.
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: sgd-auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  approve-and-merge:
+    # Only run when the review gate is set and no human-hold label is present.
+    if: >-
+      github.event.pull_request.draft == false &&
+      contains(github.event.pull_request.labels.*.name, 'pr-reviewed') &&
+      !contains(github.event.pull_request.labels.*.name, 'hold') &&
+      !contains(github.event.pull_request.labels.*.name, 'do-not-merge') &&
+      !contains(github.event.pull_request.labels.*.name, 'needs-human') &&
+      !contains(github.event.pull_request.labels.*.name, 'blocked')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint wtp-automation app token
+        id: token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.WTP_AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.WTP_AUTOMATION_PRIVATE_KEY }}
+
+      - name: Gate, wait for checks, then approve + squash-merge
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          # The commit the trusted label/event applied to — the ONLY sha we may merge.
+          EVENT_SHA: ${{ github.event.pull_request.head.sha }}
+          BOT: "wtp-automation[bot]"
+          # Canonical hold-label set (lower-case; matched case-insensitively below).
+          HOLD_LABELS: "hold do-not-merge needs-human blocked"
+        run: |
+          set -euo pipefail
+
+          # --- 0. Sensitive-path deny (Model-B gate #2). Refuse auto-merge for changes
+          #        that must have a human in the loop, regardless of label. Conservative
+          #        by design: a false positive merely routes to human review (safe). ---
+          SENSITIVE_RE='(^|/)\.github/|(^|/)(infra|iac)/|\.(tf|tfvars|bicep)$|(^|/)Pulumi\.[^/]*\.ya?ml$|(^|/)Dockerfile|docker-compose|(^|/)(auth|authn|authz|security)(/|\.|-)|secret|credential|\.(pem|p12|pfx)$|(^|/)\.env($|\.)'
+          # Fail-CLOSED: if the diff can't be fetched (rate limit / network), refuse
+          # rather than skip the gate. An empty diff must never silently pass.
+          if ! files="$(gh pr diff "$PR" --repo "$REPO" --name-only 2>/tmp/diff.err)"; then
+            echo "::error::Cannot fetch PR diff ($(cat /tmp/diff.err)) — refusing auto-merge (fail-closed)."
+            exit 1
+          fi
+          if printf '%s\n' "$files" | grep -qiE "$SENSITIVE_RE"; then
+            hit="$(printf '%s\n' "$files" | grep -iE "$SENSITIVE_RE" | head -5 | paste -sd', ' -)"
+            echo "sensitive path(s) touched: $hit — refusing auto-merge, human gate required."
+            gh pr comment "$PR" --repo "$REPO" --body \
+              "🤖 **Auto-merge declined — human gate required.** This PR touches a sensitive path ( \`$hit\` ): workflows / IaC / Dockerfiles / auth / secrets. Per Model B these must be reviewed and merged by a human, not the bot." || true
+            exit 0
+          fi
+
+          # --- 1. Wait for all checks on the BOUND commit to conclude (pass/fail).
+          #        Abort immediately if the live head drifts from EVENT_SHA (someone pushed).
+          #        IMPORTANT: distinguish "no checks YET (CI still registering)" from
+          #        "no checks configured". A bare gh-pr-checks-is-empty must NOT be read as
+          #        green, or we'd merge before CI even starts — so we hold through a grace
+          #        window for checks to appear, and only treat a persistently-empty set as
+          #        "no CI". We also exclude THIS workflow's own checks (by the `workflow`
+          #        field AND the job name) so we never wait on ourselves. ---
+          SELF_WF="SGD Auto-Approve & Merge"
+          # Grace for checks to REGISTER (not finish). 180s >> GitHub Actions' typical
+          # 10-30s registration; raise this knob if the repo adopts slow external checks.
+          grace_deadline=$(( SECONDS + 180 ))
+          deadline=$(( SECONDS + 900 ))         # overall ceiling (~15 min)
+          while :; do
+            live="$(gh pr view "$PR" --repo "$REPO" --json headRefOid --jq .headRefOid 2>/dev/null || echo '')"
+            if [ "$live" != "$EVENT_SHA" ]; then
+              echo "head drifted ($EVENT_SHA → ${live:-unknown}) — re-review required; not merging."
+              gh pr comment "$PR" --repo "$REPO" --body \
+                "🤖 **Auto-merge paused** — a new commit was pushed after \`pr-reviewed\` was applied, so the label no longer matches what was reviewed. Please review the new changes and re-apply \`pr-reviewed\` if they're clean." || true
+              exit 0
+            fi
+            checks="$(gh pr checks "$PR" --repo "$REPO" --json name,bucket,workflow 2>/dev/null || echo '[]')"
+            # Drop our own checks (this very run) so we never wait on ourselves.
+            others="$(jq --arg wf "$SELF_WF" '[ .[] | select(.workflow != $wf) | select((.name | test("^approve-and-merge$")) | not) ]' <<<"$checks")"
+            total="$(jq 'length' <<<"$others")"
+            failed="$(jq '[ .[] | select(.bucket=="fail" or .bucket=="cancel") ] | length' <<<"$others")"
+            pending="$(jq '[ .[] | select(.bucket=="pending") ] | length' <<<"$others")"
+            if [ "$failed" -gt 0 ]; then
+              echo "::warning::$failed check(s) failing on #$PR — not merging."
+              gh pr comment "$PR" --repo "$REPO" --body \
+                "🤖 **Auto-merge held** — \`pr-reviewed\` is set but $failed check(s) are failing. Push a fix and re-apply \`pr-reviewed\`, or add a \`hold\` label." || true
+              exit 0
+            fi
+            if [ "$total" -eq 0 ]; then
+              # No checks visible yet. Could be still-registering, or genuinely no CI.
+              if [ "$SECONDS" -lt "$grace_deadline" ]; then
+                echo "no checks registered yet — waiting for CI to appear…"; sleep 15; continue
+              fi
+              echo "no checks after grace window — treating as no CI configured; proceeding on label."; break
+            fi
+            if [ "$pending" -eq 0 ]; then
+              echo "all $total check(s) green on bound commit $EVENT_SHA"; break
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::warning::Timed out waiting for $pending pending check(s) on #$PR."; exit 0
+            fi
+            echo "waiting on $pending/$total pending check(s)…"; sleep 25
+          done
+
+          # --- 2. Re-fetch live state; honour a hold / draft / label-removal applied mid-flight,
+          #        and re-assert the head is still the bound commit. ---
+          meta="$(gh pr view "$PR" --repo "$REPO" --json state,isDraft,labels,author,headRefOid)"
+          [ "$(jq -r .state   <<<"$meta")" = "OPEN"  ] || { echo "PR not open — stop.";  exit 0; }
+          [ "$(jq -r .isDraft <<<"$meta")" = "false" ] || { echo "PR draft — stop.";     exit 0; }
+          [ "$(jq -r .headRefOid <<<"$meta")" = "$EVENT_SHA" ] || { echo "head drifted post-wait — stop."; exit 0; }
+          labels="$(jq -r '[.labels[].name] | map(ascii_downcase) | join(" ")' <<<"$meta")"
+          case " $labels " in *" pr-reviewed "*) : ;; *) echo "gate label removed — stop."; exit 0;; esac
+          for h in $HOLD_LABELS; do
+            case " $labels " in *" $h "*) echo "hold label '$h' applied — stop."; exit 0;; esac
+          done
+          author="$(jq -r .author.login <<<"$meta")"
+
+          # --- 3. Approve as the bot at the bound commit (unless already approved there,
+          #        or the bot is the author). per_page=100 (no --paginate) so the jq count
+          #        is a single integer, not concatenated per-page counts. ---
+          approved="$(gh api "repos/$REPO/pulls/$PR/reviews?per_page=100" \
+            --jq "[.[] | select(.user.login==\"$BOT\" and .state==\"APPROVED\" and .commit_id==\"$EVENT_SHA\")] | length" \
+            2>/dev/null || echo 0)"
+          if [ "$approved" = "0" ] && [ "$author" != "$BOT" ]; then
+            gh pr review "$PR" --repo "$REPO" --approve --body \
+              "Auto-approved by wtp-automation[bot] — SGD gate: \`pr-reviewed\` set, no hold, no sensitive path, all checks green. Bound to ${EVENT_SHA:0:12}. (Model B: clean, non-sensitive.)"
+            echo "approved at $EVENT_SHA"
+          else
+            echo "approval already present at bound commit (or bot is author) — skipping approve step"
+          fi
+
+          # --- 4. Squash-merge, pinned to the bound commit; brief retry for approval propagation.
+          #        Exit non-zero if it never merges so the check shows RED, not a silent green. ---
+          for i in 1 2 3 4; do
+            if gh pr merge "$PR" --repo "$REPO" --squash --delete-branch --match-head-commit "$EVENT_SHA" 2>/tmp/m.err; then
+              echo "merged #$PR ✓"; exit 0
+            fi
+            echo "merge attempt $i failed: $(cat /tmp/m.err)"; sleep 8
+          done
+          echo "::error::Could not merge #$PR after retries. Approval stands; a human can complete the merge."
+          exit 1
