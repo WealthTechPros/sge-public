@@ -1,0 +1,14 @@
+{
+  "extraKnownMarketplaces": {
+    "wtp-plugins": {
+      "source": {
+        "source": "github",
+        "repo": "WealthTechPros/sgd",
+        "ref": "v4.27.0"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "sgd@wtp-plugins": true
+  }
+}

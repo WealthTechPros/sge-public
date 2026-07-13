@@ -1,0 +1,2 @@
+# SGD repo-level configuration
+update_mode: pull   # pull | notify (default: pull) — see SPEC-088
