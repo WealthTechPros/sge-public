@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "sgd-memory": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/sgd-cortex/dist/sgd-cortex.bundle.mjs"]
+    }
+  }
+}
