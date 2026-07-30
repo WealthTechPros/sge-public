@@ -1,0 +1,52 @@
+# .sgd/regulated-paths.yml — per-repo list of "regulated-output" files where a
+# PR must NOT auto-merge on `pr-reviewed` alone: it requires an explicit human
+# sign-off marker, checked by .github/workflows/require-regulated-signoff.yml
+# (SPEC-071, issue #1062). Scaffolded by /sgd:sgd-init — tailor the globs to
+# this repo's actual "the number itself" files before relying on it.
+#
+# A "regulated-output" file is one where "the code is correct" and "the number a
+# real regulated client sees is correct" can DIVERGE without any automated check
+# noticing — reconciliation footings, cohort assignment/rule engines, live
+# financial figures rendered to a client. Keep this list SMALL and specific:
+# every file here makes every touching PR require a human sign-off.
+#
+# This gate is LAYERED ON TOP of the `pr-reviewed` auto-merge label — it is a
+# SEPARATE gate, not a modification of what `pr-reviewed` means. A regulated
+# path PR must satisfy BOTH: the normal SGD review (`pr-reviewed`) AND an
+# explicit human sign-off (see the two marker forms below).
+#
+# The sign-off MARKER is EITHER of:
+#   - a `signed-off` label on the PR (distinct from `pr-reviewed`; a deliberate
+#     human act, never applied by /sgd:pr-review or any automation), OR
+#   - a PR-body/commit trailer:
+#       Regulated-Sign-Off: @handle; <what was verified, min 10 chars>
+#     e.g. "Regulated-Sign-Off: @rob-duncan; verified cohort footing against
+#     the reconciliation report". The free-text records WHAT was checked, so the
+#     sign-off is auditable evidence, not a rubber stamp.
+#
+# Format is the SAME constrained YAML subset as test-map.yml, parsed by the same
+# dependency-free awk/grep loader (no yq/python):
+#   - one scalar `mode:` line (advisory | blocking — always start advisory, per
+#     SGD doctrine: prove the signal is clean before making it a gate)
+#   - one top-level list key `regulated_paths` (globstar globs, one per line)
+#   - optional top-level list key `signers` (allowed sign-off @handles)
+# Globs use bash globstar syntax (`**` matches zero or more directories).
+#
+# If this file is absent, the gate is a NO-OP — a repo with no regulated-output
+# files needs no sign-off gate (safe default, same posture as test-map.yml).
+
+mode: advisory
+
+regulated_paths:
+  # List the small set of files where the NUMBER a real client sees can be wrong
+  # even when the code is correct. Examples (uncomment/replace for your repo):
+  # - 'src/lib/**/reconciliation.ts'
+  # - 'src/lib/**/rule-engine.ts'
+  # - 'apps/**/src/lib/dw-store/cohort-*.ts'
+
+# Optional. When present, the sign-off marker's signer (the @handle in the
+# trailer, or the actor who applied the `signed-off` label) must be a member,
+# so an arbitrary contributor cannot self-sign a regulated-output change. When
+# absent, any human sign-off marker is accepted.
+# signers:
+#   - '@your-designated-signer'

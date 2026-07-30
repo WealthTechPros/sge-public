@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wealthtechpros.dev/sgd/regulatory-frontmatter.schema.json",
+  "title": "SGD spec frontmatter — regulatory traceability extension",
+  "description": "OPTIONAL `regulatory:` block added to an SGD feature-spec frontmatter by /sgd:regulatory-trace. Absent => unregulated spec (no obligation). Required (per C12) for any spec whose governing capability is `regulated: true`. Complements, never replaces, the AI use-case register (`ai-inventory.yaml`).",
+  "type": "object",
+  "properties": {
+    "regulatory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fca_obligations"],
+      "properties": {
+        "fca_obligations": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Catalogue ids this spec helps the CLIENT evidence. Each id MUST exist in obligations-catalogue.yaml and MUST NOT be retired.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "contribution"],
+            "properties": {
+              "id": { "type": "string", "examples": ["SYSC.8.1.6R", "SYSC.15A", "FG26-4", "PRIN.2A"] },
+              "contribution": { "type": "string", "minLength": 10, "description": "How this spec contributes evidence — evidence-contribution, NOT a compliance assertion." }
+            }
+          }
+        },
+        "frameworks": {
+          "type": "array",
+          "description": "Certification-framework controls this spec implements evidence for.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id"],
+            "properties": {
+              "id": { "type": "string", "examples": ["ISO27001:A.8", "ISO42001:A.6", "ISO27701:6"] },
+              "contribution": { "type": "string" }
+            }
+          }
+        },
+        "consumer_duty": {
+          "description": "Does this spec's output reach or inform a retail-customer outcome (PRIN 2A)?",
+          "enum": [true, false, "unknown"]
+        },
+        "tripartite_evidence": {
+          "type": "boolean",
+          "default": false,
+          "description": "May this spec's evidence be disclosed to a client's external auditor and/or the regulator under FG26/4 access rights?"
+        },
+        "ai_inventory_ref": {
+          "type": "string",
+          "pattern": "^AI-[0-9]{3,}$",
+          "description": "Link to the AI use-case register entry when this spec is an AI use case. Link, do NOT duplicate SS1/23 / Annex III fields."
+        }
+      }
+    }
+  }
+}

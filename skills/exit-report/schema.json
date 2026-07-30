@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/WealthTechPros/sgd/main/skills/exit-report/schema.json",
+  "title": "SGD orchestrated-skill exit report",
+  "description": "The one machine-readable exit-report shape every orchestrated SGD skill emits at the end of a run — consumed by orchestrators (team-pipeline, pr-monitor, issue-swarm) to decide the next move. See skills/exit-report/SKILL.md for the contract, emission channels, and mappings from legacy shapes.",
+  "type": "object",
+  "required": ["skill", "runId", "outcomes", "stopReason"],
+  "properties": {
+    "skill": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Emitting skill's identifier, without the plugin prefix.",
+      "examples": ["pr-fix", "pr-monitor", "team-pipeline", "issue-swarm"]
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable identifier for this run — dispatcher-provided when the skill was fanned out (so the orchestrator can correlate), otherwise self-minted as <skill>-<primary item>-<ISO start time>.",
+      "examples": ["pr-fix-812-2026-07-06T10:14:03Z", "team-pipeline-agent-806"]
+    },
+    "duration": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Wall-clock run duration in seconds."
+    },
+    "itemsProcessed": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Count of work items this run acted on. Usually outcomes.length, but may exceed it when items were examined and dismissed without a reportable outcome."
+    },
+    "outcomes": {
+      "type": "array",
+      "description": "One entry per work item the run acted on (PR, issue, lane, repo). Empty when the run found nothing actionable (pair with stopReason \"queue-empty\").",
+      "items": { "$ref": "#/$defs/outcome" }
+    },
+    "stopReason": {
+      "description": "Why the run ended — every loop's stop condition maps onto exactly one of these (see the loops reference: goal met, bound hit, no-progress/thrash, budget, user stop).",
+      "enum": [
+        "goal-met",
+        "queue-empty",
+        "bound-hit",
+        "no-progress",
+        "thrashing",
+        "budget-exhausted",
+        "blocked",
+        "error",
+        "user-stop"
+      ]
+    },
+    "followUps": {
+      "type": "array",
+      "description": "Follow-up work filed (not merely suggested) during the run — tracking issues for deferred findings, tech debt, or uncovered pre-existing bugs.",
+      "items": { "$ref": "#/$defs/followUp" }
+    },
+    "questionsPerRun": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Spec-quality metric (SPEC-093, #1235): count of SPEC-093 tier-b decision-journal entries across all lanes this run — ambiguities the agent resolved via the most-reversible-option fallback rather than a spec decision rule. Target trend → 0. Present on team-pipeline runs under --unattended (or SGD_UNATTENDED=1); 0 on attended runs. A value above 0 names which specs lack a '## Decision rules & defaults' table. See docs/specs/README.md."
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "outcome": {
+      "type": "object",
+      "required": ["item", "status"],
+      "properties": {
+        "item": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*:.+$",
+          "description": "Stable key for the work item, as <kind>:<id>.",
+          "examples": ["pr:812", "issue:806", "lane:2", "repo:WealthTechPros/sgd"]
+        },
+        "status": {
+          "description": "Terminal state of this item. success = goal reached; partial = real progress, goal not reached; blocked = structurally blocked, needs a human decision; thrashing = retry bound hit with no progress (do not re-dispatch); failed = attempted and did not succeed; skipped = deliberately not attempted (ineligible, claimed elsewhere, deduped).",
+          "enum": ["success", "partial", "blocked", "thrashing", "failed", "skipped"]
+        },
+        "detail": {
+          "type": "string",
+          "description": "One-line human-readable note. Mandatory in spirit for blocked/thrashing/failed: state the blocking condition and the recommended next action."
+        },
+        "pr": {
+          "type": ["integer", "null"],
+          "description": "PR number this outcome produced or acted on, when applicable."
+        },
+        "issue": {
+          "type": ["integer", "null"],
+          "description": "Issue number this outcome implements or acts on, when applicable."
+        },
+        "commits": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Commits produced for this item, as \"<sha> <subject>\"."
+        },
+        "labelState": {
+          "enum": ["pr-reviewed", "pr-reviewing", "none"],
+          "description": "Final merge-gate label state of a reviewed PR at run exit (issue #855, emitted by pr-review). A well-behaved review exits at pr-reviewed (passed) or none (failed/released/advisory/no-op); labelState: pr-reviewing means the run exited while still holding the claim — a violated termination contract the orchestrator must re-dispatch or nudge. Optional: only outcomes for a claimed pr-review carry it."
+        }
+      },
+      "additionalProperties": true
+    },
+    "followUp": {
+      "type": "object",
+      "required": ["ref"],
+      "properties": {
+        "ref": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Reference to the filed follow-up — \"#N\" for same-repo, \"owner/repo#N\" cross-repo, or a URL.",
+          "examples": ["#823", "WealthTechPros/sgd#823"]
+        },
+        "summary": {
+          "type": "string",
+          "description": "One-line subject of the follow-up."
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}
