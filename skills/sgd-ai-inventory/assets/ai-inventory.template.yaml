@@ -1,0 +1,127 @@
+# AI Use-Case Inventory
+# Maintained via /sgd:sgd-ai-inventory. The firm owns the content; the skill only proposes.
+# Every field the firm has not confirmed stays `unknown` — an unknown is an open action, never a guess.
+version: 1
+updated: ""                     # date of last human-confirmed review (YYYY-MM-DD); the proposing
+                                # agent leaves the prior value — the approver sets it on acceptance
+owner: ""                       # accountable individual (SMF holder where SM&CR applies)
+review_cycle_months: 12
+
+use_cases:
+  - id: AI-001
+    name: ""
+    description: ""
+    status: proposed            # proposed | approved | live | retired
+    accountable_owner: ""
+    engagement: ""              # client engagement scope; empty = firm-self (e.g. "acme-wealth")
+    model:
+      vendor: ""                # e.g. Anthropic
+      name: ""                  # e.g. claude-opus-4 — use the exact identifier from the vendor's model list
+      version_control: ""       # how model/version changes are reviewed before rollout
+    deployment:
+      route: ""                 # claude-enterprise | aws-bedrock | gcp-vertex | direct-api | other
+      region: ""
+      zdr_addendum: unknown     # true | false | unknown — ZDR is a negotiated addendum, not automatic
+      data_residency_notes: ""
+    risk:
+      tier: ""                  # PRA SS1/23 tier where applicable; else low | medium | high
+      rationale: ""
+      customer_affecting: unknown   # Consumer Duty flag: does output reach or affect retail customers?
+      eu_ai_act:
+        annex_iii_check: unknown    # true | false | unknown — was the Annex III walk-through performed?
+        classification: ""          # high-risk | limited | minimal | out-of-scope
+        reasoning: ""               # required for every classification, incl. out-of-scope
+        deployer_obligations_noted: false   # true once obligations (apply from 2026-08-02) are assessed
+                                            # and documented; for out-of-scope entries: set true only
+                                            # after the Annex III walk-through is complete and the
+                                            # out-of-scope reasoning is recorded above
+    risk_score:                 # machine-evaluable computed score; algorithm defined in #452-S1.
+                                # Additive — does NOT replace risk.tier (manual PRA/SS1.23 tier stays).
+      computed: unknown         # numeric score once 452-S1 ships; unknown until then
+      inputs:
+        exposure: unknown       # network-reachable | internal-only | unknown
+        auth: unknown           # api-key | oauth | mTLS | none | unknown
+        data_class: unknown     # classes of client/personal data this use-case can reach
+    control_bindings: []        # controlId refs from the #450 control catalogue
+                                # e.g. [FCA-SYSC-8.1.6R, FCA-COBS-9.2.2R]
+    controls:
+      human_oversight: ""       # who reviews output; when/how it can be overridden
+      validation_status: not-validated    # not-validated | validated (date, validator)
+      validation_independence: ""        # SS1/23: confirm validator is independent of model-dev function
+      monitoring_plan: ""
+    dora:
+      ict_third_party: unknown  # true for EU-regulated entities (external LLM = ICT third-party);
+                                # UK-only firms: record n/a and cross-reference FCA op-res register
+      register_ref: ""          # reference to the firm's DORA register entry
+      contractual_provisions: ""
+      exit_strategy: ""
+    evidence:
+      vendor_dd_ref: ""         # link to the completed vendor due-diligence record
+      approvals: []             # [{by, role, date}]
+
+# ── MCP server / tool assets ──────────────────────────────────────────────────
+# First-class governed asset class. Register every MCP server and its individual
+# tools that are in scope for a client engagement or firm-self use.
+# See references/asset-classes.md for field guidance and regulatory mapping.
+mcp_assets:
+  - id: MCP-001
+    name: ""                    # human-readable name (e.g. "WTP MCP Gateway")
+    description: ""
+    status: proposed            # proposed | approved | live | retired
+    accountable_owner: ""
+    engagement: ""              # client engagement scope; empty = firm-self
+    server:
+      vendor: ""                # e.g. WTP, Anthropic, third-party vendor name
+      operated_by: ""           # wtp-operated | client-operated | external-vendor
+      external: unknown         # true | false | unknown — outside WTP infrastructure?
+      endpoint: ""              # URI or description of where the server is reachable
+      source_ref: ""            # repo / release ref (for wtp-operated servers)
+    tools:
+      - name: ""
+        description: ""
+        data_class_reachable: unknown   # classes of client/personal data this tool can reach
+                                        # e.g. client-portfolio | pii | none | unknown
+    exposure: unknown           # network-reachable | internal-only | unknown
+    auth:
+      model: unknown            # api-key | oauth | mTLS | none | unknown
+      notes: ""                 # scopes, token TTL, rotation policy
+    risk_score:                 # machine-evaluable score; algorithm defined in #452-S1
+      computed: unknown
+      inputs:
+        exposure: unknown
+        auth: unknown
+        data_class: unknown
+    control_bindings: []        # controlId refs from the #450 control catalogue
+    dora:
+      ict_third_party: unknown  # true if external MCP server is an ICT third-party dependency
+      register_ref: ""
+    evidence:
+      approvals: []             # [{by, role, date}]
+
+# ── Prompt / skill assets ─────────────────────────────────────────────────────
+# Register prompts and skills in scope for a client engagement or firm-self use.
+# Hash attestation and AI-build provenance are owned by #449 — record the
+# attestation_ref here; do NOT duplicate hash-stamping logic.
+# See references/asset-classes.md for field guidance and regulatory mapping.
+prompt_assets:
+  - id: PRO-001
+    name: ""                    # human-readable name (e.g. "/sgd:sgd-implement")
+    description: ""
+    type: ""                    # skill | system-prompt | user-prompt | chain
+    status: proposed            # proposed | approved | live | retired
+    accountable_owner: ""
+    engagement: ""              # client engagement scope; empty = firm-self
+    source_ref: ""              # file path, repo+SHA, or published URI
+    attestation_ref: ""         # ref to the #449 AI-build provenance hash attestation record
+                                # e.g. "provenance/PRO-001-2026-06-30.json"
+    model_binding: ""           # model(s) this prompt is validated against (e.g. claude-sonnet-4-6)
+    data_class_reachable: unknown   # classes of client/personal data this prompt can reach
+    risk_score:                 # machine-evaluable score; algorithm defined in #452-S1
+      computed: unknown
+      inputs:
+        exposure: unknown       # how broadly this prompt/skill is deployed
+        auth: unknown           # access control around invoking this prompt/skill
+        data_class: unknown
+    control_bindings: []        # controlId refs from the #450 control catalogue
+    evidence:
+      approvals: []             # [{by, role, date}]

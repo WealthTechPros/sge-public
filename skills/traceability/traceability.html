@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SGD Traceability Chart</title>
+  <style>
+    :root {
+      --wtp-navy: #0D2240;
+      --wtp-gold: #C9A84C;
+      --wtp-blue-light: #1E3A5F;
+      --bg: #f8f9fa;
+      --surface: #ffffff;
+      --border: #dee2e6;
+      --text: #212529;
+      --text-muted: #6c757d;
+      --badge-traced: #198754;
+      --badge-gap: #dc3545;
+      --badge-open: #0d6efd;
+      --badge-merged: #6f42c1;
+      --badge-closed: #6c757d;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+
+    header {
+      background: var(--wtp-navy);
+      color: #fff;
+      padding: 0.75rem 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+
+    header h1 { font-size: 1.1rem; font-weight: 600; letter-spacing: 0.01em; }
+    header .repo { font-size: 0.8rem; opacity: 0.7; }
+
+    #stats-bar {
+      background: var(--wtp-blue-light);
+      color: #fff;
+      padding: 0.5rem 1.5rem;
+      display: flex;
+      gap: 2rem;
+      font-size: 0.85rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    #stats-bar .stat { display: flex; align-items: center; gap: 0.4rem; }
+    #stats-bar .stat .label { opacity: 0.75; }
+    #stats-bar .stat .val { font-weight: 700; font-size: 1rem; }
+    #stats-bar .trace-pct { color: var(--wtp-gold); }
+
+    #progress-bar {
+      height: 4px;
+      background: rgba(255,255,255,0.2);
+      flex: 1;
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    #progress-fill { height: 100%; background: var(--wtp-gold); transition: width 0.5s; }
+
+    .toolbar {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0.5rem 1.5rem;
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+    }
+
+    .toolbar input {
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.3rem 0.6rem;
+      font-size: 0.85rem;
+      flex: 1;
+      max-width: 280px;
+    }
+
+    .btn {
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      padding: 0.3rem 0.8rem;
+      border-radius: 4px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .btn:hover { background: var(--bg); }
+    .btn-primary { background: var(--wtp-navy); color: #fff; border-color: var(--wtp-navy); }
+    .btn-primary:hover { background: var(--wtp-blue-light); }
+
+    #main {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+      gap: 0;
+    }
+
+    #tree-panel {
+      width: 320px;
+      min-width: 220px;
+      max-width: 480px;
+      border-right: 1px solid var(--border);
+      overflow-y: auto;
+      background: var(--surface);
+      resize: horizontal;
+    }
+
+    #detail-panel {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1.25rem 1.5rem;
+      background: var(--bg);
+    }
+
+    .tree-section { padding: 0.5rem 0; }
+    .tree-section-header {
+      padding: 0.4rem 1rem;
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      background: var(--bg);
+      border-top: 1px solid var(--border);
+    }
+
+    .tree-node {
+      padding: 0.4rem 1rem 0.4rem 1.25rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      font-size: 0.88rem;
+      border-left: 3px solid transparent;
+      transition: background 0.1s;
+    }
+    .tree-node:hover { background: var(--bg); }
+    .tree-node.active {
+      background: #e8f0fe;
+      border-left-color: var(--wtp-navy);
+      font-weight: 600;
+    }
+    .tree-node .node-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .badge {
+      font-size: 0.7rem;
+      padding: 0.15rem 0.45rem;
+      border-radius: 99px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .badge-traced { background: #d1e7dd; color: #0a3622; }
+    .badge-gap { background: #f8d7da; color: #58151c; }
+    .badge-count { background: #e9ecef; color: var(--text-muted); }
+
+    .pr-list { display: flex; flex-direction: column; gap: 0.6rem; }
+    .pr-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 0.25rem 0.75rem;
+      align-items: start;
+    }
+    .pr-card .pr-num {
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--text-muted);
+      grid-row: span 2;
+      padding-top: 0.15rem;
+    }
+    .pr-card .pr-title {
+      font-size: 0.9rem;
+      font-weight: 500;
+      line-height: 1.3;
+    }
+    .pr-card .pr-title a { color: var(--text); text-decoration: none; }
+    .pr-card .pr-title a:hover { color: var(--wtp-navy); text-decoration: underline; }
+    .pr-card .pr-meta {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+    .pr-card .pr-state { grid-row: span 2; }
+    .state-badge {
+      font-size: 0.7rem;
+      padding: 0.15rem 0.5rem;
+      border-radius: 99px;
+      font-weight: 600;
+    }
+    .state-merged { background: #e8d5f5; color: #3a0068; }
+    .state-open { background: #cfe2ff; color: #052c65; }
+    .state-closed { background: #e9ecef; color: #495057; }
+    .spec-tags { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.25rem; }
+    .spec-tag {
+      font-size: 0.68rem;
+      background: #e7f1ff;
+      color: #0050b3;
+      border-radius: 3px;
+      padding: 0.1rem 0.35rem;
+      font-family: ui-monospace, monospace;
+    }
+
+    .detail-header {
+      margin-bottom: 1rem;
+      padding-bottom: 0.75rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .detail-header h2 { font-size: 1.1rem; font-weight: 600; margin-bottom: 0.25rem; }
+    .detail-header p { font-size: 0.85rem; color: var(--text-muted); }
+
+    .empty-state {
+      text-align: center;
+      padding: 3rem 2rem;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+
+    .error-banner {
+      background: #f8d7da;
+      color: #58151c;
+      padding: 0.75rem 1.5rem;
+      font-size: 0.875rem;
+      display: none;
+    }
+
+    #loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      flex: 1;
+    }
+
+    @media print {
+      header, .toolbar, #tree-panel, #stats-bar { display: none !important; }
+      #main { display: block; }
+      #detail-panel { padding: 0; }
+      #print-table { display: table !important; width: 100%; border-collapse: collapse; font-size: 0.75rem; }
+      #print-table th, #print-table td { border: 1px solid #ccc; padding: 4px 6px; text-align: left; }
+      #print-table th { background: #f0f0f0; font-weight: 700; }
+      .pr-list { display: none !important; }
+    }
+
+    #print-table { display: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>SGD Traceability Chart</h1>
+      <div class="repo" id="repo-label">Loading…</div>
+    </div>
+    <div style="font-size:0.75rem;opacity:0.6">Powered by SGD · SPEC-054</div>
+  </header>
+
+  <div id="error-banner" class="error-banner"></div>
+
+  <div id="stats-bar">
+    <div class="stat">
+      <span class="label">Total PRs</span>
+      <span class="val" id="stat-total">—</span>
+    </div>
+    <div class="stat">
+      <span class="label">Traceable</span>
+      <span class="val" id="stat-traced">—</span>
+    </div>
+    <div class="stat">
+      <span class="label">Gaps</span>
+      <span class="val" id="stat-gaps">—</span>
+    </div>
+    <div class="stat">
+      <span class="label">Trace%</span>
+      <span class="val trace-pct" id="stat-pct">—</span>
+    </div>
+    <div id="progress-bar" style="min-width:80px">
+      <div id="progress-fill" style="width:0%"></div>
+    </div>
+    <div class="stat" style="margin-left:auto;opacity:0.6;font-size:0.75rem" id="generated-at"></div>
+  </div>
+
+  <div class="toolbar">
+    <input type="search" id="search-input" placeholder="Filter specs or PRs…" />
+    <button class="btn btn-primary" onclick="printAuditTable()">Print / PDF</button>
+    <button class="btn" onclick="collapseAll()">Collapse all</button>
+  </div>
+
+  <div id="main">
+    <div id="loading">Loading traceability data…</div>
+  </div>
+
+  <table id="print-table">
+    <thead><tr><th>#</th><th>Title</th><th>Spec Refs</th><th>State</th><th>Author</th><th>Date</th></tr></thead>
+    <tbody id="print-tbody"></tbody>
+  </table>
+
+  <script>
+    let DATA = null;
+    let activeNode = null;
+
+    async function load() {
+      const dataPath = document.currentScript
+        ? new URL('./assets/traceability.json', document.currentScript.src).href
+        : './assets/traceability.json';
+      try {
+        const res = await fetch(dataPath);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        DATA = await res.json();
+        render();
+      } catch (e) {
+        showError(`Failed to load traceability.json: ${e.message}. Make sure the data builder has run.`);
+        document.getElementById('loading').textContent = 'No data.';
+      }
+    }
+
+    function showError(msg) {
+      const el = document.getElementById('error-banner');
+      el.textContent = msg;
+      el.style.display = 'block';
+    }
+
+    function render() {
+      document.getElementById('loading').remove();
+
+      const stats = DATA.stats;
+      document.getElementById('stat-total').textContent = stats.total;
+      document.getElementById('stat-traced').textContent = stats.traceable;
+      document.getElementById('stat-gaps').textContent = stats.untraceable;
+      document.getElementById('stat-pct').textContent = stats.tracePercent + '%';
+      document.getElementById('progress-fill').style.width = stats.tracePercent + '%';
+      const gen = new Date(DATA.generatedAt);
+      document.getElementById('generated-at').textContent = 'Generated ' + gen.toLocaleString();
+
+      const main = document.getElementById('main');
+      main.innerHTML = '';
+
+      const tree = document.createElement('div');
+      tree.id = 'tree-panel';
+      tree.innerHTML = buildTree();
+      main.appendChild(tree);
+
+      const detail = document.createElement('div');
+      detail.id = 'detail-panel';
+      detail.innerHTML = '<div class="empty-state">Select a spec or section to view PRs.</div>';
+      main.appendChild(detail);
+
+      tree.addEventListener('click', onTreeClick);
+      document.getElementById('search-input').addEventListener('input', onSearch);
+    }
+
+    function specKeys() {
+      return Object.keys(DATA.specs).sort();
+    }
+
+    function buildTree(filter) {
+      const lc = filter ? filter.toLowerCase() : null;
+      const keys = specKeys();
+      let html = '';
+
+      // Specs section
+      const filteredKeys = lc
+        ? keys.filter(k => k.toLowerCase().includes(lc) || (DATA.specs[k].prs || []).some(p => p.title.toLowerCase().includes(lc)))
+        : keys;
+
+      if (filteredKeys.length > 0) {
+        html += `<div class="tree-section">`;
+        html += `<div class="tree-section-header">Specs / Capabilities (${filteredKeys.length})</div>`;
+        for (const key of filteredKeys) {
+          const count = DATA.specs[key].prs.length;
+          html += `<div class="tree-node${activeNode===key?' active':''}" data-node="${escHtml(key)}">
+            <span class="node-label">${escHtml(key)}</span>
+            <span class="badge badge-traced">${count}</span>
+          </div>`;
+        }
+        html += `</div>`;
+      }
+
+      // Governance gaps section
+      const gaps = DATA.governanceGaps || [];
+      const filteredGaps = lc ? gaps.filter(p => p.title.toLowerCase().includes(lc)) : gaps;
+      if (filteredGaps.length > 0) {
+        html += `<div class="tree-section">`;
+        html += `<div class="tree-section-header">Governance Gaps (${filteredGaps.length})</div>`;
+        html += `<div class="tree-node${activeNode==='__gaps__'?' active':''}" data-node="__gaps__">
+          <span class="node-label">Untraceable PRs</span>
+          <span class="badge badge-gap">${filteredGaps.length}</span>
+        </div>`;
+        html += `</div>`;
+      }
+
+      return html || '<div class="empty-state" style="padding:1rem">No results.</div>';
+    }
+
+    function onTreeClick(e) {
+      const node = e.target.closest('.tree-node');
+      if (!node) return;
+      activeNode = node.dataset.node;
+      document.querySelectorAll('.tree-node').forEach(n => n.classList.remove('active'));
+      node.classList.add('active');
+      renderDetail(activeNode);
+    }
+
+    function renderDetail(nodeKey) {
+      const detail = document.getElementById('detail-panel');
+      const lc = (document.getElementById('search-input')?.value || '').toLowerCase();
+
+      if (nodeKey === '__gaps__') {
+        let prs = DATA.governanceGaps || [];
+        if (lc) prs = prs.filter(p => p.title.toLowerCase().includes(lc));
+        detail.innerHTML = `
+          <div class="detail-header">
+            <h2>Governance Gaps</h2>
+            <p>${prs.length} PR${prs.length!==1?'s':''} with no spec reference — review and link to a spec.</p>
+          </div>
+          <div class="pr-list">${prs.map(prCard).join('')}</div>`;
+      } else {
+        const spec = DATA.specs[nodeKey];
+        if (!spec) return;
+        let prs = spec.prs || [];
+        if (lc) prs = prs.filter(p => p.title.toLowerCase().includes(lc) || nodeKey.toLowerCase().includes(lc));
+        detail.innerHTML = `
+          <div class="detail-header">
+            <h2>${escHtml(nodeKey)}</h2>
+            <p>${prs.length} PR${prs.length!==1?'s':''} linked to this spec.</p>
+          </div>
+          <div class="pr-list">${prs.map(prCard).join('')}</div>`;
+      }
+    }
+
+    function prCard(pr) {
+      const stateCls = pr.merged ? 'state-merged' : (pr.state === 'open' ? 'state-open' : 'state-closed');
+      const stateLabel = pr.merged ? 'Merged' : (pr.state === 'open' ? 'Open' : 'Closed');
+      const date = pr.mergedAt || pr.createdAt;
+      const dateStr = date ? new Date(date).toLocaleDateString('en-GB', {day:'2-digit', month:'short', year:'numeric'}) : '';
+      const specTags = (pr.specRefs || []).map(r => `<span class="spec-tag">${escHtml(r)}</span>`).join('');
+      return `
+        <div class="pr-card">
+          <div class="pr-num">#${pr.number}</div>
+          <div class="pr-title"><a href="${escHtml(pr.url)}" target="_blank" rel="noopener">${escHtml(pr.title)}</a></div>
+          <div class="pr-state"><span class="state-badge ${stateCls}">${stateLabel}</span></div>
+          <div class="pr-meta">${escHtml(pr.author)} · ${dateStr}${specTags ? '<br>' : ''}${specTags ? '<div class="spec-tags">'+specTags+'</div>' : ''}</div>
+        </div>`;
+    }
+
+    function onSearch(e) {
+      const val = e.target.value.trim();
+      const treePanel = document.getElementById('tree-panel');
+      if (treePanel) treePanel.innerHTML = buildTree(val);
+      if (activeNode) renderDetail(activeNode);
+    }
+
+    function collapseAll() {
+      activeNode = null;
+      const treePanel = document.getElementById('tree-panel');
+      if (treePanel) {
+        document.querySelectorAll('.tree-node').forEach(n => n.classList.remove('active'));
+      }
+      const detail = document.getElementById('detail-panel');
+      if (detail) detail.innerHTML = '<div class="empty-state">Select a spec or section to view PRs.</div>';
+    }
+
+    function printAuditTable() {
+      if (!DATA) return;
+      const tbody = document.getElementById('print-tbody');
+      tbody.innerHTML = '';
+      const all = [];
+      for (const key of specKeys()) {
+        for (const pr of DATA.specs[key].prs) all.push(pr);
+      }
+      for (const pr of DATA.governanceGaps || []) all.push(pr);
+      all.sort((a, b) => a.number - b.number);
+      for (const pr of all) {
+        const tr = document.createElement('tr');
+        const date = (pr.mergedAt || pr.createdAt || '').slice(0, 10);
+        const state = pr.merged ? 'Merged' : pr.state;
+        tr.innerHTML = `<td>${pr.number}</td><td>${escHtml(pr.title)}</td><td>${escHtml((pr.specRefs||[]).join(', ') || '—')}</td><td>${state}</td><td>${escHtml(pr.author)}</td><td>${date}</td>`;
+        tbody.appendChild(tr);
+      }
+      window.print();
+    }
+
+    function escHtml(s) {
+      return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    load();
+  </script>
+</body>
+</html>
