@@ -81,12 +81,19 @@ Both are wired into CI by **`.github/workflows/ai-supply-chain.yml`**, which fai
 
 ### 1. Install the SGD plugin
 
-The plugin is published to the WTP private marketplace. Run these commands once per machine inside Claude Code.
+Run these commands once per machine inside Claude Code.
 
-**Add the WTP marketplace** (one-time, per machine):
+**Add the WTP marketplace** (one-time, per machine). Which source you use depends on whether you can clone this private repo:
+
 ```
+# External / client repos — the public redacted distribution:
+/plugin marketplace add WealthTechPros/sgd-public
+
+# WTP staff with access to this private repo (tracks main directly):
 /plugin marketplace add WealthTechPros/sgd
 ```
+
+> **This README is copied verbatim into `WealthTechPros/sgd-public`** by `.github/workflows/publish-public.yml` (no rewrite step), so anyone reading it there is an external adopter who **cannot** clone `WealthTechPros/sgd`. Keep the public source listed first, and never reduce this block to the private ref alone — that is what made the public install instructions unusable (#1713).
 
 **Install the plugin** into the current repo:
 ```
