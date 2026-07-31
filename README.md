@@ -109,6 +109,12 @@ After install, the SGD commands (`/sgd:init`, `/sgd:sgd-implement`, etc.) become
 
 The `SessionStart` hook will nudge you when a newer version is available.
 
+> **Using GitHub Copilot CLI instead of Claude Code?** The commands above
+> work identically — Copilot CLI reads the same `.claude-plugin` marketplace
+> format natively. See [`docs/copilot-cli-install.md`](docs/copilot-cli-install.md)
+> for Copilot-CLI-specific install mechanics and a known Windows AV/EDR
+> failure mode (`Access is denied. (os error 5)`) and its fix.
+
 ---
 
 ### 2. Install and configure Doppler
