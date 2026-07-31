@@ -316,8 +316,8 @@ candidates**; hand `tidy` off. Bash: [mechanisms](references/mechanisms.md).
 ## Phase 1 — Issue Discovery
 
 Build the work queue from open, unassigned, unlocked issues, then apply the
-**dependency gate** (raw fallback only — drop any issue whose body declares a
-still-open blocker, via `deps_of`/`is_blocked` from
+**dependency gate** (raw fallback only — drop any issue with an open or
+indeterminate blocker, via the fail-closed `is_blocked` in
 [available-issues Phase 2](../available-issues/SKILL.md#phase-2--dependency-gate)
 and the canonical
 [dependency grammar](../decompose-issue/SKILL.md#dependency-metadata-grammar)),

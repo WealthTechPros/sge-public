@@ -96,7 +96,7 @@ fi
 echo "repo context: $(git remote get-url origin) ($(pwd)) host: ${HOST_KIND}"
 ```
 
-`IR` (`scripts/issue-read.sh`, #1237) is the seam for all issue read operations in this skill: with a normalised JSON output shape so the rest of the skill is backend-agnostic. It resolves **two** independent dimensions — the **ALM (issue-tracker) backend** first (`with-repo-cwd.sh alm` → `github`|`jira`, SPEC-105 S2 #1700: a repo may be GitHub-hosted yet track work in Jira, routing `list`→P1 `list-dispatchable` / `view`→P2 `view-item` through `scripts/jira-adapter.sh`), then the **git host** (`gh` for GitHub, `scripts/forgejo-adapter.sh` for Forgejo/Gitea). `SGD_ALM_BACKEND` unset keeps the GitHub path byte-identical; an unrecognised value fails loud (DR1) — never a silent GitHub fallback. A Jira backend also needs `SGD_JIRA_PROJECT` (the project P1 enumerates) and the jira-adapter's credential/host-allow-list env. **P7 `item-dependencies` and P9 `dispatch-label-config` Jira realisations are S4**, so on a Jira backend the Phase 2 body-text dependency gate and the awaiting-label report are GitHub-shaped niceties that stay dark until then.
+`IR` (`scripts/issue-read.sh`, #1237) is the seam for all issue read operations in this skill: with a normalised JSON output shape so the rest of the skill is backend-agnostic. It resolves **two** independent dimensions — the **ALM (issue-tracker) backend** first (`with-repo-cwd.sh alm` → `github`|`jira`, SPEC-105 S2 #1700: a repo may be GitHub-hosted yet track work in Jira, routing `list`→P1 `list-dispatchable` / `view`→P2 `view-item` / `dependencies`→P7 `item-dependencies` / `dispatch-label`→P9 `dispatch-label-config` through `scripts/jira-adapter.sh`), then the **git host** (`gh` for GitHub, `scripts/forgejo-adapter.sh` for Forgejo/Gitea). `SGD_ALM_BACKEND` unset keeps the GitHub path byte-identical; an unrecognised value fails loud (DR1) — never a silent GitHub fallback. A Jira backend also needs `SGD_JIRA_PROJECT` (the project P1 enumerates) and the jira-adapter's credential/host-allow-list env.
 
 The helper verifies the checkout's `origin` actually matches the requested repo (a directory with the right name but the wrong origin is rejected) and refuses — with an actionable error — rather than proceeding in the ambient directory. Announce the resolved context once so the caller can catch a wrong-repo invocation immediately. Every `gh`/`git` snippet in the phases below assumes this entry sequence has just run in the same shell call.
 
@@ -112,7 +112,7 @@ This skill is **read-only** unless `--setup` is given. It never edits issue bodi
 
 ### Dispatch-label gate
 
-Read the repo's `CLAUDE.md` for a `dispatch-label:` key. When declared the value is the **quality-label name** — only issues carrying that label enter the ready pool; unlabelled issues are never dispatchable and are surfaced separately as "awaiting quality label" so the caller knows they exist but won't be picked. When not declared, no label filter is applied and the current behaviour is preserved (backwards-compatible).
+Resolve the dispatch-label name via the port — `"$IR" dispatch-label` returns the repo-configurable quality-label name, backend-agnostic (GitHub: reads `dispatch-label:` from CLAUDE.md; Jira: reads `SGD_DISPATCH_LABEL`, default `sgd-ready`, DP2). When declared the value is the **quality-label name** — only issues carrying that label enter the ready pool; unlabelled issues are never dispatchable and are surfaced separately as "awaiting quality label" so the caller knows they exist but won't be picked. When not declared, no label filter is applied and the current behaviour is preserved (backwards-compatible).
 
 #### The `orchestrator-only` exclusion (quality-confirmed ≠ worker-dispatchable)
 
@@ -123,9 +123,16 @@ The **`orchestrator-only`** label encodes exactly that bit. It is orthogonal to 
 This replaces the fragile prior practice of encoding the exclusion as prose in a worker brief ("never touch infra/…") — a rule a worker had to re-derive by inspecting each issue's likely diff surface. Making it a label means the exclusion is declared on the issue, auditable at a glance, and enforced mechanically by the same claim-gate query, so "why was this ready issue never picked up?" is answerable from the issue itself.
 
 ```bash
-# Resolve DISPATCH_LABEL from CLAUDE.md (defaults to empty = no filter).
-DISPATCH_LABEL=$(grep -E '^dispatch-label:\s*\S' CLAUDE.md 2>/dev/null \
-  | head -1 | sed 's/^dispatch-label:[[:space:]]*//' | tr -d '[:space:]' || true)
+# Resolve DISPATCH_LABEL via the port. An UNSET key legitimately yields empty
+# (= no filter, the documented default). An INVALID value is different: the
+# port exits non-zero (#1726), and swallowing that would silently drop the
+# label filter and widen the dispatch pool — the opposite of what a gate
+# should do on bad input. Stop instead, and say why.
+if ! DISPATCH_LABEL=$("$IR" dispatch-label 2>&1); then
+  echo "STOP: dispatch-label is misconfigured in CLAUDE.md — $DISPATCH_LABEL"
+  echo "Refusing to run discovery unfiltered; fix the dispatch-label value first."
+  exit 1
+fi
 ```
 
 Build the candidate set from open issues that **no one has claimed**. The lock label is the same durable, cross-agent mutex `/sgd:team-pipeline` uses — `agent-lock` — so discovery and the pipeline agree on what is taken without a shared state file.
@@ -206,26 +213,25 @@ A candidate that is `in_flight` is **claimed** — exclude it from the ready poo
 
 ## Phase 2 — Dependency gate
 
-Parse each candidate's body for declared dependencies and let an **open** dependency block it. Recognise the common forms without inventing new syntax:
-
-- a GitHub task-list / keyword line: `Depends on #123`, `Blocked by #123`, `Requires #123`;
-- the decompose-issue child-metadata field `DependsOn: #123` — see the [dependency metadata grammar](../decompose-issue/SKILL.md#dependency-metadata-grammar) in `/sgd:decompose-issue`;
-- a tracking checkbox referencing another issue;
-- `--analyze` / `--blocking` also resolve transitive chains (A → B → C).
+Resolve each candidate's dependencies via the port (`"$IR" dependencies <number>`) and let an **open** dependency block it. The port is backend-agnostic: on GitHub/Forgejo it parses the issue body for `Depends on #123`, `Blocked by #123`, `Requires #123`, `DependsOn: #123` (the [dependency metadata grammar](../decompose-issue/SKILL.md#dependency-metadata-grammar)); on Jira it reads structural `is blocked by` issue links, resolving state via status **category** (DR2 — never a localised status name). `--analyze` / `--blocking` also resolve transitive chains (A → B → C).
 
 ```bash
-deps_of() {  # emit dependency issue numbers referenced in the body
-  printf '%s' "$1" | grep -ioE '(depends[ -]?on|blocked[ -]?by|requires)[[:space:]:]+#[0-9]+' \
-    | grep -oE '[0-9]+'
-}
-is_blocked() {  # true if any dependency issue is still open
-  local n
-  for n in $(deps_of "$1"); do
-    # $IR routes to gh (GitHub) or forgejo-adapter (Forgejo/Gitea); both backends
-    # normalise .state to OPEN|CLOSED so the comparison is host-agnostic.
-    [ "$("$IR" view "$n" 2>/dev/null | jq -r '.state')" = "OPEN" ] && return 0
-  done
-  return 1
+is_blocked() {  # true if any dependency is open OR indeterminate
+  # $IR dependencies routes through the ALM-adapter port: Jira uses structural
+  # "is blocked by" issue links resolved via status CATEGORY (DR2, SPEC-105 §2.3);
+  # GitHub/Forgejo parses Depends on #N / Blocked by #N / Requires #N / DependsOn:
+  # from the issue body and resolves each dep's state.
+  # Output: id\topen|closed|unknown.
+  #
+  # FAILS CLOSED (issue #1726). Two distinct things must both block:
+  #   - `unknown` — the port could not determine a dependency's state;
+  #   - a NON-ZERO exit — the port itself failed, so its (possibly empty)
+  #     output says nothing. Reading that as "no open deps" is what let a
+  #     backend outage or a `Depends on #<private-issue>` bypass the gate.
+  local out rc
+  out="$("$IR" dependencies "$1" 2>/dev/null)"; rc=$?
+  [ "$rc" -eq 0 ] || return 0          # port failed -> treat as blocked
+  printf '%s\n' "$out" | grep -qE "$(printf '\t(open|unknown)$')"
 }
 ```
 
