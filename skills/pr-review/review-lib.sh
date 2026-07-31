@@ -388,6 +388,104 @@ EOF
   echo 0
 }
 
+# Canonical location of the repo-level generated-artefact manifest (issue #1757).
+# One record per line, TAB-separated: <artefact-path>\t<generator-command>\t
+# <published 0|1>. Lines starting with `#` and blank lines are ignored. The
+# classifier (rl_diff_generated) reads only the artefact-path column; the
+# generator command and published flag are consumed by pr-review's Phase 2
+# regenerate-and-byte-diff / content-safety steps (see SKILL.md).
+rl_generated_manifest_path() {
+  printf '%s\n' '.sgd/generated-artefacts.tsv'
+}
+
+# `generated` risk-tier gate (issue #1757). Prints 1 ONLY when EVERY file in the
+# diff is a generated artefact DECLARED in the base-ref manifest — i.e. the diff
+# is entirely mechanically-reproducible output whose correctness is settled by
+# regenerate-and-byte-diff (a Phase-2 dispatch step), not line-by-line review.
+# Like rl_diff_trivial this is a MECHANICAL classifier that runs NO generator
+# code itself; it only decides the tier. FAILS CLOSED to 0 (never-generated) on
+# any error, an empty diff, an absent/unreadable manifest, or ANY changed file
+# not declared — so an unverifiable "generated" file is never downgraded, and a
+# diff that also touches the generator (never a declared artefact path) keeps its
+# own normal tier (acceptance criteria 3 & 4).
+#
+# SECURITY: the manifest is read from the PR's BASE sha, never the PR head, so a
+# PR cannot add a manifest entry for its own changed file to earn the cheaper
+# path. That guarantee only holds when the base ref is a REVIEW-GATED branch, so
+# the gate additionally requires the PR to target the repo's DEFAULT branch
+# (`.base.ref == .default_branch`) — otherwise an actor with push access to some
+# unprotected branch could land a self-serving manifest there and open/retarget a
+# PR against it. A PR targeting any non-default branch falls back to 0 (never
+# downgraded) rather than trusting a manifest at an ungated ref. Requires CWD
+# inside a clone of the PR's repo with the base sha reachable (same assumption as
+# rl_diff_trivial); a non-clone/control-session caller falls back to 0.
+rl_diff_generated() {
+  local pr="$1" repo base base_ref default_branch files manifest decl f
+  repo=$(rl__repo) || { echo 0; return 0; }
+
+  base=$(gh api "repos/$repo/pulls/$pr" --jq '.base.sha' 2>/dev/null) || { echo 0; return 0; }
+  [ -n "$base" ] || { echo 0; return 0; }
+
+  # Trust the base-ref manifest only when the PR targets the review-gated
+  # default branch (see SECURITY note). Any fetch failure -> fail closed.
+  base_ref=$(gh api "repos/$repo/pulls/$pr" --jq '.base.ref' 2>/dev/null) || { echo 0; return 0; }
+  default_branch=$(gh api "repos/$repo" --jq '.default_branch' 2>/dev/null) || { echo 0; return 0; }
+  [ -n "$base_ref" ] && [ -n "$default_branch" ] && [ "$base_ref" = "$default_branch" ] \
+    || { echo 0; return 0; }
+
+  files=$(gh pr diff "$pr" --repo "$repo" --name-only 2>/dev/null) || { echo 0; return 0; }
+  [ -n "$files" ] || { echo 0; return 0; }
+
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo 0; return 0; }
+  git cat-file -e "$base" 2>/dev/null || { echo 0; return 0; }
+
+  # Trusted manifest from the BASE ref. MSYS_NO_PATHCONV keeps the `<ref>:<path>`
+  # colon-arg intact on git-bash/Windows (raw-git pitfall — see gh-repo SKILL).
+  # Absent/unreadable at the base ref -> fail closed.
+  manifest=$(MSYS_NO_PATHCONV=1 git show "$base:$(rl_generated_manifest_path)" 2>/dev/null) \
+    || { echo 0; return 0; }
+  [ -n "$manifest" ] || { echo 0; return 0; }
+
+  # Declared artefact paths = first TAB-delimited field of each non-comment,
+  # non-blank line (CRs stripped for cross-platform manifests).
+  decl=$(printf '%s\n' "$manifest" | tr -d '\r' \
+    | grep -v '^[[:space:]]*#' | grep -v '^[[:space:]]*$' | cut -f1)
+  [ -n "$decl" ] || { echo 0; return 0; }
+
+  # EVERY changed file must be a declared artefact. One undeclared file (the
+  # generator itself, the manifest, or any source) -> not all-generated -> fall
+  # back to the normal tier. Exact whole-line fixed-string match.
+  while IFS= read -r f; do
+    f="${f%$'\r'}"   # symmetric CR-strip with the manifest side (host robustness)
+    [ -n "$f" ] || continue
+    printf '%s\n' "$decl" | grep -qxF "$f" || { echo 0; return 0; }
+  done <<EOF
+$files
+EOF
+
+  echo 1
+}
+
+# Look up the generator command + published flag for a DECLARED artefact from the
+# same TRUSTED base-ref manifest rl_diff_generated classifies against (issue
+# #1757) — so Phase 2's regenerate-and-byte-diff and the published-artefact
+# content-safety trigger never re-parse the TSV by hand per invocation. Prints
+# "<generator-command>\t<published>" for <path>, or nothing (exit 0) when <path>
+# is not declared or the manifest is unreadable. Read from the base sha; same
+# fail-safe posture as rl_diff_generated (empty output, never a guess).
+rl_generated_manifest_lookup() {
+  local pr="$1" path="$2" repo base manifest
+  repo=$(rl__repo) || return 0
+  base=$(gh api "repos/$repo/pulls/$pr" --jq '.base.sha' 2>/dev/null) || return 0
+  [ -n "$base" ] || return 0
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+  git cat-file -e "$base" 2>/dev/null || return 0
+  manifest=$(MSYS_NO_PATHCONV=1 git show "$base:$(rl_generated_manifest_path)" 2>/dev/null) || return 0
+  printf '%s\n' "$manifest" | tr -d '\r' \
+    | grep -v '^[[:space:]]*#' | grep -v '^[[:space:]]*$' \
+    | awk -F'\t' -v p="$path" '$1 == p { printf "%s\t%s\n", $2, $3; exit }'
+}
+
 # Phase 5 pass-through parse — extracts the `<!-- sgd-phase5-verdict: {...} -->`
 # marker /sgd:sgd-implement embeds in the PR body. Sets PHASE5_SHA,
 # PHASE5_VERDICT, PHASE5_BLOCKERS in the caller's shell (empty when absent —

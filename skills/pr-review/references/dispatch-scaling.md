@@ -75,9 +75,63 @@ resolution), not diff-content-scaled, so `trivial` never skips them. The Phase 5
 when it applies, still takes precedence over this whole section (a pass-through PR never reaches
 diff classification at all).
 
+## `generated` tier — full mechanics (issue #1757)
+
+`GENERATED=$(rl_diff_generated "$PR")`. A companion to `trivial`: it downgrades not
+*non-semantic* diffs but *mechanically-reproducible* ones. A generated artefact — the tracked
+output of a tracked generator — is verified far more cheaply and reliably by **regenerating it
+and byte-diffing** than by line-by-line code review. The measured case (wtp-org#535): a 569-line
+generated `field-explorer.html` classified `high` on line count drew ~140k subagent tokens, and
+the single check that actually established correctness was re-running the generator and byte-
+diffing (exact match, zero drift). This is **not** "review generated files less" — the security
+lane on that same PR found a real content leak; it is "review them for the *right* thing".
+
+**Classification (`rl_diff_generated`, mechanical, no code execution).** Returns `1` only when
+**every** changed file is a generated artefact **declared in the base-ref manifest**
+`.sgd/generated-artefacts.tsv` — one TAB-separated record per line,
+`<artefact-path>\t<generator-command>\t<published 0|1>`, `#`-comments and blank lines ignored.
+The manifest is read from the PR's **base sha** (`git show <base>:.sgd/generated-artefacts.tsv`,
+`MSYS_NO_PATHCONV=1` on git-bash), **never the PR head** — so a PR cannot add a manifest entry
+for its own changed file to earn the cheaper path; the declaration must already exist on the
+target branch. That "cannot self-declare" guarantee only holds when the base ref is itself
+review-gated, so the classifier additionally requires the PR to target the repo's **default
+branch** (`.base.ref == .default_branch`); a PR targeting any other branch falls back to `0`
+rather than trust a manifest at a potentially ungated ref. **Fails closed to `0`**
+(never-generated) on any fetch/parse error, an
+absent/unreadable manifest, an empty diff, or **any** changed file not declared — so an
+unverifiable "generated" file is never downgraded (acceptance criterion 4). Requires CWD inside
+a clone of the PR's repo with the base sha reachable; a non-clone caller falls back to `0`.
+
+**Dispatch for a `generated` diff.**
+
+1. **Correctness by reproduction, not line-reading.** For each declared artefact, read its
+   generator command and `published` flag with `rl_generated_manifest_lookup "$PR" <path>` (the
+   same TRUSTED base-ref manifest the classifier used — never hand-parse the TSV), run that
+   generator command and byte-compare the result against the committed file (modulo
+   documented line-ending normalisation). An exact match settles correctness — **replace** the
+   `@code-reviewer` correctness lane entirely. A **byte mismatch (drift) is a blocker**, and the
+   diff **falls back to the full normal-tier review** (drift means the committed output no longer
+   matches its generator — a real defect, or an out-of-band hand-edit that must be reviewed as
+   source).
+2. **Content-safety is never skipped for published artefacts (non-negotiable — wtp-org#535).**
+   When any changed artefact carries `published=1` (client-facing / published output), the
+   content-safety lane — `/security-review` + `@security-auditor` scoped to the artefact content
+   (redaction / PII / secrets / de-redaction / exfiltration) — **runs regardless** of the
+   generated classification. Byte-diff proves the output *matches the generator*; it says nothing
+   about whether the generator emitted something it shouldn't publish.
+3. **The generator keeps its own tier.** If the diff also touches the generator (or any file not
+   declared as an artefact), `rl_diff_generated` returns `0` and the diff is classified by the
+   normal `low`/`medium`/`high` rules — semantic risk lives in the generator's diff, and it is
+   reviewed there at its own tier (acceptance criterion 3).
+
+Like `trivial`, this extends the `rl_diff_trivial` "provably non-semantic ⇒ cheaper path"
+doctrine (whitespace-only / single-lockfile) — here "provably reproducible ⇒ verify by
+reproduction". **Phase 3, 4, and 5.5 still run in full**, and the Phase 5 pass-through, when it
+applies, still takes precedence over the whole classification.
+
 ## Per-tier budget (issues #688, #888)
 
-Wall-clock / tokens / ~tool-calls per tier: **trivial** 2min/15k/5 · **low** 5min/50k/15 · **medium** 10min/150k/40 · **high** 20min/400k/80.
+Wall-clock / tokens / ~tool-calls per tier: **trivial** 2min/15k/5 · **generated** 4min/25k/12 (the regenerate-and-byte-diff run plus a conditional content-safety lane — bounded well below a full correctness review) · **low** 5min/50k/15 · **medium** 10min/150k/40 · **high** 20min/400k/80.
 
 ## Budget-exhaustion behaviour (issues #688, #888)
 
