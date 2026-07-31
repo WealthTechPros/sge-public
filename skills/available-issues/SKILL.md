@@ -213,7 +213,7 @@ A candidate that is `in_flight` is **claimed** — exclude it from the ready poo
 
 ## Phase 2 — Dependency gate
 
-Resolve each candidate's dependencies via the port (`"$IR" dependencies <number>`) and let an **open** dependency block it. The port is backend-agnostic: on GitHub/Forgejo it parses the issue body for `Depends on #123`, `Blocked by #123`, `Requires #123`, `DependsOn: #123` (the [dependency metadata grammar](../decompose-issue/SKILL.md#dependency-metadata-grammar)); on Jira it reads structural `is blocked by` issue links, resolving state via status **category** (DR2 — never a localised status name). `--analyze` / `--blocking` also resolve transitive chains (A → B → C).
+Resolve each candidate's dependencies via the port (`"$IR" dependencies <number>`) and let an **open** dependency block it. The port is backend-agnostic: on GitHub/Forgejo it parses the issue body for `Depends on #123`, `Blocked by #123`, `Requires #123`, `DependsOn: #123` (the [dependency metadata grammar](../decompose-issue/SKILL.md#dependency-metadata-grammar)); on Jira it reads structural `is blocked by` issue links, resolving state via status **category** (DR2 — never a localised status name). Cross-repo refs (`org/repo#N`) are recognised and emitted as `unknown` (blocking), since they cannot be resolved repo-locally (#1732). **Limitation:** the port resolves only **direct** dependencies — no transitive walk (A → B → C) exists; `--analyze` / `--blocking` use the same direct-dependency resolution.
 
 ```bash
 is_blocked() {  # true if any dependency is open OR indeterminate

@@ -103,7 +103,12 @@ printf '%s' "$report" \
 # list-dispatchable through the Jira adapter when SGD_ALM_BACKEND=jira and to
 # `gh` otherwise (byte-identical for GitHub). Never shell `gh issue list`
 # directly here. See references/alm-routing.md.
+# $IW (scripts/issue-write.sh) is the WRITE analogue (SPEC-105 S3): route every
+# mutating tracker op — `gh issue comment`/`gh issue create` and close-on-merge —
+# through it so Jira-tracked writes land correctly. Never shell those `gh`
+# writes directly. See references/alm-routing.md ("Mutating tracker writes").
 IR="${CLAUDE_PLUGIN_ROOT:-.}/scripts/issue-read.sh"
+IW="${CLAUDE_PLUGIN_ROOT:-.}/scripts/issue-write.sh"
 QUEUE=$("$IR" list --state open --limit 50 \
   | jq -r '[.[] | select(
     (.assignees | length == 0) and
@@ -437,10 +442,11 @@ git -C "${AGENT_EXEC_ROOT[<N>]}" worktree remove "${AGENT_WORKTREE[<N>]}" --forc
 # 9. Mark wave as landed (the kill counts as a landing event).
 ```
 
-Step 6 issue comment:
+Step 6 issue comment (route via `$IW` — SPEC-105 S3 — so a Jira-tracked repo's
+comment lands on the item; on GitHub `$IW comment` is the same `gh issue comment`):
 
 ```bash
-gh issue comment <N> --body "$(cat <<EOF
+"$IW" comment <N> "$(cat <<EOF
 **/sgd:team-pipeline** killed this lane after <M>m with no draft PR
 (time-box=${staleKillMinutes}m).
 
@@ -474,18 +480,35 @@ done
 Post the run report durably. **Default:** append `$PHASE6_REPORT` to the rolling
 "pipeline runs" tracking issue (find-or-create once per repo):
 
+The whole find-or-create is backend-neutral: the **lookup** reads through `$IR
+search` (P10, S4) and both **writes** through `$IW` (S3), so a Jira-tracked repo
+finds its existing tracking item and appends to it rather than opening a new one
+each run. Creating the item is a P6 `create-item`, so it needs the DP3 opt-in —
+`$IW` never grants that itself:
+
 ```bash
-TRACKING=$(gh issue list --search "pipeline runs in:title" --state open \
-  --json number -q '.[0].number')
-[ -n "$TRACKING" ] || TRACKING=$(gh issue create \
-  --title "pipeline runs" \
-  --body "Rolling log of /sgd:team-pipeline run reports. One comment per run." \
-  --json number -q .number)
-gh issue comment "$TRACKING" --body "## team-pipeline run ${RUN_ID}
+IR="${CLAUDE_PLUGIN_ROOT:-.}/scripts/issue-read.sh"
+IW="${CLAUDE_PLUGIN_ROOT:-.}/scripts/issue-write.sh"
+TRACKING=$("$IR" search "pipeline runs" --state open --limit 1 \
+  | jq -r '.[0].number // empty')
+[ -n "$TRACKING" ] || TRACKING=$(JIRA_ADAPTER_ALLOW_CREATE=1 "$IW" create \
+  "pipeline runs" \
+  "Rolling log of /sgd:team-pipeline run reports. One comment per run.")
+"$IW" comment "$TRACKING" "## team-pipeline run ${RUN_ID}
 \`\`\`
 ${PHASE6_REPORT}
 \`\`\`"
 ```
+
+> **`$IW create` prints the new item's bare ref** — an issue number on GitHub, an
+> issueKey (`PROJ-123`) on Jira. Treat `$TRACKING` as opaque and pass it straight
+> back to `$IW`; never parse it as an integer.
+>
+> **Gap closed (#1729).** The lookup was previously a direct `gh issue list
+> --search`, because `$IR list` exposes only `--state`/`--label`/`--limit`. On a
+> Jira-tracked repo it therefore returned empty and a **new** tracking item was
+> created every run. P10 `search` (S4) adds the backend-neutral free-text title
+> search this needs, so the rolling log is now genuinely rolling on every backend.
 
 **When `SGD_BACKEND_URL` is set:** additionally POST the report via the same
 snapshot mechanism `/sgd:roi-report` Step 6 uses (reuse its `curl`/auth
