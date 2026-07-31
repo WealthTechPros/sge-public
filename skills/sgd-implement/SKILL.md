@@ -197,7 +197,7 @@ A Large issue splits into an **enabler** (foundation — model/types/service she
 
 **Gate the fan-out on `/sgd:build-ready-audit` before dispatching children.** Run it over the children; implement only `READY` children (non-blocking verdict), and **skip and report** any `NOT_READY`/`TOO_LARGE` rather than dispatching blindly. Its #872 fold also returns each child's verdict — pass each `results[].governance` down as `SGD_GOVTRACE_VERDICT` for the child's Phase 0.5. Then comment on the parent with the sequence + per-child verdict and ask "Start with the enabler?"
 
-Full taxonomy, `gh issue create` templates, and per-child gating detail: [`child-splitting.md`](references/child-splitting.md).
+Full taxonomy, child-creation templates (via the `$IW` write seam), and per-child gating detail: [`child-splitting.md`](references/child-splitting.md).
 
 ---
 
@@ -279,13 +279,13 @@ gh pr create --draft --title "<conventional title>" --body "Closes #<issue-numbe
 # then, per green cycle:  /sgd:commit ... && git push
 ```
 
+> Non-GitHub tracker: [close-on-merge](references/alm-close-on-merge.md).
+
 The early PR **stays a draft**, carries **no `pr-reviewed` label**, and is **never undraft**ed here (issue #699; full rule in Phase 6). Phase 6 **reuses this PR**; a "PR already exists" from `gh pr create` is expected.
 
 Repeat per acceptance criterion.
 
-**WIP checkpoint on interruption.** On a shutdown/timeout/kill mid-slice — or before terminating with uncommitted changes — commit them as `wip: checkpoint before shutdown` (`SGD-Override: WIP; checkpoint before shutdown` trailer) and push before exiting. May be red; a successor picks it up. Never strand uncommitted work when a push is possible.
-
-**Track your starting map as you work.** When you read a file for context but change nothing, note it — filename + one-line rationale (e.g. `src/widgets/WidgetCard.tsx — verified CSS shrink chain, no change needed`). Pass this list to the Phase 5 reviewer so it verifies your claims rather than re-discovering the neighbourhood.
+**Work hygiene — unconditional.** On any interruption, commit uncommitted work as `wip: checkpoint before shutdown` (with the `SGD-Override: WIP; checkpoint before shutdown` trailer) and **push before exiting** — never strand work a successor could pick up. Also track the files you read but did not change, as a starting map for the Phase 5 reviewer. Both: [`phase3-work-hygiene.md`](references/phase3-work-hygiene.md).
 
 ---
 
