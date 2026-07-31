@@ -52,6 +52,8 @@ jobs:
               fail(`marketplace.json: repository must self-point at WealthTechPros/sgd-public, found ${entry.repository} (private-repo pointer = uninstallable externally, sgd#1705)`);
             if (entry && entry.source !== "./")
               fail(`marketplace.json: source must be "./", found ${entry.source}`);
+            if (plugin.repository && !/WealthTechPros\/sgd-public/.test(plugin.repository))
+              fail(`plugin.json: repository must self-point at WealthTechPros/sgd-public, found ${plugin.repository}`);
             if (process.exitCode) process.exit(process.exitCode);
             console.log(`manifests ok: ${plugin.name}@${plugin.version} self-pointing at sgd-public`);
           '
@@ -59,13 +61,22 @@ jobs:
       - name: Verify every SKILL.md-referenced plugin-root path exists
         run: |
           set -euo pipefail
+          # A publish that dropped skills/ entirely must fail loudly, not
+          # degrade into a vacuous sweep (xargs with no operands would make
+          # grep read stdin).
+          skill_count=$(find skills -name SKILL.md | wc -l)
+          if [ "$skill_count" -eq 0 ]; then
+            echo "::error::no SKILL.md files found — published tree is missing the skills surface"
+            exit 1
+          fi
+          echo "sweeping $skill_count SKILL.md files"
           missing=0
           while IFS= read -r relpath; do
             if [ ! -e "$relpath" ]; then
               echo "::error::a SKILL.md references missing path: \${CLAUDE_PLUGIN_ROOT}/$relpath"
               missing=1
             fi
-          done < <(find skills -name SKILL.md -print0 | xargs -0 grep -ohE '\$\{CLAUDE_PLUGIN_ROOT\}/[A-Za-z0-9._/-]+' | sed 's#\${CLAUDE_PLUGIN_ROOT}/##' | sort -u)
+          done < <(find skills -name SKILL.md -print0 | xargs -0 -r grep -ohE '\$\{CLAUDE_PLUGIN_ROOT\}/[A-Za-z0-9._/-]+' | sed 's#\${CLAUDE_PLUGIN_ROOT}/##' | sort -u)
           if [ "$missing" -ne 0 ]; then
             echo "::error::published tree is missing one or more skill-referenced paths"
             exit 1
