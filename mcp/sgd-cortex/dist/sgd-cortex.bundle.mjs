@@ -26200,10 +26200,7 @@ var RemoteCortexStore = class _RemoteCortexStore {
     const count = Number(matched.rows[0]?.cnt ?? 0);
     if (count === 0) return;
     await this.client.batch(
-      [
-        { sql: `DELETE FROM relations ${where}`, args },
-        this.auditStmt("delete_relation", count)
-      ],
+      [{ sql: `DELETE FROM relations ${where}`, args }, this.auditStmt("delete_relation", count)],
       "write"
     );
   }
@@ -26254,7 +26251,15 @@ var RemoteCortexStore = class _RemoteCortexStore {
     return {
       sql: `INSERT INTO audit_log (op, scope, classification, source_type, source_ref, source_repo, redacted_summary)
             VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      args: [op, scope, DEFAULT_CLASSIFICATION, this.sourceType, this.sourceRef, this.sourceRepo, `${op}: ${count} items`]
+      args: [
+        op,
+        scope,
+        DEFAULT_CLASSIFICATION,
+        this.sourceType,
+        this.sourceRef,
+        this.sourceRepo,
+        `${op}: ${count} items`
+      ]
     };
   }
   async hydrate(rows) {
