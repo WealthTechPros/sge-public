@@ -19,7 +19,7 @@ This is the standalone version of the complexity-sizing and child-issue logic th
 
 It runs **inline** in the main conversation — do not fork it into a subagent. The sizing and conflict analysis (Phase 2–3) may be delegated to subagents for a large blast radius; the split decision (Phase 4) and the child-issue creation (Phase 5) are interactive.
 
-> **Target repo.** Phases 1–6 read the parent (`gh issue view`) and write the children (`gh issue create` / `gh issue edit` / `gh issue comment`) against the current working directory. When decomposing from a hub/control checkout (e.g. `wtp-org`) or when `/sgd:sgd-implement` Phase 2 dispatches this against another repo, apply the shared repo-targeting convention — [`gh-repo`](../gh-repo/SKILL.md) — first: `cd` into the target checkout (or `export GH_REPO=owner/repo`) and run its startup echo, so the child issues are created in the right repo rather than silently in the hub. Same-repo: leave `GH_REPO` unset.
+> **Target repo.** Phases 1–6 read the parent (`gh issue view`) and write the children through the ALM write seam `$IW` (`scripts/issue-write.sh` — `create`/`comment`; `gh issue edit` for labels on the GitHub path) against the current working directory. When decomposing from a hub/control checkout (e.g. `wtp-org`) or when `/sgd:sgd-implement` Phase 2 dispatches this against another repo, apply the shared repo-targeting convention — [`gh-repo`](../gh-repo/SKILL.md) — first: `cd` into the target checkout (or `export GH_REPO=owner/repo`) and run its startup echo, so the child issues are created in the right repo rather than silently in the hub. Same-repo: leave `GH_REPO` unset.
 
 ## Usage
 
@@ -191,29 +191,35 @@ Then capture the decision via **AskUserQuestion** — one question, never a free
 
 One enabler issue, then one issue per vertical slice. Each child carries its dependency and conflict metadata **in the body** so a flow consumer (`/sgd:team-pipeline`, or a repo-shipped `/sgd:available-issues` / `/sgd:issue-swarm` if present) can read it, and so a human landing on the issue understands its place in the DAG.
 
+> **Children are created through `$IW`, not `gh issue create` directly** (SPEC-105 S3, #1701). `scripts/issue-write.sh` is the backend-aware write seam: on GitHub it delegates to `gh` unchanged; on a Jira-tracked repo it routes to P6 `create-item` so the children reach the tracker the work actually lives in. Shelling `gh issue create` here means a Jira repo's decomposition silently produces nothing. `create` is scope-gated per DP3, so it needs the explicit `JIRA_ADAPTER_ALLOW_CREATE=1` opt-in — `$IW` supplies the write flag but never the create scope. Full routing table: [`../team-pipeline/references/alm-routing.md`](../team-pipeline/references/alm-routing.md).
+>
+> `$IW create <title> <body>` prints the new item's **bare ref** (issue number on GitHub, issueKey on Jira) — capture it to express `DependsOn:`. It takes no `--label`/`--milestone`; apply those after creation on the GitHub path (Jira label parity is S4, P9).
+
 **Spec lane** (parent references `SPEC-NNN`):
 
 ```bash
+IW="${CLAUDE_PLUGIN_ROOT:-.}/scripts/issue-write.sh"
 PARENT=312
 SPEC=SPEC-027
 
-gh issue create --title "${SPEC}-E1: Enabler — Migration + Model + Service Shell + Types" \
-  --label "sgd,enabler" \
-  --body "$(cat <<'EOF'
-Parent: #312
+E1=$(JIRA_ADAPTER_ALLOW_CREATE=1 "$IW" create \
+  "${SPEC}-E1: Enabler — Migration + Model + Service Shell + Types" \
+  "$(cat <<EOF
+Parent: #${PARENT}
 DependsOn: —
 Owns: db/migrations/*import*, models/import_job.*, services/import_service.* (shell only)
 
 Technical foundation only — no user-facing output, no TDD required.
 Verified by: migration runs and rolls back cleanly, types compile, module resolves, lint passes.
 EOF
-)"
+)")
+gh issue edit "$E1" --add-label "sgd,enabler"   # GitHub path; Jira labels are S4 (P9)
 
-gh issue create --title "${SPEC}-S1: CSV ingest + validation (TDD)" \
-  --label "sgd,story" \
-  --body "$(cat <<'EOF'
-Parent: #312
-DependsOn: #<E1-number>
+JIRA_ADAPTER_ALLOW_CREATE=1 "$IW" create \
+  "${SPEC}-S1: CSV ingest + validation (TDD)" \
+  "$(cat <<EOF
+Parent: #${PARENT}
+DependsOn: #${E1}
 Owns: services/import_service.parse*, parsers/csv.*, tests/csv_*
 ParallelSafeWith: S2, S3
 ConflictsWith: —
@@ -234,10 +240,13 @@ EOF
 **No-spec lane** (general feature/bug/chore parent): drop the `SPEC-NNN-` title prefix and use the `enabler` / `story` labels alone (plus any `module:*` label inherited from the parent). The children inherit the parent's milestone:
 
 ```bash
-gh issue create --title "Enabler: <parent title> — foundation" \
-  --label "enabler" --milestone "<parent milestone>" \
-  --body "Parent: #${PARENT}\nDependsOn: —\nOwns: ..."
+E1=$("$IW" create "Enabler: <parent title> — foundation" \
+  "$(printf 'Parent: #%s\nDependsOn: —\nOwns: ...' "$PARENT")")
+gh issue edit "$E1" --add-label "enabler" --milestone "<parent milestone>"
 ```
+
+(`JIRA_ADAPTER_ALLOW_CREATE=1` prefix omitted for brevity — it is required on the
+Jira backend for every `create`, exactly as in the spec lane above.)
 
 **Metadata fields, every child:**
 
@@ -272,11 +281,11 @@ Worked example — a child whose deliverable lives in another repo (the `sgd#798
 shape), stamped so team-pipeline routes its worktree/PR to `owner/other-repo`:
 
 ```bash
-gh issue create --title "${SPEC}-S4: Wire the adviser allowlist (TDD)" \
-  --label "sgd,story" \
-  --body "$(cat <<'EOF'
-Parent: #312
-DependsOn: #<E1-number>
+S4=$(JIRA_ADAPTER_ALLOW_CREATE=1 "$IW" create \
+  "${SPEC}-S4: Wire the adviser allowlist (TDD)" \
+  "$(cat <<EOF
+Parent: #${PARENT}
+DependsOn: #${E1}
 Repo: owner/other-repo            # executes here, not in the parent's repo
 Owns: app/allowlist/*, tests/allowlist_*
 ParallelSafeWith: S1, S2
@@ -285,7 +294,8 @@ ConflictsWith: —
 One vertical slice whose deliverable lives in owner/other-repo. Strict TDD.
 Acceptance criterion: <the specific criterion this slice satisfies>
 EOF
-)"
+)")
+gh issue edit "$S4" --add-label "sgd,story"
 ```
 
 Status/labels (including `agent-lock`) stay on the tracking child issue created
@@ -320,7 +330,7 @@ mirror it in the consumers if a new form is ever needed.
 Skip only if `--no-comment` is passed. Comment on the parent with the full child sequence and the parallel lanes, so the parent becomes the single source of truth for the decomposition:
 
 ```bash
-gh issue comment $PARENT --body "$(cat <<'EOF'
+"$IW" comment "$PARENT" "$(cat <<'EOF'
 ## Decomposed into parallel-safe sub-tasks
 
 **Complexity:** 41 (Large) — split warranted.
