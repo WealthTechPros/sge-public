@@ -1,0 +1,84 @@
+# Publish integrity — the always-on PR check for this repo (sgd-public#3).
+#
+# This repo's main is governed by SGD posture (>= 1 required status check).
+# CodeQL default setup cannot be that check: it skips PRs that touch no
+# analyzable language, and publish syncs are mostly markdown — a required
+# CodeQL context would deadlock exactly the PRs this repo exists for
+# (required-context flip hazard). This workflow runs on EVERY pull request,
+# unconditionally, and validates the published plugin surface:
+#
+#   1. `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`
+#      parse, agree on version, and self-point at THIS public repo (a
+#      regression to the private-repo pointer made the plugin uninstallable
+#      for every external org — the original sgd#1705 defect).
+#   2. Every `${CLAUDE_PLUGIN_ROOT}/<path>` referenced from any SKILL.md
+#      exists in the tree (same extraction as the sgd-side clean-room smoke,
+#      sgd#1721 — catches a partial sync landing here directly).
+#
+# The branch-protection required context "Publish integrity" is managed as
+# code in wtp-org `infra/github/` — keep this job's `name:` in sync with it.
+name: Publish integrity
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  publish-integrity:
+    name: Publish integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate plugin + marketplace manifests
+        run: |
+          set -euo pipefail
+          node -e '
+            const fs = require("fs");
+            const plugin = JSON.parse(fs.readFileSync(".claude-plugin/plugin.json", "utf8"));
+            const market = JSON.parse(fs.readFileSync(".claude-plugin/marketplace.json", "utf8"));
+            const fail = (msg) => { console.error("::error::" + msg); process.exitCode = 1; };
+            if (!plugin.name) fail("plugin.json: missing name");
+            if (!plugin.version) fail("plugin.json: missing version");
+            const entry = (market.plugins || []).find((p) => p.name === plugin.name);
+            if (!entry) fail(`marketplace.json: no plugin entry named ${plugin.name}`);
+            if (entry && entry.version !== plugin.version)
+              fail(`version mismatch: plugin.json ${plugin.version} vs marketplace.json ${entry.version}`);
+            if (entry && !/WealthTechPros\/sgd-public/.test(entry.repository || ""))
+              fail(`marketplace.json: repository must self-point at WealthTechPros/sgd-public, found ${entry.repository} (private-repo pointer = uninstallable externally, sgd#1705)`);
+            if (entry && entry.source !== "./")
+              fail(`marketplace.json: source must be "./", found ${entry.source}`);
+            if (plugin.repository && !/WealthTechPros\/sgd-public/.test(plugin.repository))
+              fail(`plugin.json: repository must self-point at WealthTechPros/sgd-public, found ${plugin.repository}`);
+            if (process.exitCode) process.exit(process.exitCode);
+            console.log(`manifests ok: ${plugin.name}@${plugin.version} self-pointing at sgd-public`);
+          '
+
+      - name: Verify every SKILL.md-referenced plugin-root path exists
+        run: |
+          set -euo pipefail
+          # A publish that dropped skills/ entirely must fail loudly, not
+          # degrade into a vacuous sweep (xargs with no operands would make
+          # grep read stdin).
+          skill_count=$(find skills -name SKILL.md | wc -l)
+          if [ "$skill_count" -eq 0 ]; then
+            echo "::error::no SKILL.md files found — published tree is missing the skills surface"
+            exit 1
+          fi
+          echo "sweeping $skill_count SKILL.md files"
+          missing=0
+          while IFS= read -r relpath; do
+            if [ ! -e "$relpath" ]; then
+              echo "::error::a SKILL.md references missing path: \${CLAUDE_PLUGIN_ROOT}/$relpath"
+              missing=1
+            fi
+          done < <(find skills -name SKILL.md -print0 | xargs -0 -r grep -ohE '\$\{CLAUDE_PLUGIN_ROOT\}/[A-Za-z0-9._/-]+' | sed 's#\${CLAUDE_PLUGIN_ROOT}/##' | sort -u)
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::published tree is missing one or more skill-referenced paths"
+            exit 1
+          fi
+          echo "all skill-referenced plugin-root paths present"
