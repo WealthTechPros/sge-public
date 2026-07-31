@@ -25953,8 +25953,39 @@ var RemoteCortexStore = class _RemoteCortexStore {
     this.sourceRepo = opts.sourceRepo ?? null;
   }
   static async create(client, opts = {}) {
+    try {
+      await client.execute("ALTER TABLE nodes ADD COLUMN content_hash TEXT");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!/duplicate column|no such table/i.test(msg)) {
+        throw err;
+      }
+    }
     for (const sql of SCHEMA_STATEMENTS) {
       await client.execute(sql);
+    }
+    const cols = await client.execute(`PRAGMA table_info(observations)`);
+    const colNames = new Set(cols.rows.map((r) => r[1]));
+    const temporalAlters = [];
+    if (!colNames.has("valid_from")) {
+      temporalAlters.push(
+        "ALTER TABLE observations ADD COLUMN valid_from TEXT",
+        `UPDATE observations SET valid_from = COALESCE(created_at, datetime('now'))
+         WHERE valid_from IS NULL`
+      );
+    }
+    if (!colNames.has("valid_to")) {
+      temporalAlters.push("ALTER TABLE observations ADD COLUMN valid_to TEXT");
+    }
+    if (!colNames.has("superseded_by")) {
+      temporalAlters.push("ALTER TABLE observations ADD COLUMN superseded_by INTEGER");
+    }
+    if (temporalAlters.length > 0) {
+      await client.batch(temporalAlters, "write");
+    }
+    try {
+      await client.execute("PRAGMA foreign_keys = ON");
+    } catch {
     }
     const colsOf = async (table) => new Set(
       (await client.execute(`PRAGMA table_info(${table})`)).rows.map((r) => String(r.name))
@@ -25988,6 +26019,26 @@ var RemoteCortexStore = class _RemoteCortexStore {
     for (const e of entities) {
       const id = scopedId(this.scope, e.name);
       const conf = baseConfidenceForType(e.entityType);
+      const priorRs = await this.client.execute({
+        sql: "SELECT id, content FROM observations WHERE node_id = ? AND valid_to IS NULL ORDER BY id",
+        args: [id]
+      });
+      const uniqueObs = [...new Set(e.observations)];
+      const newContents = new Set(uniqueObs);
+      const priorByContent = /* @__PURE__ */ new Map();
+      const duplicateCurrent = [];
+      for (const r of priorRs.rows) {
+        const rowId = Number(r[0]);
+        const content = r[1];
+        const kept = priorByContent.get(content);
+        if (kept !== void 0) {
+          duplicateCurrent.push({ content, dupId: rowId });
+        } else {
+          priorByContent.set(content, rowId);
+        }
+      }
+      const freshContents = uniqueObs.filter((obs) => !priorByContent.has(obs));
+      const stale = [...priorByContent.entries()].filter(([content]) => !newContents.has(content));
       const stmts = [
         {
           sql: `INSERT INTO nodes (id, name, type, scope, classification,
@@ -26019,12 +26070,39 @@ var RemoteCortexStore = class _RemoteCortexStore {
             conf
           ]
         },
-        { sql: "DELETE FROM observations WHERE node_id = ?", args: [id] },
-        ...e.observations.map((obs) => ({
+        ...freshContents.map((obs) => ({
           sql: `INSERT INTO observations (node_id, content, valid_from) VALUES (?, ?, datetime('now'))`,
           args: [id, obs]
         }))
       ];
+      const unambiguous = stale.length === 1 && freshContents.length === 1;
+      for (const [, rowId] of stale) {
+        stmts.push(
+          unambiguous ? {
+            sql: `UPDATE observations
+                      SET valid_to = datetime('now'),
+                          superseded_by = (SELECT MAX(id) FROM observations
+                                           WHERE node_id = ? AND content = ? AND valid_to IS NULL)
+                      WHERE id = ? AND valid_to IS NULL`,
+            args: [id, freshContents[0] ?? "", rowId]
+          } : {
+            sql: `UPDATE observations SET valid_to = datetime('now'), superseded_by = NULL
+                      WHERE id = ? AND valid_to IS NULL`,
+            args: [rowId]
+          }
+        );
+      }
+      for (const d of duplicateCurrent) {
+        stmts.push({
+          sql: `UPDATE observations
+                SET valid_to = datetime('now'),
+                    superseded_by = (SELECT MAX(id) FROM observations
+                                     WHERE node_id = ? AND content = ?
+                                       AND valid_to IS NULL AND id <> ?)
+                WHERE id = ? AND valid_to IS NULL`,
+          args: [id, d.content, d.dupId, d.dupId]
+        });
+      }
       if (e === entities[entities.length - 1]) {
         stmts.push(this.auditStmt("create_entities", entities.length));
       }
@@ -26071,7 +26149,7 @@ var RemoteCortexStore = class _RemoteCortexStore {
     const rs = await this.client.execute({
       sql: `SELECT DISTINCT n.id, n.name, n.type
             FROM nodes n
-            LEFT JOIN observations o ON o.node_id = n.id
+            LEFT JOIN observations o ON o.node_id = n.id AND o.valid_to IS NULL
             WHERE n.scope IN (${ph}) AND (n.name LIKE ? OR o.content LIKE ?)
             LIMIT ?`,
       args: [...this.activeScopes, like, like, cap]
@@ -26093,10 +26171,16 @@ var RemoteCortexStore = class _RemoteCortexStore {
       args: [name, ...this.activeScopes]
     });
     if (rs.rows.length === 0) return;
-    const stmts = rs.rows.map((r) => ({
-      sql: "DELETE FROM nodes WHERE id = ?",
-      args: [r[0]]
-    }));
+    const stmts = rs.rows.flatMap((r) => [
+      { sql: "DELETE FROM observations WHERE node_id = ?", args: [r[0]] },
+      {
+        sql: "DELETE FROM relations WHERE from_id = ? OR to_id = ?",
+        args: [r[0], r[0]]
+      },
+      { sql: "DELETE FROM vectors WHERE node_id = ?", args: [r[0]] },
+      { sql: "DELETE FROM nodes WHERE id = ?", args: [r[0]] }
+    ]);
+    stmts.push(this.auditStmt("delete_entity", rs.rows.length));
     await this.client.batch(stmts, "write");
   }
   async deleteRelation(source, target, relationType) {
@@ -26106,20 +26190,49 @@ var RemoteCortexStore = class _RemoteCortexStore {
     const fromPh = fromIds.map(() => "?").join(",");
     const toPh = toIds.map(() => "?").join(",");
     const scopePh = this.activeScopes.map(() => "?").join(",");
-    await this.client.execute({
-      sql: `DELETE FROM relations
-            WHERE from_id IN (${fromPh}) AND to_id IN (${toPh})
-              AND type = ? AND scope IN (${scopePh})`,
-      args: [...fromIds, ...toIds, relationType, ...this.activeScopes]
+    const where = `WHERE from_id IN (${fromPh}) AND to_id IN (${toPh})
+                     AND type = ? AND scope IN (${scopePh})`;
+    const args = [...fromIds, ...toIds, relationType, ...this.activeScopes];
+    const matched = await this.client.execute({
+      sql: `SELECT COUNT(*) AS cnt FROM relations ${where}`,
+      args
     });
+    const count = Number(matched.rows[0]?.cnt ?? 0);
+    if (count === 0) return;
+    await this.client.batch(
+      [
+        { sql: `DELETE FROM relations ${where}`, args },
+        this.auditStmt("delete_relation", count)
+      ],
+      "write"
+    );
   }
   async deleteScope(scope) {
     if (!this.activeScopes.includes(scope)) return;
+    const counts = await this.client.execute({
+      sql: `SELECT (SELECT COUNT(*) FROM nodes WHERE scope = ?)
+                 + (SELECT COUNT(*) FROM relations WHERE scope = ?)
+                 + (SELECT COUNT(*) FROM derivatives WHERE scope = ?) AS total`,
+      args: [scope, scope, scope]
+    });
+    const total = Number(counts.rows[0]?.total ?? 0);
     await this.client.batch(
       [
+        // Explicit history erasure BEFORE the node delete — cascade-independent
+        // (see deleteEntity). The subselect runs while the nodes still exist.
+        {
+          sql: "DELETE FROM observations WHERE node_id IN (SELECT id FROM nodes WHERE scope = ?)",
+          args: [scope]
+        },
+        // vectors has no scope column — erase via the node subselect too.
+        {
+          sql: "DELETE FROM vectors WHERE node_id IN (SELECT id FROM nodes WHERE scope = ?)",
+          args: [scope]
+        },
         { sql: "DELETE FROM nodes WHERE scope = ?", args: [scope] },
         { sql: "DELETE FROM relations WHERE scope = ?", args: [scope] },
-        { sql: "DELETE FROM derivatives WHERE scope = ?", args: [scope] }
+        { sql: "DELETE FROM derivatives WHERE scope = ?", args: [scope] },
+        this.auditStmt("delete_scope", total, scope)
       ],
       "write"
     );
@@ -26133,21 +26246,23 @@ var RemoteCortexStore = class _RemoteCortexStore {
   async reflect(_opts) {
     return null;
   }
-  auditStmt(op, count) {
+  // `scope` defaults to the store's own scope — correct for the create paths and
+  // for entity/relation deletes, which act within it. deleteScope must override
+  // it: audit_log.scope is indexed and is the key auditRead filters by, so an
+  // erasure recorded under the default scope lands in the wrong trail (#1715).
+  auditStmt(op, count, scope = this.scope) {
     return {
       sql: `INSERT INTO audit_log (op, scope, classification, source_type, source_ref, source_repo, redacted_summary)
             VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      args: [op, this.scope, DEFAULT_CLASSIFICATION, this.sourceType, this.sourceRef, this.sourceRepo, `${op}: ${count} items`]
+      args: [op, scope, DEFAULT_CLASSIFICATION, this.sourceType, this.sourceRef, this.sourceRepo, `${op}: ${count} items`]
     };
-  }
-  async audit(op, count) {
-    await this.client.execute(this.auditStmt(op, count));
   }
   async hydrate(rows) {
     if (rows.length === 0) return [];
     const ph = rows.map(() => "?").join(",");
     const rs = await this.client.execute({
-      sql: `SELECT node_id, content FROM observations WHERE node_id IN (${ph}) ORDER BY id`,
+      sql: `SELECT node_id, content FROM observations
+            WHERE node_id IN (${ph}) AND valid_to IS NULL ORDER BY id`,
       args: rows.map((r) => r.id)
     });
     const byNode = /* @__PURE__ */ new Map();
