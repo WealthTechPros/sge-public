@@ -55,12 +55,62 @@ On the Jira backend an item id is a Jira **issueKey** (`PROJ-123`), so the
 normalised `.number` field is that key string and `.state` is `OPEN`/`CLOSED`
 derived from the Jira status **category** (DR2), never a localised status name.
 
+### Mutating tracker writes route through `$IW` (SPEC-105 S3, #1701)
+
+All **mutating** issue operations — the tracker-side writes the pipeline and
+`pr-monitor`/`pr-review`/`sgd-implement` perform (claim notices, triage/exit-report
+comments, decomposition children, close-on-merge linkage) — route through the
+single seam `scripts/issue-write.sh` (`$IW`), the write-path analogue of `$IR`.
+It resolves the ALM backend the same way (fail loud on an unrecognised value,
+DR1) and, unlike `$IR`, **is** the write opt-in: it sets `JIRA_ADAPTER_ALLOW_WRITE=1`
+for its adapter calls. It never sets `JIRA_ADAPTER_ALLOW_CREATE` — that DP3 scope
+gate stays the caller's explicit decision, so the common-case dispatch token
+cannot create work items. **Never shell `gh issue comment`/`gh issue create`
+directly in a write path** — call `$IW` so a Jira-tracked repo's writes land on
+the right backend.
+
+```bash
+IW="${CLAUDE_PLUGIN_ROOT:-.}/scripts/issue-write.sh"
+```
+
+| `ALM` | Action |
+|---|---|
+| `github` (unset/empty) | `comment`/`create` delegate to `gh` byte-identically; `close-link` is DECLARATIVE — `$IW` prints the `Closes #N` token to embed in the PR body (it does not edit the PR) |
+| `jira` | `comment`→**P5 `comment-item`**, `create`→**P6 `create-item`** (needs `SGD_JIRA_PROJECT` + the caller's `JIRA_ADAPTER_ALLOW_CREATE=1`), `close-link`→**P8 `link-close-on-merge`** (records a remote link on the item — Jira has no native PR link, #1150 — plus a close transition when `SGD_JIRA_CLOSE_TRANSITION_ID` is set; a failed write is surfaced loud, never swallowed) |
+| *unrecognised* | **fail loud** naming the value (DR1); no `gh` and no Jira REST write |
+
+| Phase / step | Write op | Port call |
+|---|---|---|
+| **Phase 1/2** — claim notice, triage, exit report | P5 `comment-item` | `"$IW" comment "$n" "$body"` |
+| **Decomposition** — child work items | P6 `create-item` | `JIRA_ADAPTER_ALLOW_CREATE=1 "$IW" create "$title" "$body"` |
+| **PR handoff** — close-on-merge linkage | P8 `link-close-on-merge` | `"$IW" close-link "$n" "$pr_url"` (github: embed the printed `Closes #N`) |
+
+### PR comments are NOT tracker writes — they stay on `gh`
+
+The port covers **issue-tracker** operations (SPEC-105 §2.1, P1–P9). A comment on
+the **pull request** is a *code-host* write, not a tracker write: the PR lives on
+GitHub even when the work items live in Jira, and the port has no operation for
+it. So `pr-monitor`'s status comments (held-review, abandoned-draft,
+conflicting-branch, GitHub-degraded) and `pr-review`'s verdict correctly remain
+`gh pr comment` / `gh pr review` — routing them through `$IW` would post a PR
+status note onto an unrelated Jira issue.
+
+The rule is the target, not the verb: **`gh issue …` in a write path is a bug on a
+Jira repo; `gh pr …` is correct on every backend.** What S3 gives `pr-monitor` and
+`pr-review` is the ability to write to the *tracker* when they need to (via `$IW`);
+it does not move their PR-surface commentary.
+
 ### Out of scope here (later slices)
 
-- **Mutating** ops — claim/release/comment/create and the close-on-merge link
-  are **S3** (not routed by `$IR`, which is read-only).
 - **P7 `item-dependencies`** (Jira issue links) and **P9 `dispatch-label-config`**
   Jira realisations are **S4**; until then, the body-text dependency gate and
   the awaiting-label report are GitHub-shaped and stay dark on Jira.
+- **Free-text tracker search (#1729).** `$IR list` exposes `--state`/`--label`/`--limit`
+  only, so a find-or-create by title (e.g. team-pipeline's rolling "pipeline runs"
+  item) still uses a direct `gh issue list --search`. On Jira that lookup returns
+  empty and a new item is created per run — **S4**.
+- **Claim/release** (P3/P4) remain `available-issues`/`team-pipeline` concerns via
+  the jira-adapter transition verbs (S1); `$IW` covers the comment/create/close
+  surface S3 adds.
 
 ---
