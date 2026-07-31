@@ -26097,6 +26097,7 @@ var RemoteCortexStore = class _RemoteCortexStore {
       sql: "DELETE FROM nodes WHERE id = ?",
       args: [r[0]]
     }));
+    stmts.push(this.auditStmt("delete_entity", rs.rows.length));
     await this.client.batch(stmts, "write");
   }
   async deleteRelation(source, target, relationType) {
@@ -26106,20 +26107,38 @@ var RemoteCortexStore = class _RemoteCortexStore {
     const fromPh = fromIds.map(() => "?").join(",");
     const toPh = toIds.map(() => "?").join(",");
     const scopePh = this.activeScopes.map(() => "?").join(",");
-    await this.client.execute({
-      sql: `DELETE FROM relations
-            WHERE from_id IN (${fromPh}) AND to_id IN (${toPh})
-              AND type = ? AND scope IN (${scopePh})`,
-      args: [...fromIds, ...toIds, relationType, ...this.activeScopes]
+    const where = `WHERE from_id IN (${fromPh}) AND to_id IN (${toPh})
+                     AND type = ? AND scope IN (${scopePh})`;
+    const args = [...fromIds, ...toIds, relationType, ...this.activeScopes];
+    const matched = await this.client.execute({
+      sql: `SELECT COUNT(*) AS cnt FROM relations ${where}`,
+      args
     });
+    const count = Number(matched.rows[0]?.cnt ?? 0);
+    if (count === 0) return;
+    await this.client.batch(
+      [
+        { sql: `DELETE FROM relations ${where}`, args },
+        this.auditStmt("delete_relation", count)
+      ],
+      "write"
+    );
   }
   async deleteScope(scope) {
     if (!this.activeScopes.includes(scope)) return;
+    const counts = await this.client.execute({
+      sql: `SELECT (SELECT COUNT(*) FROM nodes WHERE scope = ?)
+                 + (SELECT COUNT(*) FROM relations WHERE scope = ?)
+                 + (SELECT COUNT(*) FROM derivatives WHERE scope = ?) AS total`,
+      args: [scope, scope, scope]
+    });
+    const total = Number(counts.rows[0]?.total ?? 0);
     await this.client.batch(
       [
         { sql: "DELETE FROM nodes WHERE scope = ?", args: [scope] },
         { sql: "DELETE FROM relations WHERE scope = ?", args: [scope] },
-        { sql: "DELETE FROM derivatives WHERE scope = ?", args: [scope] }
+        { sql: "DELETE FROM derivatives WHERE scope = ?", args: [scope] },
+        this.auditStmt("delete_scope", total, scope)
       ],
       "write"
     );
@@ -26133,15 +26152,16 @@ var RemoteCortexStore = class _RemoteCortexStore {
   async reflect(_opts) {
     return null;
   }
-  auditStmt(op, count) {
+  // `scope` defaults to the store's own scope — correct for the create paths and
+  // for entity/relation deletes, which act within it. deleteScope must override
+  // it: audit_log.scope is indexed and is the key auditRead filters by, so an
+  // erasure recorded under the default scope lands in the wrong trail (#1715).
+  auditStmt(op, count, scope = this.scope) {
     return {
       sql: `INSERT INTO audit_log (op, scope, classification, source_type, source_ref, source_repo, redacted_summary)
             VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      args: [op, this.scope, DEFAULT_CLASSIFICATION, this.sourceType, this.sourceRef, this.sourceRepo, `${op}: ${count} items`]
+      args: [op, scope, DEFAULT_CLASSIFICATION, this.sourceType, this.sourceRef, this.sourceRepo, `${op}: ${count} items`]
     };
-  }
-  async audit(op, count) {
-    await this.client.execute(this.auditStmt(op, count));
   }
   async hydrate(rows) {
     if (rows.length === 0) return [];
