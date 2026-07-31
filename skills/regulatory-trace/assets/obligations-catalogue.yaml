@@ -1,0 +1,141 @@
+# Regulatory obligation & framework controlled vocabulary
+# ------------------------------------------------------------------------------
+# The SINGLE source of truth for the obligation / framework ids a spec mapping may
+# reference (/sgd:regulatory-trace). A mapping that cites an id NOT in this file —
+# or one flagged `retired: true` — is a drift finding (C12), never silently accepted.
+#
+# WTP is the SUBJECT, not the addressee, of these regimes: it builds AI software for
+# FCA-authorised firms and is their data processor/sub-processor. A `helps_evidence`
+# note describes how a WTP spec contributes evidence the CLIENT needs — it is NOT a
+# claim that WTP is itself authorised or compliant. Verify wording before citing to a
+# regulator; regimes move (researched 2026-06).
+version: 1
+maintained_via: /sgd:regulatory-trace
+
+# `must_be_covered: true` => `review` raises a low-severity "orphan obligation" if no
+#   spec in the repo maps to it (a hole in the client DD story).
+# `retired: true`        => any mapping referencing it is a HIGH-severity stale finding.
+# `supersedes` / `superseded_by` chain retired ids to their replacement.
+
+fca_obligations:
+  - id: SYSC.8.1
+    name: Outsourcing — general
+    regime: FCA SYSC 8.1
+    helps_evidence: >
+      A spec that documents the controls, data flows and service boundary of a
+      WTP-provided service gives the client the artefacts SYSC 8.1 expects it to
+      hold for an outsourced/critical-function arrangement.
+    must_be_covered: true
+  - id: SYSC.8.1.6R
+    name: Non-delegable regulatory accountability
+    regime: FCA SYSC 8.1.6R
+    helps_evidence: >
+      The keystone rule: a firm cannot contract out its regulatory accountability.
+      Specs mapped here EVIDENCE the firm's retained oversight (review gates, audit
+      trail, exit/rollback) — never assert that WTP absorbs the accountability.
+    must_be_covered: true
+  - id: SYSC.13
+    name: Operational risk — systems & controls (insurers)
+    regime: FCA SYSC 13
+    helps_evidence: >
+      Change-control, testing and audit-trail evidence for operational-risk systems.
+  - id: SYSC.15A
+    name: Operational resilience — important business services
+    regime: FCA SYSC 15A
+    helps_evidence: >
+      Where WTP software underpins a client important business service, specs
+      covering resilience, recovery, testing and impact tolerances contribute the
+      mapping evidence SYSC 15A requires the firm to maintain.
+    must_be_covered: true
+  - id: FG16-5
+    name: Guidance for firms outsourcing to the cloud and other third-party IT
+    regime: FCA FG16/5
+    helps_evidence: >
+      FG16/5 confirms ISO 27001 ALONE is insufficient for material outsourcing.
+      Specs evidencing data location, access control, exit and audit rights fill the
+      gap FG16/5 names. Pairs with ISO27001/ISO42001 framework mappings.
+    must_be_covered: true
+  - id: FG26-4
+    name: Operational resilience & critical/material third-party ICT arrangements
+    regime: FCA/PRA FG26/4 (pub. Mar 2026; rules in force 18 Mar 2027)
+    helps_evidence: >
+      §3.7 explicitly names advanced analytics / AI-ML models, their training/test
+      data (incl. synthetic), and third-party OSS / ML libraries as reportable ICT
+      third-party arrangements. In-scope clients register WTP and demand DD evidence
+      with TRIPARTITE (firm + auditor + regulator) access. Specs mapped here populate
+      that registration + the trust-fabric auditor evidence room.
+    must_be_covered: true
+  - id: PRIN.2A
+    name: Consumer Duty
+    regime: FCA PRIN 2A
+    helps_evidence: >
+      Specs whose output reaches or informs a retail-customer outcome contribute
+      good-outcomes / monitoring evidence. Set the spec `consumer_duty: true` flag.
+    must_be_covered: true
+  - id: PRIN.11
+    name: Relations with regulators — openness & cooperation
+    regime: FCA PRIN 11
+    helps_evidence: >
+      The route for SMALLER clients (below the FG26/4 enhanced-scope threshold):
+      they operate under Principle 11 and surface WTP evidence on request rather than
+      via formal material-arrangement registration.
+  - id: SUP.15
+    name: Notifications to the FCA
+    regime: FCA SUP 15
+    helps_evidence: >
+      Incident / material-change specs give the client the evidence trail behind a
+      SUP 15 notification obligation.
+  - id: SMCR.SC4
+    name: SM&CR — senior manager accountability (named owner)
+    regime: FCA SM&CR
+    helps_evidence: >
+      A spec's `owner` maps to the client's accountable senior manager for the
+      function the software supports.
+  - id: SS1-23
+    name: PRA SS1/23 — model risk management principles
+    regime: PRA SS1/23
+    helps_evidence: >
+      For AI/model specs, cross-link to the AI inventory (`ai_inventory_ref`) rather
+      than restating tiering here. Present so non-AI specs can still cite governance
+      controls that feed the client's model-risk framework.
+  - id: SS2-21
+    name: PRA SS2/21 — outsourcing & third-party risk management
+    regime: PRA SS2/21
+    helps_evidence: >
+      Prudential analogue of FG16/5 for PRA-dual-regulated clients; same evidence
+      contribution (exit, audit rights, sub-outsourcing, resilience).
+
+frameworks:
+  # ISO/IEC 27001:2022 Annex A — 93 controls, 4 themes (5 Org, 6 People, 7 Physical, 8 Tech).
+  - id: ISO27001:A.5
+    name: Organizational controls (2022 Annex A theme 5)
+    regime: ISO/IEC 27001:2022
+    helps_evidence: Policies, supplier relationships, roles — table-stakes ISMS evidence.
+  - id: ISO27001:A.8
+    name: Technological controls (2022 Annex A theme 8)
+    regime: ISO/IEC 27001:2022
+    helps_evidence: Access control, crypto, secure SDLC, logging — what specs most often evidence.
+  # ISO/IEC 42001:2023 — first certifiable AI Management System; the AI differentiator.
+  - id: ISO42001:A.6
+    name: AI system lifecycle (impact assessment, validation)
+    regime: ISO/IEC 42001:2023
+    helps_evidence: AI risk/impact assessment + validation controls; ~40% overlap with 27001.
+  - id: ISO42001:A.8
+    name: Data for AI systems (provenance, quality)
+    regime: ISO/IEC 42001:2023
+    helps_evidence: Training/test data governance — the FG26/4 §3.7 data dimension.
+  # ISO/IEC 27701 — privacy (PIMS) extension over the ISMS for UK GDPR.
+  - id: ISO27701:6
+    name: PIMS-specific controls (controller/processor)
+    regime: ISO/IEC 27701
+    helps_evidence: WTP-as-processor obligations — DPIA, sub-processor, data-subject rights.
+
+# ---- Retired / superseded examples (kept so the C12 drift check has live targets) ----
+# When a regime withdraws an obligation, set retired:true here rather than deleting it —
+# existing mappings then surface as stale findings instead of vanishing silently.
+retired:
+  - id: SYSC.8.1.legacy-mifid
+    name: (example) pre-2021 MiFID outsourcing wording
+    retired: true
+    superseded_by: SYSC.8.1
+    note: Placeholder demonstrating the retired-id drift path; replace with real retirements.

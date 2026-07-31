@@ -1,0 +1,64 @@
+# Regulatory traceability index + export shapes
+# ------------------------------------------------------------------------------
+# Maintained via /sgd:regulatory-trace. The AGGREGATE index of spec→obligation
+# mappings for this repo. Inline spec frontmatter (`regulatory:` block) is the
+# AUTHORITATIVE source; this index is derived from it (plus capability-level
+# controls that no single spec owns). When the two disagree, the spec wins and
+# `review` flags index drift.
+#
+# Every id under `fca_obligations` / `frameworks` MUST exist in
+# obligations-catalogue.yaml and MUST NOT be `retired: true`.
+version: 1
+updated: ""                       # YYYY-MM-DD of last human-confirmed review
+owner: ""                         # accountable individual for the evidence pack
+# The canonical catalogue ships INSIDE the sgd plugin, not in this repo. This key
+# is documentation for humans — no tool parses it (YAML does not expand env vars).
+# check-regulatory-trace.sh resolves the catalogue itself: an explicit $1 override
+# first, else a repo-local skills/regulatory-trace/assets/obligations-catalogue.yaml
+# (only if the repo vendors its own copy), else $CLAUDE_PLUGIN_ROOT, else the copy
+# bundled beside the script inside the installed plugin.
+catalogue: ${CLAUDE_PLUGIN_ROOT}/skills/regulatory-trace/assets/obligations-catalogue.yaml
+
+# Capability-level regulatory posture — mirror of the capability-model extension.
+# Lets you flag a whole capability `regulated` and attach controls that aren't
+# owned by one spec (e.g. an org-wide logging control).
+capabilities:
+  - id: ""                        # CAP-NNN
+    regulated: false              # true => every active spec under it MUST carry a regulatory block (C12)
+    regulatory_controls:          # controls evidenced at the capability level, not a single spec
+      fca_obligations: []         # [SYSC.8.1, ...]
+      frameworks: []              # [ISO27001:A.5, ...]
+      note: ""
+
+# Per-spec mappings (derived from each spec's inline `regulatory:` block).
+specs:
+  - id: ""                        # SPEC-NNN
+    capability: ""                # CAP-NNN (its governing capability)
+    status: ""                    # mirror of the spec status: draft|approved|implemented|...
+    consumer_duty: unknown        # true|false|unknown — reaches/informs a retail-customer outcome?
+    tripartite_evidence: false    # true => may be disclosed to client auditor/regulator (FG26/4)
+    ai_inventory_ref: ""          # AI-NNN when this spec is an AI use case (link, don't duplicate)
+    fca_obligations:              # each id + how this spec contributes evidence
+      - id: ""                    # e.g. SYSC.8.1.6R
+        contribution: ""          # one line: HOW this spec contributes evidence (required)
+    frameworks:
+      - id: ""                    # e.g. ISO42001:A.6
+        contribution: ""
+
+# ---- Export shape A: regulatory-traceability matrix (obligation-keyed) --------
+# Emitted by `export`; the artefact a client drops into its FG26/4 / DD pack.
+matrix:
+  generated_at: ""                # ISO-8601 UTC
+  audited_sha: ""                 # git rev-parse HEAD at export time
+  rows:
+    - obligation_id: ""           # SYSC.8.1.6R
+      obligation_name: ""
+      regime: ""
+      contributing_specs:
+        - spec: ""                # SPEC-NNN
+          capability: ""
+          status: ""
+          success_measure_moved: ""
+          governed: false         # green CI + pr-reviewed + has mapping
+          artefact_uri: ""        # spec permalink @ audited_sha
+      coverage: ""                # covered | partial | orphan (no spec maps to it)

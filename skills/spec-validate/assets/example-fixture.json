@@ -1,0 +1,8 @@
+{
+  "totals": { "clients": 1000 },
+  "addressable": { "clients": 900 },
+  "exclusions": { "clients": 100 },
+  "c1": { "clients": 400 },
+  "c2": { "clients": 300 },
+  "c3": { "clients": 200 }
+}
