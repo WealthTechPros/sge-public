@@ -91,12 +91,44 @@ Classify **each worktree and each branch**. Record the **tip SHA for every row**
 
 | Signal | Check | Verdict |
 |---|---|---|
+| **Live ownership claim** | `.sgd-wt-claim` present, timestamp within TTL (see below for `roc_claim_state`) | 🟩 **KEEP (live claim)** — never in the deletion plan, in any mode including `--force` |
+| **Recency guard** | worktree directory mtime within `SGD_WT_RECENCY_GUARD_MIN` (default 10) minutes **and** no `.sgd-wt-claim` present (a claim supersedes this) | 🟩 **KEEP (recently created)** — never in the deletion plan, in any mode including `--force`; a brand-new worktree with no artefacts is exactly the most dangerous moment; presume live pending confirmation |
 | Uncommitted changes | `git -C <wt> status --porcelain` non-empty | 🟥 VALUABLE — uncommitted (no SHA can recover this) |
 | Stash **attributed to this branch** | stash subject `WIP on <branch>:` / `On <branch>:` matches | 🟥 VALUABLE — stashed |
 | Unpushed commits not in any PR | ahead of upstream or no upstream, AND no open **or squash-merged** PR (see below) | 🟥 VALUABLE — unpushed |
 | Open PR branch | branch in the open-PR set | 🟩 KEEP (in flight) |
 | `main` / default branch / current worktree | — | 🟩 KEEP |
 | Clean + merged (incl. squash-merged), or clean + fully pushed with PR closed/merged | none of the above | ⬜ SAFE TO REMOVE |
+
+**Live ownership claim — `.sgd-wt-claim` (issue #1759).** The shared [`resume-or-create.sh`](../worktrees/resume-or-create.sh) helper writes a `.sgd-wt-claim` file (containing `<agent-id> <epoch-seconds>`) when a worker leases a worktree. The sweep reads it using the same `roc_claim_state` predicate:
+
+```bash
+source "${CLAUDE_PLUGIN_ROOT}/skills/worktrees/resume-or-create.sh"
+claim=$(roc_claim_state "$wt")
+# claim = "free" | "mine" | "held-fresh"
+```
+
+- **`held-fresh`** — another agent's claim is within the TTL (`SGD_WT_CLAIM_TTL_MIN`, default 30 min). Verdict: 🟩 **KEEP (live claim)**. The worktree **never** appears in the deletion plan, even with `--force`. This is the primary fix for the "brand-new worktree looks empty and gets swept" incident.
+- **`mine`** — this agent's own claim. This sweep is running in a different session than the worker, so `mine` means this session is sweeping its own worktree — same as the current-worktree guard: 🟩 KEEP.
+- **`free`** — no claim or expired. Proceed to the remaining signals (uncommitted, stash, unpushed, etc.) — the worktree is audited normally.
+
+An expired claim (older than the TTL with the owning agent presumably dead) self-heals: the worktree falls through to normal audit rules rather than being kept forever.
+
+**Recency guard (issue #1759).** When no `.sgd-wt-claim` is present (the worker died before writing one, or the worktree was created outside the claim-aware path), fall back to directory age: if the worktree directory's **mtime** is within `SGD_WT_RECENCY_GUARD_MIN` (default 10 minutes), presume it is live and classify 🟩 **KEEP (recently created)**. Check mtime portably:
+
+```bash
+# macOS
+wt_mtime=$(stat -f '%m' "$wt" 2>/dev/null)
+# Linux
+[ -z "$wt_mtime" ] && wt_mtime=$(stat -c '%Y' "$wt" 2>/dev/null)
+now=$(date +%s)
+age_min=$(( (now - wt_mtime) / 60 ))
+if [ "$age_min" -lt "${SGD_WT_RECENCY_GUARD_MIN:-10}" ]; then
+  # KEEP (recently created) — do not add to the deletion plan
+fi
+```
+
+The recency guard is a secondary net; the claim file is the real fix. A worktree that is both old (past recency) and claim-free is audited under normal rules.
 
 **Stash attribution — `git stash list` is repo-global.** All worktrees share one stash list, so "stash list non-empty" would let a single stash block every removal in the repo. Instead, attribute each stash to a branch via its subject line (`WIP on <branch>: …` / `On <branch>: …`) and only mark *that* branch/worktree VALUABLE. Stashes that match no candidate branch (or were made on `main`) are **a note in the final summary, never a removal blocker**.
 
@@ -205,6 +237,8 @@ Build a **single deletion plan** covering every ⬜ SAFE worktree/branch *plus* 
 
 Order matters: **worktrees → local branches → remote branches.** Remote deletion comes last, only for branches whose PR is merged/closed, and only as part of the confirmed plan (see the remote-first cascade hazard above).
 
+> ⚠️ **Label-mutation prohibition (issue #1759).** Phase 4 removes worktrees, branches, and remote branches. It **never** touches GitHub labels on PRs. No `gh pr edit --add-label`, no `gh pr edit --remove-label`, no `gh issue edit --remove-label`. Merge-gate labels (`pr-reviewing`, `pr-reviewed`) are owned by the review plane — a sweep that strips them corrupts a concurrent review's state machine (Incident 1, 2026-07-31).
+
 ### Windows junction guard (run before every `git worktree remove`)
 
 > ⚠️ **Windows data-loss hazard.** On Windows, repos whose worktrees are wired up by a junction-clone (NTFS directory junctions linking shared build artefacts such as `packages-shared/`, `api/backend-core/`, or `packages/core-*` into each worktree) will have `git worktree remove` — and any recursive `rm -rf` — **follow the junctions and delete the real target files**. This has caused loss of 1000+ source files in a single sweep. Always run this guard before removing a worktree path on Windows.
@@ -292,3 +326,5 @@ When given several repo directories, **fan out the read-only part, keep the dest
 8. **Windows junction guard is mandatory on Windows.** NTFS directory junctions inside a worktree are followed by `git worktree remove` and recursive deletes, destroying real target files. Always run Steps 4a–4b (detect junctions, unlink with `cmd /c rmdir`, verify gone) before any worktree removal on Windows.
 9. **A rescued/resumed worktree is rebased onto base and isolated-installed before its work is pushed or verified** (issue #951). The `../worktrees/rescue-guard.sh` guard is a default action on the Phase 3 "Push + draft PR" path, not an optional troubleshooting step — a stale branch must not merge behind main, and a junctioned `node_modules` must not let main's stale build masquerade as the worktree's verification.
 10. **A rescue is checked for supersession before it is pushed at all** (issue #1538). The `../worktrees/rescue-guard.sh supersession` preflight runs FIRST on the "Push + draft PR" path — a branch already merged elsewhere is Discarded (tip SHA recorded), never pushed as a duplicate or reverting PR (the 2026-07-23 incident: 3/3 rescued PRs superseded, one would have reverted ~1,808 lines).
+11. **Live ownership claims are sacrosanct** (issue #1759). A worktree carrying a fresh `.sgd-wt-claim` (within TTL) is **never** in the deletion plan — not in default mode, not in `--force`. The claim file is the primary signal that a running worker owns the worktree; the recency guard (directory mtime within 10 min) is a secondary net for the case where no claim was written yet. An expired claim self-heals: the worktree falls through to normal audit. The recency guard carries the same immunity under `--force`.
+12. **Sweeps never mutate merge-gate labels** (issue #1759). A sweep must **never** add, remove, or modify GitHub labels on PRs — specifically `pr-reviewing` and `pr-reviewed`. These labels are the property of the review plane (`/sgd:pr-review`'s termination contract), and a sweep that strips `pr-reviewing` mid-review corrupts the review's state machine. The sweep's job is worktree/branch lifecycle only; label state is out of scope.

@@ -119,34 +119,36 @@ A PR from a **rescued or resumed worktree** may carry `tsc`/test claims from a s
 
 `DIFF_RISK=$(rl_diff_risk "$PR" <bot_hot>)` (`bot_hot=1` when `BOT_FINDINGS` has a major/blocker). Record `diff_risk`.
 
-| Tier | Criteria (`high` = any one; `low` = all; `trivial` = a narrower gate checked before `low`) |
+| Tier | Criteria (`high` = any one; `low` = all; `trivial`/`generated` = narrower gates checked before `low`) |
 |---|---|
 | **trivial** | `rl_diff_trivial "$PR"` returns `1` (issue #973 — see below) |
+| **generated** | `rl_diff_generated "$PR"` returns `1` (issue #1757 — see below); checked after `trivial` |
 | **low** | ≤ ~150 **raw** lines, AND no security-sensitive file, AND no `major`/`blocker` in `BOT_FINDINGS` |
 | **medium** | anything not `low` or `high` |
-| **high** | security-sensitive paths (auth/payments/migrations/data-isolation), OR > ~400 **weighted** lines, OR a `major`/`blocker` in `BOT_FINDINGS` |
+| **high** | a security-sensitive path, OR > ~400 **weighted** lines, OR a `major`/`blocker` in `BOT_FINDINGS` |
 
-**Security-sensitive paths** — list in `review-lib.sh` (`rl_security_glob_regex`; `rl_security_files "$PR"` prints matches): `**/auth/**`, `**/middleware/**`, `**/*token*`, `**/*secret*`, `**/config/**`, `**/crypto*`, any DB migration. This one list drives the risk tier, `/security-review` trigger, and `@security-auditor` dispatch.
+**Security-sensitive paths** — the one `rl_security_glob_regex` list in `review-lib.sh` (`rl_security_files "$PR"` prints matches) drives the risk tier, `/security-review` trigger, and `@security-auditor` dispatch.
 
-**Test/doc-weighted lines (#984)** (`high`'s `> ~400` leg only; `rl_diff_weighted_lines` = raw minus test/doc files, fails closed to `weighted == raw`) and **`trivial` tier mechanics (#973)** (`rl_diff_trivial` returns `1` only for a provably non-semantic diff — whitespace-only or a single lockfile change with a passing check — fails closed to `0`; Phase 3/4/5.5 still run, Phase 5 pass-through takes precedence): [`dispatch-scaling.md`](references/dispatch-scaling.md).
+**Tier mechanics** — all fail closed; Phase 3/4/5.5 always run, Phase 5 pass-through wins; detail in [`dispatch-scaling.md`](references/dispatch-scaling.md): weighted `high` leg (#984), the `trivial` gate (#973), and the `generated` gate (#1757 — every changed file an artefact declared in the base-ref manifest `.sgd/generated-artefacts.tsv`).
 
 ### Dispatch scaling by tier
 
 | Tier | Dispatch | `specialist_dispatch:` |
 |---|---|---|
 | **trivial** | native Layer 1 `low` only — **no specialists ever** (not even on a bot major/blocker) | `skipped` |
+| **generated** | regenerate-and-byte-diff replaces the correctness lane (drift = **blocker** → full review); content-safety runs for published artefacts (#1757) | `reduced` |
 | **low + clean bot review** (no unresolved major/blocker) | **skip fresh specialist dispatch**; native Layer 1 `low`/`medium`, cite the bot review | `skipped` |
 | **low, no bot review** | Layer 1 `low`/`medium` + **one** specialist (`@code-reviewer`) | `reduced` |
 | **medium** | Layer 1 `high` + both bundled specialists | `full` |
 | **high risk** (auth/payments/migrations/data-isolation) — **always full regardless of bot signal** | Layer 1 `max`/`ultra` + both bundled + matching Layer 3 | `full` |
 
-Never downgrade a `high`-risk diff on a bot review alone. Phase 5 pass-through takes precedence over this section.
+Never downgrade a `high`-risk diff on a bot review alone. Phase 5 pass-through wins here.
 
 ### Budget (issues #688, #888)
 
-Per-tier **wall-clock / token / ~tool-call budget** (numbers in [`dispatch-scaling.md`](references/dispatch-scaling.md)). On exhaustion: stop waiting and report **partial results** with the **gate decision explained** (never silently consume unbounded time), record `budget_exceeded`/`partial`, and never silently promote a budget-exhausted high-risk review.
+Per-tier **wall-clock / token / ~tool-call budgets**, and the on-exhaustion rule (stop waiting, report **partial** with the gate decision, record `budget_exceeded`/`partial`, never silently promote a budget-exhausted high-risk review): [`dispatch-scaling.md`](references/dispatch-scaling.md).
 
-**Investigation depth & pragmatism (issue #888).** `DIFF_RISK` sets the investigation-depth tier up front (`high` → Layer 1 `max`/`ultra`). Default (`low`/`medium`): **fewer, high-confidence findings scoped to the diff**; reserve deep multi-source verification only for `high`-risk PRs. **Trust the PR's own tests** for a claim they mechanically prove — escalate to upstream-source verification only when no test covers it; keep every grep/search scoped to the files touched by the diff (exclude `node_modules`/`venv`/`site-packages`/`vendor`); read targeted excerpts, not whole files end-to-end (Windows `git` `:`-args: `MSYS_NO_PATHCONV=1`). Full guidance: [`dispatch-scaling.md`](references/dispatch-scaling.md).
+**Investigation depth & pragmatism (issue #888).** `DIFF_RISK` sets the investigation-depth tier up front (`high` → Layer 1 `max`/`ultra`; `low`/`medium` → **fewer, high-confidence findings scoped to the diff**, trusting the PR's own tests, deep verification reserved for `high`). Full guardrails (search scoping, excerpt-reading, Windows `MSYS_NO_PATHCONV=1`): [`dispatch-scaling.md`](references/dispatch-scaling.md).
 
 ### Claim the review (label gate)
 
@@ -240,7 +242,7 @@ quality_gates: pass | fail | not-run
 qa_evidence: <comment-url> | none | stale@<sha> | stale@unknown
 unresolved_threads: <count>   # must be 0 for a pass verdict
 tool_call_count: <count>      # Phase 2 only; 0 in phase5-passthrough
-diff_risk: trivial | low | medium | high
+diff_risk: trivial | generated | low | medium | high
 specialist_dispatch: skipped | reduced | full
 bot_findings_folded: <count>
 budget_exceeded: true | false
