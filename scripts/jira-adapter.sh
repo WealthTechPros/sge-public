@@ -9,8 +9,9 @@
 # reports `jira`. S1 ships the READ verbs (P1 list-dispatchable, P2 view-item,
 # P7 item-dependencies, P9 dispatch-label-config), the claim-mutex core
 # (P3 claim-item / P4 release-item), and the credential + allow-list +
-# redirect-pin boundary. The mutating comment/create/link ops (P5, P6, P8) are
-# S3 scope and deliberately absent.
+# redirect-pin boundary. S3 (#1701) adds the mutating comment/create/link ops
+# (P5 comment-item, P6 create-item — DP3 scope-gated, P8 link-close-on-merge).
+# Still absent: P7/P9's Jira realisations, which are S4 scope.
 #
 # Structure mirrors scripts/forgejo-adapter.sh (SPEC-094) point-for-point:
 # injection-safe field encoding (_ja_json_str = the _fa_json_str family), the
@@ -71,6 +72,12 @@
 #       Print, one per line, `<KEY>\t<open|closed>` for every issue this item
 #       is blocked by (link type "is blocked by"), state resolved via status
 #       CATEGORY (DR2 — never a localised status name).
+#   jira-adapter.sh search-items <project-key> <text> [open|closed|all] (read, P10)
+#       JQL `summary ~ "<text>"` scoped to <project-key>. State defaults to
+#       "open" (statusCategory != Done); "closed" = Done only; "all" = no
+#       state filter. Free text is JQL-escaped so it cannot break out of the
+#       string literal. Prints the Jira search JSON (same shape as
+#       list-dispatchable).
 #   jira-adapter.sh list-dispatchable <project-key> [<dispatch-label>]   (read, P1)
 #       Open (statusCategory != Done) items in <project-key> carrying the
 #       dispatch label, unassigned, excluding SGD_JIRA_CLAIM_STATUS when set.
@@ -82,6 +89,26 @@
 #       reporting the item already claimed.
 #   jira-adapter.sh release-item <issueKey>                          (MUTATING, P4)
 #       Fire the SGD_JIRA_RELEASE_TRANSITION_ID transition.
+#   jira-adapter.sh comment-item <issueKey> <body>                   (MUTATING, P5)
+#       Append a comment (claim notice, triage, exit report). The body is
+#       injection-encoded through _ja_json_str — free text can never close the
+#       JSON string early and inject a sibling key. A non-2xx is surfaced loud.
+#   jira-adapter.sh create-item <project-key> <summary> [<description>]  (MUTATING, P6)
+#       Open a new work item. SCOPE-GATED per DP3: needs JIRA_ADAPTER_ALLOW_WRITE=1
+#       AND the explicit JIRA_ADAPTER_ALLOW_CREATE=1 opt-in — the common-case
+#       dispatch token must not be able to create items in the customer's Jira.
+#       Issue type = SGD_JIRA_ISSUETYPE (default Task). Prints the created JSON
+#       ({key,...}). All free text is injection-encoded.
+#   jira-adapter.sh link-close-on-merge <issueKey> <change-url> [<title>]  (MUTATING, P8)
+#       Express "merging this change closes item N" on the Jira item. Jira has
+#       NO native link to an externally-hosted PR (#1150); the CORRELATION
+#       CONVENTION is a development-panel REMOTE LINK on the issue carrying the
+#       merged change URL, with a stable globalId (= the URL) so a re-run is
+#       idempotent, not a duplicate. When SGD_JIRA_CLOSE_TRANSITION_ID is set the
+#       close transition is ALSO fired. FAILURE MODE: a non-2xx from the
+#       remote-link POST (or a non-204 from the optional transition) is surfaced
+#       non-zero — the linkage is never silently swallowed, so a caller must not
+#       record an unlinked merge as linked.
 # END_USAGE
 #
 # NOTE: shell state does NOT persist across agent tool calls; skills re-derive
@@ -266,6 +293,59 @@ _ja_require_write() { # <op-name>
   fi
 }
 
+# create-item (P6) is SCOPE-GATED beyond the write boundary (DP3): it is
+# EXCLUDED from the default token scope and enabled only via this explicit
+# opt-in, so the common-case dispatch token cannot create work items in the
+# customer's Jira. Checked AFTER the write boundary, still BEFORE any
+# credential/host/project resolution — a caller lacking the opt-in fails loud
+# on the scope gate, not on an auth complaint.
+_ja_require_create() {
+  if [ "${JIRA_ADAPTER_ALLOW_CREATE:-}" != "1" ]; then
+    _ja_err "refusing create-item: set JIRA_ADAPTER_ALLOW_CREATE=1 to permit work-item creation — P6 is EXCLUDED from the default token scope (SPEC-105 DP3); the common-case dispatch token must not be able to create items in the customer's Jira"
+    return 1
+  fi
+}
+
+_ja_mktemp() {
+  mktemp "${TMPDIR:-/tmp}/jira-adapter.XXXXXX" 2>/dev/null \
+    || { _ja_err "mktemp failed — cannot buffer the REST response body"; return 1; }
+}
+
+# POST a JSON body to a MUTATING endpoint and require a 2xx. A non-2xx is
+# surfaced LOUD (status + a bounded body snippet) — a failed write is NEVER
+# silently swallowed, so a caller cannot record an unlinked/uncommented item as
+# done. Prints the response body on success (create-item wants the new key).
+# The body reaches curl via _ja_api_post_status: credential as config lines on
+# stdin (never argv), allow-list before auth, redirects pinned to https.
+_ja_post_expect() { # <op-name> <path> <json-body>
+  local op="$1" path="$2" body="$3" status tmp snip
+  tmp="$(_ja_mktemp)" || return 1
+  # The temp holds only a (non-secret, mode-0600) Jira response body. It is
+  # removed on every RETURN path below — success, non-2xx, and post-call failure
+  # — via _ja_drop_tmp, which ALSO clears the signal trap.
+  #
+  # A RETURN trap is deliberately NOT used: set inside a function it persists
+  # and refires on outer returns where `tmp` is unbound (set -u). INT/TERM is
+  # safe because _ja_drop_tmp clears it before this frame goes away, so the
+  # handler can never outlive the `tmp` it closes over.
+  trap 'rm -f "$tmp"; trap - INT TERM' INT TERM
+  _ja_drop_tmp() { rm -f "$tmp"; trap - INT TERM; }
+  status="$(_ja_api_post_status "$path" "$body" "$tmp")" || { _ja_drop_tmp; return 1; }
+  case "$status" in
+    2[0-9][0-9])
+      cat "$tmp"
+      _ja_drop_tmp
+      return 0
+      ;;
+    *)
+      snip="$(head -c 300 "$tmp" 2>/dev/null | tr '\n' ' ')"
+      _ja_drop_tmp
+      _ja_err "$op failed (HTTP $status) — the write did not land and is not silently swallowed${snip:+; response: $snip}"
+      return 1
+      ;;
+  esac
+}
+
 # Authenticated GET. Read path: allow-list before credential, redirects refused
 # and pinned to https so the credential can never ride a cross-host redirect.
 # The credential is RESOLVED FIRST (fail loud — an empty config must never
@@ -304,6 +384,20 @@ _ja_api_post_status() { # <path> <json-body> [<body-out-file>]
     -H "Content-Type: application/json" -H "Accept: application/json" \
     -d "$2" -o "${3:-/dev/null}" -w '%{http_code}' \
     "${_JA_API_BASE}$1"
+}
+
+# Escape free text for safe inclusion inside a JQL "..." string literal.
+# JQL string literals are delimited by double quotes; inside them only `\` and
+# `"` need escaping (backslash-prefix). This is NOT JSON encoding — JQL has its
+# own quoting rules. Backslash is escaped FIRST so the subsequent quote escape
+# cannot double-escape it.
+_ja_jql_escape() { # <raw-text> -> stdout: escaped text (no surrounding quotes)
+  local s="$1"
+  s="${s//\\/\\\\}"    # backslash first
+  s="${s//\"/\\\"}"    # then double-quote
+  s="${s//$'\n'/ }"    # newline → space (Jira Cloud rejects literal newlines in JQL strings)
+  s="${s//$'\r'/ }"    # carriage return → space
+  printf '%s' "$s"
 }
 
 # URL-encode one query-string value. jq is the correct encoder; the fallback
@@ -359,7 +453,10 @@ _ja_transition() { # <issueKey> <transition-id> <claim|release>
 }
 
 _ja_usage() {
-  [ -n "${1:-}" ] && _ja_err "$1"
+  # `if`, not `[ -n … ] && …`: the short-circuit form returns non-zero when the
+  # arg is empty, which would abort the caller under `set -e` if this ever
+  # stopped being followed by `exit 2`.
+  if [ -n "${1:-}" ]; then _ja_err "$1"; fi
   # awk, not sed: BSD/macOS sed rejects the `{ /re/d; p }` one-liner address
   # form ("extra characters at the end of p command"), which broke printing
   # this block exactly when a caller had the subcommand wrong (issue #1675).
@@ -400,6 +497,27 @@ _ja_main() {
            (if .fields.status.statusCategory.key == "done" then "closed" else "open" end)]
         | @tsv'
       ;;
+    search-items)
+      # P10 — free-text search by summary, scoped to a project. The search
+      # text is JQL-escaped (_ja_jql_escape) so it cannot break out of the
+      # `summary ~ "..."` literal — the same injection treatment the S1 read
+      # path applies to its JQL atoms via character-class validation, but here
+      # the input is intentionally free-form so escaping replaces validation.
+      [ -n "${2:-}" ] || _ja_usage 'search-items needs <project-key> <text>'
+      [ -n "${3:-}" ] || _ja_usage 'search-items needs <project-key> <text>'
+      _ja_require_project_key "$2" || exit 1
+      local search_text="$3" search_state="${4:-open}"
+      local escaped
+      escaped="$(_ja_jql_escape "$search_text")"
+      local jql="project = $2 AND summary ~ \"$escaped\""
+      case "$search_state" in
+        open)   jql="$jql AND statusCategory != Done" ;;
+        closed) jql="$jql AND statusCategory = Done" ;;
+        all)    : ;;  # no state filter
+        *)      _ja_err "search-items: invalid state '$search_state' — use open|closed|all"; exit 2 ;;
+      esac
+      _ja_api_get "/rest/api/2/search?jql=$(_ja_urlencode "$jql")&fields=summary,description,labels,assignee,status,issuelinks"
+      ;;
     list-dispatchable)
       # P1 — open items carrying the dispatch label, unassigned, minus the
       # claimed status when configured. JQL is assembled ONLY from atoms that
@@ -437,6 +555,72 @@ _ja_main() {
         exit 1
       }
       _ja_transition "$2" "${SGD_JIRA_RELEASE_TRANSITION_ID}" "release" || exit 1
+      ;;
+    comment-item)
+      # P5 — MUTATING. Boundary FIRST (before key/credential/host/project), so a
+      # read-path caller gets the write-boundary error, not an auth complaint.
+      # The body is injection-encoded via _ja_json_str — never hand-interpolated.
+      _ja_require_write "comment-item" || exit 1
+      [ -n "${2:-}" ] && [ "$#" -ge 3 ] || _ja_usage 'comment-item needs <issueKey> <body>'
+      _ja_require_issue_key "$2" || exit 1
+      _ja_post_expect "comment-item" "/rest/api/2/issue/$2/comment" \
+        "{\"body\":$(_ja_json_str "$3")}" >/dev/null
+      ;;
+    create-item)
+      # P6 — MUTATING + SCOPE-GATED (DP3): needs the write boundary AND the
+      # explicit create opt-in, both checked before any credential/host/project
+      # resolution. Every free-text field (summary, description, issuetype,
+      # project key) is injection-encoded; the project key is ALSO validated
+      # against its strict class.
+      _ja_require_write "create-item" || exit 1
+      _ja_require_create || exit 1
+      [ -n "${2:-}" ] && [ "$#" -ge 3 ] || _ja_usage 'create-item needs <project-key> <summary> [<description>]'
+      _ja_require_project_key "$2" || exit 1
+      local _ja_itype="${SGD_JIRA_ISSUETYPE:-Task}"
+      local _ja_fields
+      _ja_fields="{\"project\":{\"key\":$(_ja_json_str "$2")},\"summary\":$(_ja_json_str "$3"),\"issuetype\":{\"name\":$(_ja_json_str "$_ja_itype")}"
+      # Arity, not emptiness: an explicitly-supplied empty description is a
+      # deliberate "clear the field" and must reach Jira, whereas an omitted
+      # 4th arg must leave `description` absent entirely.
+      if [ "$#" -ge 4 ]; then
+        _ja_fields="${_ja_fields},\"description\":$(_ja_json_str "$4")"
+      fi
+      _ja_fields="${_ja_fields}}"
+      _ja_post_expect "create-item" "/rest/api/2/issue" "{\"fields\":${_ja_fields}}"
+      ;;
+    link-close-on-merge)
+      # P8 — MUTATING. Jira has NO native link to an externally-hosted PR
+      # (#1150). CORRELATION CONVENTION: record the merged change as a
+      # development-panel REMOTE LINK on the issue, globalId = the change URL so
+      # a re-run is idempotent (Jira upserts on globalId) rather than a
+      # duplicate. When SGD_JIRA_CLOSE_TRANSITION_ID is configured the close
+      # transition is ALSO fired. Both the remote-link POST and the optional
+      # transition fail LOUD on a non-2xx/non-204 — the linkage is never
+      # silently swallowed, so a caller cannot record an unlinked merge as
+      # linked. The change URL only ever lands inside a JSON string value
+      # (encoded), never a URL path, so no traversal surface is opened.
+      _ja_require_write "link-close-on-merge" || exit 1
+      [ -n "${2:-}" ] && [ -n "${3:-}" ] || _ja_usage 'link-close-on-merge needs <issueKey> <change-url> [<title>]'
+      _ja_require_issue_key "$2" || exit 1
+      local _ja_url="$3" _ja_title="${4:-Closed by merged change $3}"
+      case "$_ja_url" in
+        http://*|https://*) : ;;
+        *) _ja_err "link-close-on-merge: <change-url> '$3' is not an http(s) URL"; exit 1 ;;
+      esac
+      _ja_post_expect "link-close-on-merge (remote link)" "/rest/api/2/issue/$2/remotelink" \
+        "{\"globalId\":$(_ja_json_str "$_ja_url"),\"object\":{\"url\":$(_ja_json_str "$_ja_url"),\"title\":$(_ja_json_str "$_ja_title")}}" >/dev/null
+      if [ -n "${SGD_JIRA_CLOSE_TRANSITION_ID:-}" ]; then
+        case "${SGD_JIRA_CLOSE_TRANSITION_ID}" in
+          ''|*[!0-9]*) _ja_err "invalid SGD_JIRA_CLOSE_TRANSITION_ID '${SGD_JIRA_CLOSE_TRANSITION_ID}' — must be numeric"; exit 1 ;;
+        esac
+        local _ja_tstatus
+        _ja_tstatus="$(_ja_api_post_status "/rest/api/2/issue/$2/transitions" \
+          "{\"transition\":{\"id\":$(_ja_json_str "${SGD_JIRA_CLOSE_TRANSITION_ID}")}}")" || exit 1
+        case "$_ja_tstatus" in
+          204) : ;;
+          *) _ja_err "link-close-on-merge: close transition for '$2' failed (HTTP $_ja_tstatus) — the merge remote link was recorded but the close transition did not apply; not silently swallowed (check SGD_JIRA_CLOSE_TRANSITION_ID)"; exit 1 ;;
+        esac
+      fi
       ;;
     -h|--help|help|'')
       _ja_usage
