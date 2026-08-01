@@ -1,8 +1,8 @@
 ---
-description: Use when a GitHub issue (or a batch of them) must be gated as build-ready before any agent picks it up — clear acceptance criteria, bounded scope, no unresolved open questions or decisions, dependencies resolved, AND classified against the repo's SGD governance artefacts — so a swarm or pipeline only burns implementation effort on well-defined, governed work. This audit folds in the /sgd:governance-trace classification (opt-out via --skip-governance) so callers make one skill hop, not two. Invoke when asked to "check build-readiness of these issues", "gate the backlog before swarming", or when /sgd:available-issues / /sgd:issue-swarm dispatches its per-issue go/no-go. Read-only triage, not implementation; for the deep per-spec entry check use /sgd:sgd-preflight.
+description: Use when a GitHub issue (or a batch of them) must be gated as build-ready before any agent picks it up — clear acceptance criteria, bounded scope, no unresolved open questions or decisions, dependencies resolved, AND classified against the repo's SGD governance artefacts — so a swarm or pipeline only burns implementation effort on well-defined, governed work. This audit folds in the /sgd:governance-trace classification (opt-out via --skip-governance) so callers make one skill hop, not two. Invoke when asked to "check build-readiness of these issues", "gate the backlog before swarming", or when /sgd:available-issues / /sgd:issue-swarm dispatches its per-issue go/no-go. Writes routing verdict labels to issues (Step 3R); does not implement issues. For the deep per-spec entry check use /sgd:sgd-preflight.
 argument-hint: "<issue# | issue#,issue# | --milestone <name> | --module <name>> [--skip-governance]"
 context: fork
-allowed-tools: Read, Grep, Glob, Agent, Bash(gh issue view:*), Bash(gh issue list:*), Bash(gh issue comment:*), Bash(gh label list:*), Bash(git ls-files:*), Bash(git log:*)
+allowed-tools: Read, Grep, Glob, Agent, Bash(gh issue view:*), Bash(gh issue list:*), Bash(gh issue comment:*), Bash(gh issue edit:*), Bash(gh label create:*), Bash(gh label list:*), Bash(git ls-files:*), Bash(git log:*)
 ---
 
 # Build-Ready Audit — Gate Issues Before They Flow
@@ -18,10 +18,10 @@ both together: callers make **one skill hop, not two** (issue #872).
 ## Out of scope
 - Deep per-spec entry checks (that is `/sgd:sgd-preflight`)
 - Implementing any issue
-- Writing to the repo (optional comment on issues is the only permitted write,
-  and only in standalone mode). The folded governance classification runs
-  headlessly with `--no-comment`, so this audit stays read-only by default —
-  see Step 2G.
+- Writing to the repo. The audit's issue-side writes are limited to routing
+  verdict labels (Step 3R — applied in both standalone and dispatched mode) and
+  optional comments (standalone only, or `superseded` citations). The folded
+  governance classification runs headlessly with `--no-comment` — see Step 2G.
 - The `/sgd:sgd-implement` Phase 0.5 governance gate is a **separate** fold
   (issue #949); this audit is the batch build-ready front end, not the
   per-issue implement gate. Both reuse the same `/sgd:governance-trace`
@@ -38,11 +38,11 @@ a deep per-spec entry check that runs once an issue is already claimed; this aud
 is a quick go/no-go applied across a *set* of candidates so under-specified or
 ungoverned issues never reach a worktree.
 
-This skill runs as a forked, read-only triage (`context: fork`). It never
-modifies the repo. Its **only optional write** is a clarifying comment on an
-audited issue (`gh issue comment`), and only in standalone mode when the user
-asks for the verdict to be recorded — the dispatched flow writes nothing and
-just returns the JSON.
+This skill runs as a forked triage (`context: fork`). It never modifies the
+repo checkout. Its issue-side writes are: **routing verdict labels** (Step 3R — applied
+in both standalone and dispatched mode so the verdict is always a recorded
+state), **optional comments** (standalone mode, or `superseded` citations which
+always post), and the folded governance-trace's own always-post exceptions.
 
 It is consumed two ways:
 
@@ -275,6 +275,101 @@ it — e.g. `NOT_READY — no acceptance criteria and no SPEC link (2A); blocked
 
 ---
 
+## Step 3R: Apply Routing Verdict Label (per issue)
+
+Every audited non-ready issue must leave with exactly **one** routing verdict
+label — making the triage outcome a recorded, filterable state rather than an
+unlabelled gap that accumulates silently (the 14-closeable-issues failure mode
+from #1762).
+
+Three verdict labels exist (create them if missing on the target repo — see the
+create-if-missing note below, and never `--force`):
+
+| Label | Colour | When to apply |
+|-------|--------|---------------|
+| `needs-human` | `#B60205` (red) | The issue requires a human action a worker cannot perform — a tenant write, a legal signature, a manual attestation, a live-environment change, or a decision that only a named person can make. Well-specified but not worker-dispatchable. **Dual-use label — see the warning below.** |
+| `needs-decision` | `#FBCA04` (yellow) | An unresolved decision or open question blocks the work (gate 2C failed). The decision-holder must weigh in before dispatch. |
+| `superseded` | `#C2E0C6` (light green) | The issue is no longer relevant — a newer issue, spec, or merged PR already covers the work, or the issue was a duplicate. |
+
+### Application rules
+
+1. **Exactly one verdict label per non-ready issue.** If the issue already
+   carries a different verdict label, remove it before applying the new one —
+   verdicts do not stack.
+2. **READY issues get no verdict label** — their recorded state is `sgd-ready`
+   (which they already carry to have entered the audit).
+3. **TOO_LARGE issues get `needs-decomposition`** — the label already exists on
+   this repo and is the recorded state for "route to `/sgd:decompose-issue`".
+   Leaving them bare would reopen the accumulation gap this step closes: an
+   audited oversized issue would be indistinguishable from an unaudited one.
+4. **Superseded verdicts must cite the superseding artefact.** When applying
+   `superseded`, also post a comment: `Superseded by #<N>` (or
+   `Superseded by SPEC-NNN` / `Superseded by PR #NNN`) — the label alone
+   is not self-documenting.
+5. **No auto-closing.** Closures remain the human owner's call. Applying
+   `superseded` records the verdict; it does not close the issue.
+
+### `needs-human` is dual-use — never reset it
+
+`needs-human` predates this step as a **PR auto-merge hold** label, and it is
+load-bearing there: `sgd-auto-merge.yml`, `hold-gate.yml`,
+`.github/scripts/hold-labels.txt`, `services/pr-monitor-pod/rearm_lane.py`,
+`services/review-daemon-poc/github_adapter.py`, and the SPEC-071 regulated
+sign-off gate, which applies it as its hold mechanism. Those consumers all read
+labels on **pull requests**; this step writes labels on **issues**, so the two
+uses coexist without affecting merge behaviour. Its description must name both
+uses, and its colour stays `#B60205` so a held PR still looks like a held PR.
+
+This is why the creates below use plain `gh label create` and **never
+`--force`**. `--force` turns create-if-missing into reset-to-my-values, which
+would silently overwrite the SPEC-071 hold semantics on every repo this audit
+ever sweeps.
+
+### Ensure labels exist on the target repo
+
+Before applying a verdict label, ensure it exists. These are create-if-missing:
+a create against an existing label fails harmlessly and is discarded, leaving
+any established description and colour intact.
+
+```bash
+gh label create "needs-human" --repo "$TARGET" --color "B60205" --description "Human hold: on a PR, blocks bot auto-merge; on an issue, triage verdict = needs hands-on human input" 2>/dev/null
+gh label create "needs-decision" --repo "$TARGET" --color "FBCA04" --description "Triage verdict: unresolved decision blocks work — resolve before dispatch" 2>/dev/null
+gh label create "superseded" --repo "$TARGET" --color "C2E0C6" --description "Triage verdict: superseded by another artefact — see comment for reference" 2>/dev/null
+```
+
+### Apply the label
+
+```bash
+# Remove any stale routing label, then apply the current one
+for old in needs-human needs-decision superseded needs-decomposition; do
+  gh issue edit "$N" --repo "$TARGET" --remove-label "$old" 2>/dev/null
+done
+gh issue edit "$N" --repo "$TARGET" --add-label "$VERDICT_LABEL"
+```
+
+### Mapping NOT_READY reasons to verdict labels
+
+| Primary failing gate | Verdict label | Notes |
+|---------------------|---------------|-------|
+| 2A (no acceptance criteria) + body signals human-gated action | `needs-human` | The issue is well-enough understood but only a human can do it |
+| 2A (no acceptance criteria) + no human-gate signal | `needs-decision` | Missing criteria usually means nobody has decided what "done" is yet, so the unblock is a scoping decision rather than hands-on work. When the criteria are merely unwritten but the intent is already settled, that is authoring work — use `needs-human` instead |
+| 2C (open questions / decisions) | `needs-decision` | The canonical case |
+| 2D (blocked dependency on human action) | `needs-human` | Blocked on a human, not on code |
+| 2D (blocked dependency on code) | `blocked` | The existing dependency label — not a verdict label, but still a recorded state, so the issue never leaves the audit bare. It clears when the dependency merges |
+| 2B (oversized) | `needs-decomposition` | Rule 3 — route to `/sgd:decompose-issue`, then re-audit the children |
+| Issue body/comments indicate superseded or duplicate | `superseded` | Always cite the superseding artefact |
+
+When the failing gate is ambiguous (e.g. 2A + 2C both fail), prefer the
+**more specific** label: `needs-decision` over a generic NOT_READY drop. When
+the issue explicitly requires a named person or a non-code action, prefer
+`needs-human`.
+
+**Dispatched (headless) mode:** apply the label silently (no comment unless
+`superseded`). The label is the machine-readable signal; the rationale is in
+the returned JSON.
+
+---
+
 ## Step 4: Report
 
 ### Standalone (human-readable)
@@ -288,7 +383,7 @@ Step-2G verdict (omit the column entirely when `--skip-governance` was passed):
 | Issue | Verdict | Governance | Rationale |
 |-------|---------|------------|-----------|
 | #256  | READY | MATCHES_EXISTING (SPEC-088) | AC present; no open QDs; deps clear; matches SPEC-088 unchanged |
-| #261  | NOT_READY | NO_SPEC_WARRANTED | No acceptance criteria, no SPEC link (2A); chore, no spec needed |
+| #261  | NOT_READY `needs-decision` | NO_SPEC_WARRANTED | No acceptance criteria, no SPEC link (2A); chore, no spec needed |
 | #270  | TOO_LARGE | NEEDS_NEW_SPEC | 6 independent deliverables across 3 modules (2B) → decompose; no capability maps |
 | #298  | READY | MATCHES_EXISTING | AC present; deps clear; **executes in acme/client-onboarding, not the tracking repo** (2R) |
 
@@ -297,10 +392,11 @@ Step-2G verdict (omit the column entirely when `--skip-governance` was passed):
 **Governance holds (human review):** any `MATCHES_EXISTING_MODIFIED`, `NOT_SGD_SCOPE`, or low-confidence match
 ```
 
-If the user asked for the verdict to be recorded on an issue, post the rationale
-with `gh issue comment <N> --body "..."` — otherwise write nothing (the folded
-governance pass ran with `--no-comment`, so it wrote nothing beyond
-governance-trace's own always-post exceptions).
+Routing verdict labels (Step 3R) are always applied — they are not conditional
+on user request. If the user also asked for the rationale to be recorded as a
+comment, post it with `gh issue comment <N> --body "..."` — otherwise post no
+comment (the folded governance pass ran with `--no-comment`, so it wrote nothing
+beyond governance-trace's own always-post exceptions and `superseded` citations).
 
 ### Dispatched (headless)
 
@@ -324,6 +420,7 @@ End by returning exactly this shape (one `results[]` entry per audited issue):
       "specRef": "SPEC-088",
       "executionRepo": "acme/client-onboarding",
       "executionRepoDiffers": true,
+      "routingVerdict": null,
       "blockers": [],
       "governance": {
         "verdict": "MATCHES_EXISTING",
@@ -345,6 +442,7 @@ End by returning exactly this shape (one `results[]` entry per audited issue):
       "specRef": null,
       "executionRepo": "acme/hub",
       "executionRepoDiffers": false,
+      "routingVerdict": "needs-decision",
       "blockers": ["acceptance"],
       "governance": {
         "verdict": "NO_SPEC_WARRANTED",
@@ -374,6 +472,12 @@ End by returning exactly this shape (one `results[]` entry per audited issue):
   `agent-lock` / PR at the execution repo while status/labels stay on the
   tracking issue. A malformed field surfaces as a `dependencies` blocker
   (unresolvable dispatch target).
+- `routingVerdict` — the routing label applied to the issue (Step 3R): one of
+  `"needs-human"` | `"needs-decision"` | `"superseded"` | `"needs-decomposition"`
+  | `"blocked"` | `null`. `null` only for `READY` issues, whose recorded state is
+  `sgd-ready`. Every non-ready audited issue carries a non-null value —
+  `"needs-decomposition"` for `TOO_LARGE`, `"blocked"` when the sole blocker is a
+  code dependency — so no audited issue leaves the sweep unlabelled.
 - `blockers[]` — the gate keys that failed (`acceptance`, `scope`,
   `openQuestions`, `dependencies`); empty for `READY`.
 - `governance` — the folded Step-2G classification (governance axis), carrying

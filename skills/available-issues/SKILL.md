@@ -122,6 +122,12 @@ The **`orchestrator-only`** label encodes exactly that bit. It is orthogonal to 
 
 This replaces the fragile prior practice of encoding the exclusion as prose in a worker brief ("never touch infra/…") — a rule a worker had to re-derive by inspecting each issue's likely diff surface. Making it a label means the exclusion is declared on the issue, auditable at a glance, and enforced mechanically by the same claim-gate query, so "why was this ready issue never picked up?" is answerable from the issue itself.
 
+#### Routing verdict labels (triage exclusions)
+
+Routing verdict labels — `needs-human`, `needs-decision`, `superseded`, plus `needs-decomposition` for oversized issues — are applied by `/sgd:build-ready-audit` (Step 3R) to issues that are not worker-dispatchable for a specific, recorded reason. Discovery excludes all four from the ready pool alongside `orchestrator-only` and `blocked`. Unlike `orchestrator-only` (which is set at authoring time), verdict labels are set by the triage/audit sweep and can be cleared when the blocking condition resolves — e.g. a `needs-decision` issue is re-triaged as `sgd-ready` once the decision is recorded.
+
+`needs-human` is dual-use: an auto-merge hold on a PR (SPEC-071, hold-gate), this triage verdict on an issue. No collision — hold consumers read PR labels, the audit writes issue labels.
+
 ```bash
 # Resolve DISPATCH_LABEL via the port. An UNSET key legitimately yields empty
 # (= no filter, the documented default). An INVALID value is different: the
@@ -149,7 +155,11 @@ if [ -n "$DISPATCH_LABEL" ]; then
       (.assignees | length == 0) and
       ([.labels[].name] | index("agent-lock") | not) and
       ([.labels[].name] | index("blocked") | not) and
-      ([.labels[].name] | index("orchestrator-only") | not)
+      ([.labels[].name] | index("orchestrator-only") | not) and
+      ([.labels[].name] | index("needs-human") | not) and
+      ([.labels[].name] | index("needs-decision") | not) and
+      ([.labels[].name] | index("superseded") | not) and
+      ([.labels[].name] | index("needs-decomposition") | not)
     )] | sort_by(.number)')
   # Separate, read-only pass: issues that lack the dispatch label entirely
   # (they may be perfectly valid issues, just not yet quality-confirmed).
@@ -164,7 +174,11 @@ else
       (.assignees | length == 0) and
       ([.labels[].name] | index("agent-lock") | not) and
       ([.labels[].name] | index("blocked") | not) and
-      ([.labels[].name] | index("orchestrator-only") | not)
+      ([.labels[].name] | index("orchestrator-only") | not) and
+      ([.labels[].name] | index("needs-human") | not) and
+      ([.labels[].name] | index("needs-decision") | not) and
+      ([.labels[].name] | index("superseded") | not) and
+      ([.labels[].name] | index("needs-decomposition") | not)
     )] | sort_by(.number)')
   AWAITING_LABEL="[]"
 fi
