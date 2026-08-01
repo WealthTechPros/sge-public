@@ -1,6 +1,6 @@
 {
   "name": "sgd",
-  "version": "4.32.8",
+  "version": "4.32.9",
   "description": "WealthTech Pros SGD methodology plugin — shared skills for all WTP repos",
   "author": {
     "name": "WealthTech Pros",
@@ -8,6 +8,6 @@
     "url": "https://wealthtechpros.com"
   },
   "repository": "https://github.com/WealthTechPros/sgd-public",
-  "license": "UNLICENSED",
+  "license": "LicenseRef-WTP-SGD-Commercial",
   "homepage": "https://wealthtechpros.com"
 }

@@ -59,8 +59,8 @@ cp <plugin>/packages/sgd-dashboard/assets/tokens.json        scripts/tokens.json
 Keep `build-dashboard.mjs`, `sgd-dashboard.css` and `tokens.json` together — the engine
 resolves the stylesheet and design tokens beside itself. **No logo is copied** — the dashboard
 renders with a text-only header unless a brand is applied (see below).
-(`<plugin>` is this plugin's root — the directory containing `packages/sgd-dashboard/`.) If the repo
-prefers a package dependency, `npm i -D @wealthtechpros/sgd-dashboard` instead and skip the copy.
+(`<plugin>` is this plugin's root — the directory containing `packages/sgd-dashboard/`.) Vendoring is
+the supported path — the dashboard engine is distributed with this plugin, not from a public registry.
 
 ### 3 — Scaffold `sgd-dashboard.config.json`
 Start from `packages/sgd-dashboard/sgd-dashboard.config.example.json`. **Pre-fill from the repo**, then
