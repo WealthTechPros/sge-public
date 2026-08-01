@@ -95,12 +95,12 @@ Run these commands once per machine inside Claude Code.
 
 > **This README is copied verbatim into `WealthTechPros/sgd-public`** by `.github/workflows/publish-public.yml` (no rewrite step), so anyone reading it there is an external adopter who **cannot** clone `WealthTechPros/sgd`. Keep the public source listed first, and never reduce this block to the private ref alone — that is what made the public install instructions unusable (#1713).
 
-**Install the plugin** into the current repo:
+**Install the plugin** (one-time, per machine):
 ```
 /plugin install sgd
 ```
 
-After install, the SGD commands (`/sgd:init`, `/sgd:sgd-implement`, etc.) become available in every Claude Code session for that repo.
+On Claude Code CLI this installs at **user scope**, not per repo: the SGD commands (`/sgd:init`, `/sgd:sgd-implement`, etc.) become available in every Claude Code session on your machine, whatever project you are working in. There is nothing to repeat per project and nothing to commit to a repo to make it work. On GitHub Copilot CLI the same command works, but skill loading can additionally be gated per repository — see [`docs/copilot-cli-install.md`](docs/copilot-cli-install.md).
 
 **Keep it up to date:**
 ```
@@ -115,6 +115,8 @@ The `SessionStart` hook will nudge you when a newer version is available.
 > for Copilot-CLI-specific install mechanics and a known Windows AV/EDR
 > failure mode (`Access is denied. (os error 5)`) and two working fixes,
 > including one that needs no admin rights.
+
+> **Installing SGD at an organisation outside WTP?** [`docs/external-install.md`](docs/external-install.md) is the standalone install guide for external adopters — install, supported surfaces, updates, licence, and support — and is the canonical statement of install scope.
 
 ---
 
