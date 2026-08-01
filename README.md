@@ -169,15 +169,21 @@ CI uses a **Doppler service token** stored as a GitHub secret (`DOPPLER_TOKEN_ST
 
 ---
 
-### 3. Enable the commit-msg trailer hook (one-time, per clone)
+### 3. Enable the repo's git hooks (one-time, per clone)
 
-Every commit in this repo must carry a `Spec: SPEC-NNN`/`SGD-NNN` or `SGD-Override: <STEP>; <reason>` trailer (see `skills/sgd-init/templates/change-protocol.md` — the protocol template this repo authors for every onboarded repo, and, as of this workflow, also dogfoods on itself) — `/sgd:commit` emits this automatically, but a local hook catches commits made outside it too. `core.hooksPath` is a per-clone git config setting, not something a commit can carry — run this once per clone:
+`core.hooksPath` is a per-clone git config setting, not something a commit can carry — run this once per clone:
 
 ```bash
 git config core.hooksPath .githooks
+# or: ./scripts/install-git-hooks.sh   (bash)  /  ./scripts/install-git-hooks.ps1  (PowerShell)
 ```
 
-The hook (`.githooks/commit-msg`) warns on a missing trailer; it does not block. The `require-commit-trailer.yml` CI workflow is the actual enforcement point — it fails the PR check if any commit lacks the trailer, so a locally-skipped warning is still caught before merge.
+That wires both tracked hooks (see [`.githooks/README.md`](.githooks/README.md)):
+
+- **`commit-msg`** — every commit in this repo must carry a `Spec: SPEC-NNN`/`SGD-NNN` or `SGD-Override: <STEP>; <reason>` trailer (see `skills/sgd-init/templates/change-protocol.md` — the protocol template this repo authors for every onboarded repo, and, as of this workflow, also dogfoods on itself). `/sgd:commit` emits this automatically, but the hook catches commits made outside it too. It warns; it does not block. The `require-commit-trailer.yml` CI workflow is the actual enforcement point — it fails the PR check if any commit lacks the trailer, so a locally-skipped warning is still caught before merge.
+- **`prepare-commit-msg`** — appends an `Agent-Id: claude-code/<session>` trailer to **agent-authored** commits, so Zero-Trust control ZT-5 / C11 (wtp-org#373) is verifiable from git history. No-op for human commits. **Agent sessions working in this repo must enable the hook** so their commits carry the trailer.
+
+`agent-id-hook-check.yml` verifies the Agent-Id hook is vendored and tracked executable; it cannot see your local `core.hooksPath`, so the step above is still required per clone.
 
 ---
 
