@@ -94,7 +94,8 @@ A Forgejo PR is green when:
 
 ### Token prerequisites (Forgejo)
 
-Set `FORGEJO_API_TOKEN` (preferred) or `GITEA_TOKEN` in Doppler. Declare the
+Set `FORGEJO_API_TOKEN` (preferred) or `GITEA_TOKEN` in the environment, via
+whichever secret manager the repo already uses. Declare the
 host in `SGD_FORGEJO_HOSTS`. The adapter refuses loud on first authenticated
 call when either is missing — the fix never proceeds silently.
 
