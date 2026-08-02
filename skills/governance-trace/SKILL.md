@@ -2,7 +2,7 @@
 description: Use to classify a GitHub issue against a repo's SGD governance artefacts — Vision, Capability Model, Feature Specs — before any code is written. Determines whether the work matches an existing spec unchanged, would modify an existing spec's stated requirement, needs a new spec (capability gap), needs no spec (chore/infra), or falls outside SGD scope entirely (Vision non-goal conflict / ungoverned work). Use whenever `/sgd:sgd-implement` Phase 0.5 dispatches its mandatory pre-implementation gate, whenever `/sgd:deep-dive` Phase 4 needs the shared classifier instead of ad-hoc judgment, or when a human wants to check "does this need a spec, and would it change one?" before starting work by hand.
 argument-hint: "<issue-number> [--spec SPEC-NNN] [--no-comment]"
 context: fork
-allowed-tools: Read, Grep, Glob, Bash(gh issue view:*), Bash(gh issue list:*), Bash(gh issue comment:*), Bash(git log:*), Bash(git show:*), Bash(ls:*)
+allowed-tools: Read, Grep, Glob, Bash(gh issue view:*), Bash(gh issue list:*), Bash(gh issue comment:*), Bash(git log:*), Bash(git show:*), Bash(ls:*), mcp__plugin_sgd_sgd-memory__search_nodes, mcp__plugin_sgd_sgd-memory__create_entities
 ---
 
 # Governance Trace
@@ -94,7 +94,33 @@ Both modes run the same Steps 0–5; only Step 6 (commenting) and whether a huma
 Before reading any file or calling `gh`, call `search_nodes` for the issue number and (if `--spec` was given) the spec id. Skip silently if sgd-memory is unavailable.
 
 - **Hit** — orient from the cached summary; still read the actual spec/capability-model files below (observations may be stale).
-- **Miss** — proceed normally, then call `create_entities` with the verdict once Step 5 completes.
+- **Miss** — proceed normally.
+
+The cortex **write** is not conditional on this lookup's outcome — see [Step W](#step-w-cortex-write-on-every-terminal-path-mandatory) below. A hit reinforces the existing memory; a miss creates it. Neither skips.
+
+---
+
+## Step W: Cortex write on every terminal path (MANDATORY)
+
+**This step is not optional and not a tail of Step 5.** Before returning the Step 7 JSON, on **every** terminal path this skill can exit through, call `create_entities` with the verdict. That includes:
+
+| Exit path | Write |
+|---|---|
+| Full classification (Steps 1–5 ran) | create — the freshly derived verdict |
+| **Step 0.5 comment-cache hit** | **reinforce** — same entity, `cacheReused: true` in the observation |
+| **Step 0.6 trivial-tier gate** (`NO_SPEC_WARRANTED` inline) | **reinforce/create** — with the `tierGate` marker |
+| **`NOT_ONBOARDED` early return** (Step 1, skips Steps 2–5) | create/reinforce — `path: not-onboarded` |
+| Front-loaded verdict adopted by the caller | create/reinforce — the adopted verdict |
+
+On the **front-loaded** path this skill never executes, so the **adopting caller** owns the write (wiring tracked in #1938). Two exemption classes write nothing and must not be conflated: **no verdict produced** (`NO_TARGET_ISSUE`), and **verdict produced but the write is impossible** (sgd-memory unavailable — skip silently; a memory failure must never block the gate).
+
+**Reinforcement, not duplication.** `create_entities` on an existing entity name is *already* an upsert that bumps `reinforcement_count` and `current_confidence` — keep the name stable (`govtrace-<owner>-<repo>-<issue>`) and let the store reinforce. Never guard the write with an existence check.
+
+**Any future short-circuit added ahead of Step 5 must still pass through Step W** — the graph can only accumulate if the *frequent* path writes. The write used to sit on Step 0's cache-miss branch; Steps 0.5/0.6 were later added in front of it and the fleet write-rate silently went to zero on 2026-07-17.
+
+**Closed vocabulary.** Observations are enums, spec ids, and timestamps only — never issue titles, bodies, or comment text.
+
+Write shape, exemptions, front-loaded ownership, and the full regression history: [`references/cortex-write.md`](references/cortex-write.md). Fire-and-forget — never fail a classification because the write failed. Regression gate: `scripts/cortex-write-gate.mjs` (SPEC-108 §2.5).
 
 ---
 
@@ -124,7 +150,9 @@ FRESH=$(echo "$DECISION" | jq -r .fresh)
 
 `check-fresh` reports `fresh:true` only when a parseable, known-verdict `## Governance trace` comment exists **and** every named artefact's commit SHA is identical now to what it was when the comment was posted. It **fails toward staleness** — no prior comment, a malformed body, an unknown verdict token, an untracked/unreadable artefact, or an unusable `createdAt` all yield `fresh:false` — and always exits 0 (the decision is advisory; a `false` never blocks the gate, it just means run it). The `verdict` and `matchedSpec` come back on the same JSON line for reuse on a hit.
 
-**c. On a cache hit (`fresh == true`):** reuse the cached verdict. Return the **cache-hit Step 7 JSON variant** (see Step 7) built from the decision — `verdict` and `matchedSpec` from `$DECISION`, `issue` from the positional argument — with `matchConfidence: "medium"` (a reused verdict, not a freshly derived one, warrants a human glance), the marker field **`cacheReused: true`**, and `commentPosted: false`. **Post no comment** — the audit trail already exists; a duplicate is exactly the `#8815/#8877`-style pile-up this step removes. Then **stop** — do not run Steps 0.6–6.
+**c. On a cache hit (`fresh == true`):** reuse the cached verdict. Return the **cache-hit Step 7 JSON variant** (see Step 7) built from the decision — `verdict` and `matchedSpec` from `$DECISION`, `issue` from the positional argument — with `matchConfidence: "medium"` (a reused verdict, not a freshly derived one, warrants a human glance), the marker field **`cacheReused: true`**, and `commentPosted: false`. **Post no comment** — the audit trail already exists; a duplicate is exactly the `#8815/#8877`-style pile-up this step removes. Then **run [Step W](#step-w-cortex-write-on-every-terminal-path-mandatory) — `path: cache-hit`, which reinforces the existing memory — and stop**; do not run Steps 0.6–6.
+
+> Step W is **not** part of the "do not run Steps 0.6–6" skip. Skipping it here is precisely the #1664 bug: the cache-hit path is the *common* path, so a graph that never writes on it can never accumulate. Reinforcing costs one upsert, not a re-classification.
 
 **d. On a cache miss (`fresh == false`, or no prior comment):** proceed to Step 0.6 (tier gate) and from there to Step 1.
 
@@ -135,6 +163,8 @@ A short-circuited run does not change any downstream posting rule: the Step 6 ru
 ## Step 0.6: Tier gate — lightweight heuristic for trivial issues
 
 Before entering the expensive Steps 1–5, classify the issue's footprint with the tier gate — full procedure in [`references/tier-gate.md`](references/tier-gate.md). In brief: extract file paths from the issue body, classify them via `scripts/resolve-context-depth.mjs`; a `trivial` tier (docs/test/config-only paths, no behavioural ACs) gets a fast inline `NO_SPEC_WARRANTED` verdict with a `tierGate` marker in the Step 7 JSON — no governance fork. Behavioural ACs on trivial paths escalate silently to the full-fork path. **Skip this step** in `--spec` (verify) mode. Any failure or ambiguity falls back to `TIER=standard` → Step 1.
+
+**The inline `trivial` return still runs [Step W](#step-w-cortex-write-on-every-terminal-path-mandatory)** (`path: tier-gate`) before returning its Step 7 JSON. A trivial verdict is still a verdict, and a cheap classification is exactly the kind worth remembering rather than re-deriving.
 
 ---
 
@@ -150,7 +180,7 @@ Read the repo's `CLAUDE.md` (and `docs/sgd/` if present) to find, for **this rep
 
 **Schema tolerance.** At least three capability-model shapes and two spec-identification conventions coexist across the fleet (nested YAML domains→capabilities→features with inline `spec:` refs; YAML front-matter with `capability:`/`success_measure_moved:`; feature-slug filenames with a `feature:` label instead of a `ref: SPEC-NNN`). Read whichever this repo actually uses — do not assume the `sgd-init` default schema when the repo has its own.
 
-**Graceful degradation — `NOT_ONBOARDED`.** If **no** Vision, capability model, or spec directory exists at all (zero governance artefacts anywhere), this repo has not adopted SGD governance yet. That is not the same as "this issue needs no spec" — it means there is nothing to trace against. Return verdict `NOT_ONBOARDED` immediately (skip Steps 2–5) with a one-line note recommending `/sgd:sgd-init`. **Do not** confuse this with a repo that uses a non-standard-but-real convention (feature-slug files, a differently-named capability model, etc.) — those are still governed; keep looking before concluding `NOT_ONBOARDED`.
+**Graceful degradation — `NOT_ONBOARDED`.** If **no** Vision, capability model, or spec directory exists at all (zero governance artefacts anywhere), this repo has not adopted SGD governance yet. That is not the same as "this issue needs no spec" — it means there is nothing to trace against. Return verdict `NOT_ONBOARDED` immediately (skip Steps 2–5, but **still run [Step W](#step-w-cortex-write-on-every-terminal-path-mandatory)** — it is a verdict, so it writes) with a one-line note recommending `/sgd:sgd-init`. **Do not** confuse this with a repo that uses a non-standard-but-real convention (feature-slug files, a differently-named capability model, etc.) — those are still governed; keep looking before concluding `NOT_ONBOARDED`.
 
 ---
 
