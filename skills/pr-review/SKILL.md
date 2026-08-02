@@ -192,7 +192,7 @@ A `[]` from an agent that ran **no tools** mimics a clean pass. Before folding *
 
 ## Phase 3: Quality Gates (concurrent with Phase 2)
 
-Run the repo's quality suite (commands in CLAUDE.md) **as background tasks in the same message as the Phase 2 batch**, never serially: type/static analysis, lint (zero warnings), tests, coverage. Collect all before Phase 5; a still-running gate blocks the verdict, not dispatch.
+Run the repo's quality suite (commands in CLAUDE.md) **as background tasks in the same message as the Phase 2 batch**, never serially: type/static analysis, lint (zero warnings), tests, coverage. Collect all before Phase 5; a still-running gate blocks the verdict, not dispatch. **No background gate may outlive the run:** every gate launched here MUST be collected or explicitly cancelled before the skill posts its verdict or exits by ANY path (success, timeout, error) -- the release-on-exit discipline Phase 7 applies to CI (`bg-wait`; cf. build_dispatch_prompt). A verdict/exit with a gate still running wedges the dispatch at the bg-wait ceiling (#1871).
 
 ## Phase 4: Issue Validation, Traceability & QA Evidence
 
