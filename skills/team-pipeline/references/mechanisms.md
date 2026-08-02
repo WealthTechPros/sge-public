@@ -36,6 +36,13 @@ gh label create "agent-lock" --color "D93F0B" \
   --description "Issue claimed by a pipeline agent" 2>/dev/null || true
 ```
 
+`agent-lock` is the org-wide issue-claim mutex shared with every other builder
+fleet, including the external autonomous swarm. Its full semantics — claim
+comment, TTL, heartbeat, stale-claim takeover, and release points — are the
+[issue-claim convention](../../../docs/issue-claim-convention.md) (issue #1804).
+This skill's claim/release behaviour is described there as current in-force
+state; the convention's proposed extensions are wired separately.
+
 ---
 
 ## Phase 0.5 — Flush unpushed worktrees (two-gate reconcile)
