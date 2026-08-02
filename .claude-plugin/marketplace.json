@@ -7,13 +7,13 @@
   },
   "metadata": {
     "description": "WealthTech Pros — Specification-Governed Development (SGD) tooling for regulated financial-services engineering teams.",
-    "version": "4.32.9"
+    "version": "4.32.10"
   },
   "plugins": [
     {
       "name": "sgd",
       "description": "SGD methodology + shared workflow skills for all WTP repos — spec-governed implementation, PR merge gates, governance drift sweeps, and an FS AI-governance register.",
-      "version": "4.32.9",
+      "version": "4.32.10",
       "author": {
         "name": "WealthTech Pros",
         "email": "rob.duncan@wealthtechpros.com",
