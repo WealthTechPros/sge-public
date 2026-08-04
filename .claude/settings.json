@@ -3,12 +3,12 @@
     "wtp-plugins": {
       "source": {
         "source": "github",
-        "repo": "WealthTechPros/sgd",
+        "repo": "WealthTechPros/sge",
         "ref": "v4.27.0"
       }
     }
   },
   "enabledPlugins": {
-    "sgd@wtp-plugins": true
+    "sge@wtp-plugins": true
   }
 }

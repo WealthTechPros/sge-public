@@ -1,4 +1,4 @@
-# Installing SGD in GitHub Copilot CLI
+# Installing SGE in GitHub Copilot CLI
 
 This plugin was built and is primarily documented for Claude Code, but the
 same `.claude-plugin` marketplace format is also read natively by
@@ -6,7 +6,7 @@ same `.claude-plugin` marketplace format is also read natively by
 `/plugin marketplace add`, `/plugin install`, `enabledPlugins`, and
 `.claude-plugin/marketplace.json` with no translation layer needed). This
 page is the Copilot-CLI-specific companion to the main
-[`README.md`](../README.md#1-install-the-sgd-plugin) install instructions —
+[`README.md`](../README.md#1-install-the-sge-plugin) install instructions —
 read that first for *what* the plugin does; this page is about *how the
 install mechanics differ* on Copilot CLI, including a real fix for the one
 failure mode we've hit repeatedly on locked-down corporate Windows machines.
@@ -16,11 +16,11 @@ failure mode we've hit repeatedly on locked-down corporate Windows machines.
 Exactly the same commands as Claude Code, run inside a Copilot CLI session:
 
 ```
-/plugin marketplace add WealthTechPros/sgd-public
-/plugin install sgd@wtp-plugins
+/plugin marketplace add WealthTechPros/sge-public
+/plugin install sge@wtp-plugins
 ```
 
-(Use `WealthTechPros/sgd` instead of `sgd-public` only if you're WTP staff
+(Use `WealthTechPros/sge` instead of `sge-public` only if you're WTP staff
 with access to the private repo — see the main README's caveat about never
 collapsing that to the private ref alone.)
 
@@ -34,8 +34,8 @@ Or non-interactively, from a shell (useful for scripting/CI or when the
 interactive REPL prompt isn't rendering — see below):
 
 ```
-copilot plugin marketplace add WealthTechPros/sgd-public
-copilot plugin install sgd@wtp-plugins
+copilot plugin marketplace add WealthTechPros/sge-public
+copilot plugin install sge@wtp-plugins
 copilot plugin list
 ```
 
@@ -52,7 +52,7 @@ agree before skills actually load:
 2. **Plugin *install* registration** — an `installedPlugins` entry plus an
    `enabledPlugins` map key, which is what actually gates skill loading.
    Copilot CLI auto-attempts step 2 on every session start if a repo's
-   `.claude/settings.json` declares `enabledPlugins: {"sgd@wtp-plugins": true}`
+   `.claude/settings.json` declares `enabledPlugins: {"sge@wtp-plugins": true}`
    — but if that auto-install fails for any reason, it fails **silently** (a
    one-line warning in the log, nothing in the chat UI), leaving you with a
    fully-cached plugin on disk and zero usable skills. `/skills` and
@@ -60,10 +60,10 @@ agree before skills actually load:
    sitting right there in
    `%LOCALAPPDATA%\copilot\marketplaces\<org>-<repo>\`.
 
-If you're in that state, running `/plugin install sgd@wtp-plugins` by hand
+If you're in that state, running `/plugin install sge@wtp-plugins` by hand
 (per "Quick install" above) re-triggers step 2 and will either fix it or
 surface the real error — check `~/.copilot/logs/process-*.log` for a line
-like `Failed to auto-install plugin "sgd@wtp-plugins": ...`.
+like `Failed to auto-install plugin "sge@wtp-plugins": ...`.
 
 ## Known failure mode: "Access is denied. (os error 5)" on managed Windows machines, and the fix that needs no admin rights
 
@@ -72,7 +72,7 @@ device, Copilot CLI 1.0.76), the auto-install step can fail **every single
 session** with:
 
 ```
-Failed to auto-install plugin "sgd@wtp-plugins": Failed to install plugin: Access is denied. (os error 5)
+Failed to auto-install plugin "sge@wtp-plugins": Failed to install plugin: Access is denied. (os error 5)
 ```
 
 This is a genuine Windows `ERROR_ACCESS_DENIED` during the install's
@@ -110,7 +110,7 @@ Copy-Item "$env:USERPROFILE\.copilot" "$env:USERPROFILE\copilot-home" -Recurse -
 
 Open a **new** terminal/VS Code window (env var changes only apply to newly
 started processes) and re-run the install — `/plugin install` (interactive)
-or `copilot plugin install sgd@wtp-plugins` (non-interactive, see above) —
+or `copilot plugin install sge@wtp-plugins` (non-interactive, see above) —
 and verify with `copilot plugin list` / `/skills`.
 
 ### Fix B — needs local admin: AV/EDR path exclusion
@@ -137,7 +137,7 @@ If neither fix resolves it, capture `~/.copilot/logs/process-*.log` around
 the failing timestamp and open an issue — a plugin install silently failing
 every session with no retry/backoff and no user-visible error is a rough
 edge worth reporting upstream to the Copilot CLI team too, independent of
-SGD.
+SGE.
 
 ## Compatibility notes
 
@@ -146,7 +146,7 @@ SGD.
   same whether the *consuming* repo lives on GitHub or Azure DevOps.
 - Everything **downstream of install** in this plugin bundle is currently
   **GitHub-only**: the `PostToolUse` PR-review hook triggers off `gh pr
-  create`, `/sgd:align`'s drift tracking raises GitHub Issues, and CI
+  create`, `/sge:align`'s drift tracking raises GitHub Issues, and CI
   workflows (`ai-supply-chain.yml`, `require-commit-trailer.yml`,
   `require-test-evidence.yml`) are GitHub Actions. If your repo is hosted on
   Azure DevOps, the skills still run locally, but hook-driven automation and
