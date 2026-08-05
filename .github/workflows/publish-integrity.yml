@@ -48,14 +48,14 @@ jobs:
             if (!entry) fail(`marketplace.json: no plugin entry named ${plugin.name}`);
             if (entry && entry.version !== plugin.version)
               fail(`version mismatch: plugin.json ${plugin.version} vs marketplace.json ${entry.version}`);
-            if (entry && !/WealthTechPros\/sgd-public/.test(entry.repository || ""))
-              fail(`marketplace.json: repository must self-point at WealthTechPros/sgd-public, found ${entry.repository} (private-repo pointer = uninstallable externally, sgd#1705)`);
+            if (entry && !/WealthTechPros\/sge-public/.test(entry.repository || ""))
+              fail(`marketplace.json: repository must self-point at WealthTechPros/sge-public, found ${entry.repository} (private-repo pointer = uninstallable externally, sgd#1705)`);
             if (entry && entry.source !== "./")
               fail(`marketplace.json: source must be "./", found ${entry.source}`);
-            if (plugin.repository && !/WealthTechPros\/sgd-public/.test(plugin.repository))
-              fail(`plugin.json: repository must self-point at WealthTechPros/sgd-public, found ${plugin.repository}`);
+            if (plugin.repository && !/WealthTechPros\/sge-public/.test(plugin.repository))
+              fail(`plugin.json: repository must self-point at WealthTechPros/sge-public, found ${plugin.repository}`);
             if (process.exitCode) process.exit(process.exitCode);
-            console.log(`manifests ok: ${plugin.name}@${plugin.version} self-pointing at sgd-public`);
+            console.log(`manifests ok: ${plugin.name}@${plugin.version} self-pointing at sge-public`);
           '
 
       - name: Verify every SKILL.md-referenced plugin-root path exists

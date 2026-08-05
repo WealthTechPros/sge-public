@@ -1,17 +1,17 @@
-# WealthTech Pros SGD Commercial Licence
+# WealthTech Pros SGE Commercial Licence
 
 SPDX-License-Identifier: LicenseRef-WTP-SGD-Commercial
 
 Copyright (c) 2026 WealthTech Pros Ltd. All rights reserved.
 
-This repository contains the SGD platform distribution (the "Software") of
+This repository contains the SGE platform distribution (the "Software") of
 WealthTech Pros Ltd ("WTP").
 
 ## 1. Grant
 
 Use of the Software — including installation, execution, and modification for
-internal use — is licensed only to organisations holding an active, paid SGD
-subscription or a written services agreement with WTP that covers SGD
+internal use — is licensed only to organisations holding an active, paid SGE
+subscription or a written services agreement with WTP that covers SGE
 ("Subscribers"), for the duration of that subscription or agreement and
 subject to its terms, and to those organisations' employees and contractors
 acting on their behalf.
@@ -52,4 +52,4 @@ This licence is governed by the laws of England and Wales.
 ---
 
 To become a Subscriber, or for any licensing enquiry:
-<https://sgd.wealthtechpros.com>
+<https://sge.wealthtechpros.com>
