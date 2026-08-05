@@ -1,10 +1,10 @@
 ---
-description: Kill orphaned Claude Code processes (stray claude/node/bash with dead parents) and report live resource hogs. Auto-protects the current session tree. Safe to loop: /loop 30m /sgd:reap-orphans
+description: Kill orphaned Claude Code processes (stray claude/node/bash with dead parents) and report live resource hogs. Auto-protects the current session tree. Safe to loop: /loop 30m /sge:reap-orphans
 argument-hint: "[-DryRun] [-HogMB <MB>]"
 allowed-tools: Bash(pwsh:*), Bash(powershell:*)
 ---
 
-# /sgd:reap-orphans — Safe Process Reaper (Windows)
+# /sge:reap-orphans — Safe Process Reaper (Windows)
 
 ## Role
 Kill leaked `claude`/`node`/`bash` debris whose parent process is dead, protect the current session tree, and report live resource hogs for human review — without ever touching a live session.
@@ -18,7 +18,7 @@ Kill leaked `claude`/`node`/`bash` debris whose parent process is dead, protect 
 
 Kills orphaned `claude` / `node` / `bash` processes whose parent process is already dead (leaked debris from closed sessions/terminals). Auto-protects the current session tree so it **never kills the session you are running in**. Reports but does NOT kill live high-memory processes.
 
-Designed to be looped: `/loop 30m /sgd:reap-orphans`
+Designed to be looped: `/loop 30m /sge:reap-orphans`
 
 ## Flags
 

@@ -79,4 +79,4 @@ one-off cleanup.
 
 - **SGD-052** — Claim-Validation Coherence: makes the loop's prediction a governed, gated claim.
 - **SGD-027** — the coherence-check family SGD-052 extends.
-- **SGD-044** — measures whether SGD *itself* works; the same measurement culture, applied to the methodology rather than a product metric.
+- **SGD-044** — measures whether SGE *itself* works; the same measurement culture, applied to the methodology rather than a product metric.

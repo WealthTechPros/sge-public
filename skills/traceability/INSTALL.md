@@ -1,32 +1,32 @@
-# SGD Traceability Module — Install Guide
+# SGE Traceability Module — Install Guide
 
-Adds an interactive PR traceability chart to any SGD-governed repo's docs site.
+Adds an interactive PR traceability chart to any SGE-governed repo's docs site.
 
 ## Prerequisites
 
 - GitHub Actions already deploys your docs (e.g. Just the Docs, MkDocs, VitePress, or plain HTML) to GitHub Pages.
 - Node.js 18+ is available in your CI runner (true for all `ubuntu-latest` Actions runners).
 
-## Option A — SGD Web UI (recommended)
+## Option A — SGE Web UI (recommended)
 
-1. Go to `sgd.wealthtechpros.com/repos/<owner>/<repo>` → **Modules** tab.
+1. Go to `sge.wealthtechpros.com/repos/<owner>/<repo>` → **Modules** tab.
 2. Click **Install** next to "Traceability Chart".
-3. Review and merge the PR that SGD opens (`feat(sgd): install traceability chart module`).
+3. Review and merge the PR that SGE opens (`feat(sge): install traceability chart module`).
 4. The chart goes live on your next push.
 
 ## Option B — CLI skill
 
-From inside any SGD-governed repo checkout:
+From inside any SGE-governed repo checkout:
 
 ```
-/sgd:traceability
+/sge:traceability
 ```
 
 This copies the three module files into the repo and opens a draft PR. Review and merge.
 
 ## Option C — Manual
 
-Copy these three files from `skills/traceability/` in the SGD repo:
+Copy these three files from `skills/traceability/` in the SGE repo:
 
 | Source | Destination in your repo |
 |---|---|

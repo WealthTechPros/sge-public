@@ -10,7 +10,7 @@ context:
 ---
 
 ## Role
-Guide a new developer or an existing agile team through SGD onboarding — turning static documentation into a step-by-step interactive session that ends with the first governed PR or the first SGD-overlaid sprint.
+Guide a new developer or an existing agile team through SGE onboarding — turning static documentation into a step-by-step interactive session that ends with the first governed PR or the first SGE-overlaid sprint.
 
 ## Out of scope
 - Does not implement any capability or write any code on behalf of the person being onboarded
@@ -22,10 +22,10 @@ Guide a new developer or an existing agile team through SGD onboarding — turni
 ## Usage
 
 ```
-/sgd:onboard [--dev | --team]
+/sge:onboard [--dev | --team]
 ```
 
-- `--dev` — Developer onboarding: guided first-week path for an individual joining an SGD team
+- `--dev` — Developer onboarding: guided first-week path for an individual joining an SGE team
 - `--team` — Team onboarding: ceremony-overlay adoption for an existing Scrum/Kanban team
 
 If no flag is given, ask: "Who are we onboarding — a **developer** (--dev) or an **agile team** (--team)?"
@@ -38,18 +38,18 @@ If no flag is given, ask: "Who are we onboarding — a **developer** (--dev) or 
 
 Begin with the mindset shift from `onboard-a-developer.md`:
 
-> "SGD does not change *that* you build software — it changes *where you spend your judgement*. You move from typing the implementation to governing the intent."
+> "SGE does not change *that* you build software — it changes *where you spend your judgement*. You move from typing the implementation to governing the intent."
 
-Ask: "Have you read [What is SGD](/what-is-sgd/) and the [Roles](/getting-started/roles) page?" If not, surface the key points:
+Ask: "Have you read [What is SGE](/what-is-sge/) and the [Roles](/getting-started/roles) page?" If not, surface the key points:
 - The nine layers (from Vision down to Deploy)
 - The spec lifecycle: `draft → approved → in-build → shipped`
 - Their role (developer / EiC / senior mentor)
 
 ### Step 2: Address deskilling concerns
 
-Ask: "Any concerns about deskilling or how SGD fits into your day-to-day?" Then surface the honest answer:
+Ask: "Any concerns about deskilling or how SGE fits into your day-to-day?" Then surface the honest answer:
 
-The Anthropic 2026 controlled study found passive delegation lowers comprehension; conceptual inquiry preserves it. SGD keeps the developer in conceptual-inquiry mode (spec authorship, review, directing the agent) — the mode that protects skill. Reference `onboard-a-developer.md` for the full answer.
+The Anthropic 2026 controlled study found passive delegation lowers comprehension; conceptual inquiry preserves it. SGE keeps the developer in conceptual-inquiry mode (spec authorship, review, directing the agent) — the mode that protects skill. Reference `onboard-a-developer.md` for the full answer.
 
 ### Step 3: First-week plan
 
@@ -59,7 +59,7 @@ Walk through the first-week table from `onboard-a-developer.md`:
 |---|---|
 | Day 1 | Read docs; understand spec lifecycle and your role |
 | Day 1–2 | Shadow a spec review with a senior |
-| Day 2–3 | Pick one small approved spec; run `/sgd:sgd-preflight` |
+| Day 2–3 | Pick one small approved spec; run `/sge:sge-preflight` |
 | Day 3–4 | Implement with AI; open a PR; resolve governance checks |
 | Day 4–5 | Review your change against Gherkin criteria |
 | Week 1 close | Pair with a senior on a *spec*, not on typing |
@@ -77,14 +77,14 @@ If they're ready to implement, help them find an approved, unblocked spec to sta
 
 ```bash
 # Find specs in approved state
-gh issue list --label "sgd,story" --state open --limit 20
+gh issue list --label "sge,story" --state open --limit 20
 ```
 
-Or run `/sgd:sgd-preflight` on a specific issue number they name.
+Or run `/sge:sge-preflight` on a specific issue number they name.
 
-### Step 5: Record progress in sgd-memory
+### Step 5: Record progress in sge-memory
 
-After each completed step, record in `sgd-memory`:
+After each completed step, record in `sge-memory`:
 
 ```
 Entity: "<developer-name>-onboarding"
@@ -111,15 +111,15 @@ Before wrapping up, surface the three habits from `onboard-a-developer.md`:
 
 Before anything else:
 
-"Before we change anything — do you have a DORA baseline? Lead time, deploy frequency, change-fail rate, MTTR? If not, capture it now. Without a before, you can't prove SGD is working."
+"Before we change anything — do you have a DORA baseline? Lead time, deploy frequency, change-fail rate, MTTR? If not, capture it now. Without a before, you can't prove SGE is working."
 
-If they don't have it, help them instrument it by running `/sgd:dora-setup`.
+If they don't have it, help them instrument it by running `/sge:dora-setup`.
 
 ### Step 2: Ceremony overlay
 
 Walk through the ceremony overlay table from `onboard-a-team.md`:
 
-| Your ceremony | What SGD adds |
+| Your ceremony | What SGE adds |
 |---|---|
 | Backlog item / story | Card links to a feature spec |
 | Refinement / grooming | Questions loop; specs move draft → approved |
@@ -132,7 +132,7 @@ Ask: "Which ceremony feels hardest to overlay? Let's start there."
 
 ### Step 3: First sprint plan
 
-Help plan the first SGD-overlaid sprint:
+Help plan the first SGE-overlaid sprint:
 1. Identify 2–3 capabilities to govern (don't try to govern the whole backlog at once)
 2. For each: is there an existing spec in `draft` or `approved`? If not, help draft one
 3. Link the first 1–2 board items to approved specs
@@ -142,7 +142,7 @@ Help plan the first SGD-overlaid sprint:
 
 Remind the team of the four phases from `onboard-a-team.md`:
 1. **Assess** — DORA baseline (done in Step 1)
-2. **Pilot** — manual SGD on 2–3 capabilities this sprint (starting now)
+2. **Pilot** — manual SGE on 2–3 capabilities this sprint (starting now)
 3. **Measure** — re-run DORA after 3 sprints
 4. **Expand** — roll to more capabilities; automate posture checks
 
@@ -151,7 +151,7 @@ Remind the team of the four phases from `onboard-a-team.md`:
 Ask if there are objections; address from the page:
 - **"This is just more process / waterfall."** → Specs replace the throwaway docs you already write and ignore
 - **"It doesn't fit our ceremonies."** → Overlay table above; zero new meetings
-- **"Our seniors fear being deskilled."** → Point each senior to `/sgd:onboard --dev`
+- **"Our seniors fear being deskilled."** → Point each senior to `/sge:onboard --dev`
 
 ---
 
@@ -161,7 +161,7 @@ Ask if there are objections; address from the page:
 |---|---|
 | Find open approved specs | `Bash(gh issue list ...)` |
 | Check spec content | `Read` on the spec file |
-| Record onboarding progress | `sgd-memory` MCP via observation creation |
+| Record onboarding progress | `sge-memory` MCP via observation creation |
 | Find existing docs pages | `Glob` on `docs-site/**/*.md` |
 
 Always check memory for existing onboarding progress before starting a session — the developer may be resuming from a prior day.

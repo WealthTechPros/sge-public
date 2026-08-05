@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # check-regulatory-trace.sh — the mechanical C12 "Regulatory traceability" drift check.
 # ---------------------------------------------------------------------------------------
-# Single source of truth for both `/sgd:regulatory-trace review` and `/sgd:sgd-align` C12.
+# Single source of truth for both `/sge:regulatory-trace review` and `/sge:sge-align` C12.
 # Read-only. Emits a JSON block on stdout (schema in references/drift-check.md) and exits:
 #   0 = no high-severity gaps      1 = one or more high-severity gaps      2 = harness error
 #
@@ -18,7 +18,7 @@
 #   tool-resolved path — never a value declared by the audited repo (a repo-supplied
 #   path could point the check at a permissive catalogue). Resolution order when $1
 #   is absent (#720):
-#     1. the audited repo's own copy (the sgd repo itself, or a repo that vendors one)
+#     1. the audited repo's own copy (the sge repo itself, or a repo that vendors one)
 #     2. $CLAUDE_PLUGIN_ROOT, when the harness exports it
 #     3. the catalogue bundled beside this script (the installed-plugin copy — works
 #        even when CLAUDE_PLUGIN_ROOT is not exported to the shell environment)
@@ -32,13 +32,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -n "${1:-}" ]; then
   CATALOGUE="$1"
 elif [ -f "${ROOT}/skills/regulatory-trace/assets/obligations-catalogue.yaml" ]; then
-  # Prefer the audited repo's own copy: keeps sgd-repo dogfooding honest (a locally
+  # Prefer the audited repo's own copy: keeps sge-repo dogfooding honest (a locally
   # edited catalogue must be the one checked) and honours vendored catalogues.
   CATALOGUE="${ROOT}/skills/regulatory-trace/assets/obligations-catalogue.yaml"
 elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/skills/regulatory-trace/assets/obligations-catalogue.yaml" ]; then
   CATALOGUE="${CLAUDE_PLUGIN_ROOT}/skills/regulatory-trace/assets/obligations-catalogue.yaml"
 else
-  # The catalogue ships beside this script in both the sgd repo and the installed
+  # The catalogue ships beside this script in both the sge repo and the installed
   # plugin, so sibling resolution works with no environment cooperation at all.
   CATALOGUE="${SCRIPT_DIR}/obligations-catalogue.yaml"
 fi
@@ -103,7 +103,7 @@ add_finding() { # artefact severity check message
 # Fail-open-visible: without a usable catalogue, RT-2 (retired-reference) and RT-3
 # (valid-vocabulary) cannot run — that is a HIGH finding, never a silent skip.
 if [ "$catalogue_missing" = true ]; then
-  add_finding "$CATALOGUE" high "convention-unknown" "obligations catalogue not found at ${CATALOGUE} — RT-2/RT-3 cannot run; pass \$1 or set CLAUDE_PLUGIN_ROOT to the sgd plugin root"
+  add_finding "$CATALOGUE" high "convention-unknown" "obligations catalogue not found at ${CATALOGUE} — RT-2/RT-3 cannot run; pass \$1 or set CLAUDE_PLUGIN_ROOT to the sge plugin root"
 elif [ "$catalogue_unusable" = true ]; then
   add_finding "$CATALOGUE" high "convention-unknown" "obligations catalogue at ${CATALOGUE} yielded no obligation ids (empty, unreadable, or unparsable) — RT-2/RT-3 cannot run"
 fi
@@ -137,7 +137,7 @@ while IFS= read -r f; do
     cited="$(grep -aoE 'id:[[:space:]]*[A-Z][A-Za-z0-9.:_-]+' "$path" | sed 's/.*id:[[:space:]]*//' | sort -u || true)"
     while IFS= read -r cid; do
       [ -z "$cid" ] && continue
-      case "$cid" in CAP-*|SPEC-*|SGD-*|AI-*) continue;; esac   # not obligation ids
+      case "$cid" in CAP-*|SPEC-*|SGE-*|AI-*) continue;; esac   # not obligation ids
       if ! printf '%s\n' "$valid_ids" | grep -qx "$cid" && ! printf '%s\n' "$retired_ids" | grep -qx "$cid"; then
         add_finding "$f" medium "C12-unknown-id" "mapping cites id ${cid} absent from the catalogue"
       fi

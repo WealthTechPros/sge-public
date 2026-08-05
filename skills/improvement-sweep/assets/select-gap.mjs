@@ -1,28 +1,28 @@
 #!/usr/bin/env node
 /**
  * select-gap.mjs — the script-anchored PICK step for the SGD-044-S3 scheduled
- * weekly improvement sweep (sgd#833, parent #676).
+ * weekly improvement sweep (sge#833, parent #676).
  *
  * The sweep is the *cadence layer* that makes F-EFFICACY (SGD-044) real. Once a
  * week it reads the three drift **trend surfaces** the platform already
  * produces, normalises each dial's headline gap onto a comparable [0,1]
  * leverage scale, and picks the SINGLE highest-leverage dial. The chosen dial
- * maps to exactly one `/sgd:drift-hillclimb` invocation bounded to ONE round —
+ * maps to exactly one `/sge:drift-hillclimb` invocation bounded to ONE round —
  * so the sweep can never open more than one PR per cycle by construction.
  *
  * The three dials and their surfaces:
- *   - coherence     — docs/sgd/drift-trend.jsonl rows (`audit_score`, 0..100;
+ *   - coherence     — docs/sge/drift-trend.jsonl rows (`audit_score`, 0..100;
  *                     legacy rows: `sm2_sample`), the Audit Score trend #724
  *                     (CLOSED) writes. Below-target Audit Score is the gap; the
- *                     lever is `/sgd:drift-hillclimb`. NB: the Audit Score is the
+ *                     lever is `/sge:drift-hillclimb`. NB: the Audit Score is the
  *                     plugin's per-check rollup, NOT the platform's canonical
  *                     SM-2 `coherence_score` (decision #834).
  *   - token-economy — score-token-economy.mjs trendRow (`worstTokensPerSuccess`,
- *                     sgd#831). Tokens-per-success above budget is the gap; the
- *                     lever is `/sgd:drift-hillclimb --dimension token-economy`.
+ *                     sge#831). Tokens-per-success above budget is the gap; the
+ *                     lever is `/sge:drift-hillclimb --dimension token-economy`.
  *   - skill-quality — score-skill-quality.mjs trendRow (`worstThrashRate`,
- *                     sgd#832/#737). Thrash-rate is the gap; the lever is
- *                     `/sgd:drift-hillclimb --dimension skill-quality`.
+ *                     sge#832/#737). Thrash-rate is the gap; the lever is
+ *                     `/sge:drift-hillclimb --dimension skill-quality`.
  *
  * Every dial is normalised to a leverage in [0,1] plus a `trendDelta` (change
  * vs the previous trend row; positive = worsening). Ranking is:
@@ -72,9 +72,9 @@ import { readFileSync } from 'node:fs';
 const DIAL_PRIORITY = { coherence: 3, 'token-economy': 2, 'skill-quality': 1 };
 
 const DIM_COMMAND = {
-  coherence: '/sgd:drift-hillclimb --max-rounds 1',
-  'token-economy': '/sgd:drift-hillclimb --dimension token-economy --max-rounds 1',
-  'skill-quality': '/sgd:drift-hillclimb --dimension skill-quality --max-rounds 1',
+  coherence: '/sge:drift-hillclimb --max-rounds 1',
+  'token-economy': '/sge:drift-hillclimb --dimension token-economy --max-rounds 1',
+  'skill-quality': '/sge:drift-hillclimb --dimension skill-quality --max-rounds 1',
 };
 
 const clamp01 = (n) => (Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 0);
@@ -129,7 +129,7 @@ function num(v) {
  */
 export function readCoherenceDial(rows, { sm2Target = 85 } = {}) {
   // The coherence dial reads the Audit Score (`audit_score`) written by
-  // `/sgd:sgd-align` (decision #834). Legacy rows carry the pre-#834 key
+  // `/sge:sge-align` (decision #834). Legacy rows carry the pre-#834 key
   // `sm2_sample` (or `sm2`) — accepted as a fallback so historical trend
   // files keep working. NB: the Audit Score is the plugin's per-check
   // governance-coherence rollup, NOT the platform's canonical SM-2.
@@ -282,7 +282,7 @@ function round(n) {
 
 /**
  * Build the durable cycle-delta record the sweep appends to
- * docs/sgd/improvement-sweep.jsonl after drift-hillclimb re-measures. This is
+ * docs/sge/improvement-sweep.jsonl after drift-hillclimb re-measures. This is
  * the "every cycle appends a measured delta" acceptance artefact — one row per
  * cycle whether the cycle acted, skipped, or failed.
  *
@@ -290,7 +290,7 @@ function round(n) {
  * @param outcome { status: 'acted'|'skipped'|'failed', prNumber, before, after,
  *                  error }
  */
-export function buildCycleRecord(sel, { repo = 'sgd', timestamp, status, prNumber = null, before = null, after = null, error = null } = {}) {
+export function buildCycleRecord(sel, { repo = 'sge', timestamp, status, prNumber = null, before = null, after = null, error = null } = {}) {
   const ts = timestamp || new Date().toISOString();
   const measuredDelta = before !== null && after !== null ? round(after - before) : null;
   return {
@@ -314,7 +314,7 @@ export function buildCycleRecord(sel, { repo = 'sgd', timestamp, status, prNumbe
 // ---------------------------------------------------------------------------
 
 function parseArgs(argv) {
-  const args = { sm2Target: 85, tokenBudget: 5000, minLeverage: 0.05, repo: 'sgd' };
+  const args = { sm2Target: 85, tokenBudget: 5000, minLeverage: 0.05, repo: 'sge' };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const val = () => argv[++i];

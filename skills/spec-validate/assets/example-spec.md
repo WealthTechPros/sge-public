@@ -1,6 +1,6 @@
 # Example: Cohort Reconciliation (spec-validate worked example)
 
-This is the worked example bundled with `/sgd:spec-validate` (issue #761) —
+This is the worked example bundled with `/sge:spec-validate` (issue #761) —
 the reconciliation invariant Dave Howard's feedback named directly: *"How do
 we validate the rules and spec are aligned? … like C1 must be ≤ Addressable −
 Exclusions."* `SPEC-147` (the issue's original example) lives in a different
@@ -12,7 +12,7 @@ repo; this stands in as the format's canonical demo, per `docs/specs/README.md`.
 
 Invariants checked against the demo fixture at spec-graduation time. `rule` is
 what a non-technical reviewer verifies by eye; `assert` is the machine-checked
-expression `/sgd:spec-validate` evaluates, with `r` bound to the fixture's
+expression `/sge:spec-validate` evaluates, with `r` bound to the fixture's
 JSON root.
 
 | id | name | rule | assert |

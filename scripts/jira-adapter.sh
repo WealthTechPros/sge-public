@@ -22,22 +22,22 @@
 #
 # Configuration (environment; per the Doppler-injected convention — never
 # stored in the repo, never logged):
-#   SGD_JIRA_BASE_URL   https://<host> of the Jira instance (Cloud or Server).
+#   SGE_JIRA_BASE_URL   https://<host> of the Jira instance (Cloud or Server).
 #                       Caller/config-supplied → treated as UNTRUSTED until the
 #                       host passes the allow-list.
-#   SGD_JIRA_HOSTS      ';'-separated allow-list of bare hosts the credential
+#   SGE_JIRA_HOSTS      ';'-separated allow-list of bare hosts the credential
 #                       may be sent to. The base URL's host MUST appear here —
 #                       an explicit listing IS the trust decision (SPEC-094
 #                       pattern: routing is not trust).
-#   SGD_JIRA_BEARER     OAuth bearer token  — preferred when set, OR
-#   SGD_JIRA_EMAIL + SGD_JIRA_API_TOKEN
+#   SGE_JIRA_BEARER     OAuth bearer token  — preferred when set, OR
+#   SGE_JIRA_EMAIL + SGE_JIRA_API_TOKEN
 #                       Jira Cloud Basic auth pair (email + API token).
 #   Any op needing auth FAILS LOUD when no credential is set — never a silent
 #   unauthenticated call.
 #
-#   SGD_DISPATCH_LABEL              dispatch-gate label name (default sgd-ready
+#   SGE_DISPATCH_LABEL              dispatch-gate label name (default sge-ready
 #                                   — DP2: the Jira gate is a label).
-#   SGD_JIRA_CLAIM_TRANSITION_ID    workflow transition id that acquires the
+#   SGE_JIRA_CLAIM_TRANSITION_ID    workflow transition id that acquires the
 #                                   claim (→ the transition-guarded `Claimed`
 #                                   status). REQUIRED for claim-item: the
 #                                   transition guard is what makes the claim
@@ -49,9 +49,9 @@
 #                                   to claim (DR3: claim atomicity not
 #                                   guaranteeable → fail loud, never permit a
 #                                   double-claim).
-#   SGD_JIRA_RELEASE_TRANSITION_ID  transition id that releases the claim
+#   SGE_JIRA_RELEASE_TRANSITION_ID  transition id that releases the claim
 #                                   (REQUIRED for release-item, same rule).
-#   SGD_JIRA_CLAIM_STATUS           optional status name of the claimed state;
+#   SGE_JIRA_CLAIM_STATUS           optional status name of the claimed state;
 #                                   when set, list-dispatchable additionally
 #                                   excludes items sitting in it.
 #
@@ -63,7 +63,7 @@
 #
 # Usage:
 #   jira-adapter.sh dispatch-label-config                                (read, P9)
-#       Print the repo-configurable dispatch-label name (default sgd-ready).
+#       Print the repo-configurable dispatch-label name (default sge-ready).
 #       Pure/local — no network, no credential.
 #   jira-adapter.sh view-item <issueKey>                                 (read, P2)
 #       GET one work item's fields (summary, description, labels, assignee,
@@ -80,15 +80,15 @@
 #       list-dispatchable).
 #   jira-adapter.sh list-dispatchable <project-key> [<dispatch-label>]   (read, P1)
 #       Open (statusCategory != Done) items in <project-key> carrying the
-#       dispatch label, unassigned, excluding SGD_JIRA_CLAIM_STATUS when set.
+#       dispatch label, unassigned, excluding SGE_JIRA_CLAIM_STATUS when set.
 #       Prints the Jira search JSON. JQL is assembled ONLY from atoms that have
 #       passed a strict character class — no free text reaches the query.
 #   jira-adapter.sh claim-item <issueKey>                            (MUTATING, P3)
-#       Fire the SGD_JIRA_CLAIM_TRANSITION_ID transition. Exactly one racer
+#       Fire the SGE_JIRA_CLAIM_TRANSITION_ID transition. Exactly one racer
 #       wins; the loser's transition is refused by Jira and this exits non-zero
 #       reporting the item already claimed.
 #   jira-adapter.sh release-item <issueKey>                          (MUTATING, P4)
-#       Fire the SGD_JIRA_RELEASE_TRANSITION_ID transition.
+#       Fire the SGE_JIRA_RELEASE_TRANSITION_ID transition.
 #   jira-adapter.sh comment-item <issueKey> <body>                   (MUTATING, P5)
 #       Append a comment (claim notice, triage, exit report). The body is
 #       injection-encoded through _ja_json_str — free text can never close the
@@ -97,14 +97,14 @@
 #       Open a new work item. SCOPE-GATED per DP3: needs JIRA_ADAPTER_ALLOW_WRITE=1
 #       AND the explicit JIRA_ADAPTER_ALLOW_CREATE=1 opt-in — the common-case
 #       dispatch token must not be able to create items in the customer's Jira.
-#       Issue type = SGD_JIRA_ISSUETYPE (default Task). Prints the created JSON
+#       Issue type = SGE_JIRA_ISSUETYPE (default Task). Prints the created JSON
 #       ({key,...}). All free text is injection-encoded.
 #   jira-adapter.sh link-close-on-merge <issueKey> <change-url> [<title>]  (MUTATING, P8)
 #       Express "merging this change closes item N" on the Jira item. Jira has
 #       NO native link to an externally-hosted PR (#1150); the CORRELATION
 #       CONVENTION is a development-panel REMOTE LINK on the issue carrying the
 #       merged change URL, with a stable globalId (= the URL) so a re-run is
-#       idempotent, not a duplicate. When SGD_JIRA_CLOSE_TRANSITION_ID is set the
+#       idempotent, not a duplicate. When SGE_JIRA_CLOSE_TRANSITION_ID is set the
 #       close transition is ALSO fired. FAILURE MODE: a non-2xx from the
 #       remote-link POST (or a non-204 from the optional transition) is surfaced
 #       non-zero — the linkage is never silently swallowed, so a caller must not
@@ -225,20 +225,20 @@ _ja_require_status_name() { # <status>
   return 0
 }
 
-# Resolve + validate the API base from SGD_JIRA_BASE_URL. Sets _JA_API_BASE
+# Resolve + validate the API base from SGE_JIRA_BASE_URL. Sets _JA_API_BASE
 # (https://host[:port], no trailing slash) and _JA_HOSTPORT. https only — the
 # credential is never sent over cleartext.
 _ja_api_base() {
-  local url="${SGD_JIRA_BASE_URL:-}"
-  [ -n "$url" ] || { _ja_err "no Jira base URL — set SGD_JIRA_BASE_URL (https://<host>)"; return 1; }
+  local url="${SGE_JIRA_BASE_URL:-}"
+  [ -n "$url" ] || { _ja_err "no Jira base URL — set SGE_JIRA_BASE_URL (https://<host>)"; return 1; }
   case "$url" in
     https://*) : ;;
-    *) _ja_err "SGD_JIRA_BASE_URL must be https:// (got '$url') — the credential is never sent over cleartext"; return 1 ;;
+    *) _ja_err "SGE_JIRA_BASE_URL must be https:// (got '$url') — the credential is never sent over cleartext"; return 1 ;;
   esac
   local hostport="${url#https://}"
   hostport="${hostport%%/*}"
   case "$hostport" in
-    ''|*[!A-Za-z0-9.:-]*) _ja_err "SGD_JIRA_BASE_URL host '$hostport' contains invalid characters"; return 1 ;;
+    ''|*[!A-Za-z0-9.:-]*) _ja_err "SGE_JIRA_BASE_URL host '$hostport' contains invalid characters"; return 1 ;;
   esac
   _JA_HOSTPORT="$hostport"
   _JA_API_BASE="https://${hostport}"
@@ -252,14 +252,14 @@ _ja_api_base() {
 _ja_require_allowed_host() { # uses _JA_HOSTPORT
   local host entry h
   host="$(_ja_lower "${_JA_HOSTPORT%%:*}")"
-  if [ -n "${SGD_JIRA_HOSTS:-}" ]; then
-    local hosts=(); IFS=';' read -r -a hosts <<< "$(_ja_lower "$SGD_JIRA_HOSTS")"
+  if [ -n "${SGE_JIRA_HOSTS:-}" ]; then
+    local hosts=(); IFS=';' read -r -a hosts <<< "$(_ja_lower "$SGE_JIRA_HOSTS")"
     for entry in "${hosts[@]}"; do
       h="${entry%%:*}"
       [ -n "$h" ] && [ "$host" = "$h" ] && return 0
     done
   fi
-  _ja_err "refusing authenticated call to host '${_JA_HOSTPORT}' — not in the SGD_JIRA_HOSTS allow-list (';'-separated bare hosts); the credential is never sent to an unlisted host"
+  _ja_err "refusing authenticated call to host '${_JA_HOSTPORT}' — not in the SGE_JIRA_HOSTS allow-list (';'-separated bare hosts); the credential is never sent to an unlisted host"
   return 1
 }
 
@@ -273,12 +273,12 @@ _ja_credential() {
   local -
   { set +x; } 2>/dev/null
   _ja_cfg_quote() { local v="$1"; v="${v//\\/\\\\}"; v="${v//\"/\\\"}"; printf '%s' "$v"; }
-  if [ -n "${SGD_JIRA_BEARER:-}" ]; then
-    printf 'header = "Authorization: Bearer %s"\n' "$(_ja_cfg_quote "$SGD_JIRA_BEARER")"
-  elif [ -n "${SGD_JIRA_EMAIL:-}" ] && [ -n "${SGD_JIRA_API_TOKEN:-}" ]; then
-    printf 'user = "%s"\n' "$(_ja_cfg_quote "${SGD_JIRA_EMAIL}:${SGD_JIRA_API_TOKEN}")"
+  if [ -n "${SGE_JIRA_BEARER:-}" ]; then
+    printf 'header = "Authorization: Bearer %s"\n' "$(_ja_cfg_quote "$SGE_JIRA_BEARER")"
+  elif [ -n "${SGE_JIRA_EMAIL:-}" ] && [ -n "${SGE_JIRA_API_TOKEN:-}" ]; then
+    printf 'user = "%s"\n' "$(_ja_cfg_quote "${SGE_JIRA_EMAIL}:${SGE_JIRA_API_TOKEN}")"
   else
-    _ja_err "no Jira credential — set SGD_JIRA_BEARER, or SGD_JIRA_EMAIL + SGD_JIRA_API_TOKEN (never stored in the repo)"
+    _ja_err "no Jira credential — set SGE_JIRA_BEARER, or SGE_JIRA_EMAIL + SGE_JIRA_API_TOKEN (never stored in the repo)"
     return 1
   fi
 }
@@ -442,7 +442,7 @@ _ja_transition() { # <issueKey> <transition-id> <claim|release>
       # longer available) OR a misconfigured transition id. Both are loud
       # non-zero (DR3); the message names both so an operator debugging config
       # is not sent chasing a phantom racer.
-      _ja_err "$what transition refused for '$key' (HTTP 400) — either the item is already ${what}ed by another agent (lost race, single-winner transition guard: pick another candidate) or transition id '$tid' does not exist on this issue's workflow (check SGD_JIRA_${what^^}_TRANSITION_ID)"
+      _ja_err "$what transition refused for '$key' (HTTP 400) — either the item is already ${what}ed by another agent (lost race, single-winner transition guard: pick another candidate) or transition id '$tid' does not exist on this issue's workflow (check SGE_JIRA_${what^^}_TRANSITION_ID)"
       return 1
       ;;
     *)
@@ -469,8 +469,8 @@ _ja_main() {
   case "$cmd" in
     dispatch-label-config)
       # P9 — pure/local: resolve the repo-configurable dispatch-label name.
-      # DP2: the Jira dispatch gate is a LABEL, named here, default sgd-ready.
-      local lbl="${SGD_DISPATCH_LABEL:-sgd-ready}"
+      # DP2: the Jira dispatch gate is a LABEL, named here, default sge-ready.
+      local lbl="${SGE_DISPATCH_LABEL:-sge-ready}"
       _ja_require_label_name "$lbl" || exit 1
       printf '%s\n' "$lbl"
       ;;
@@ -524,12 +524,12 @@ _ja_main() {
       # passed the strict classes above; no free text reaches the query.
       [ -n "${2:-}" ] || _ja_usage 'list-dispatchable needs <project-key>'
       _ja_require_project_key "$2" || exit 1
-      local lbl="${3:-${SGD_DISPATCH_LABEL:-sgd-ready}}"
+      local lbl="${3:-${SGE_DISPATCH_LABEL:-sge-ready}}"
       _ja_require_label_name "$lbl" || exit 1
       local jql="project = $2 AND statusCategory != Done AND labels = \"$lbl\" AND assignee is EMPTY"
-      if [ -n "${SGD_JIRA_CLAIM_STATUS:-}" ]; then
-        _ja_require_status_name "${SGD_JIRA_CLAIM_STATUS}" || exit 1
-        jql="$jql AND status != \"${SGD_JIRA_CLAIM_STATUS}\""
+      if [ -n "${SGE_JIRA_CLAIM_STATUS:-}" ]; then
+        _ja_require_status_name "${SGE_JIRA_CLAIM_STATUS}" || exit 1
+        jql="$jql AND status != \"${SGE_JIRA_CLAIM_STATUS}\""
       fi
       _ja_api_get "/rest/api/2/search?jql=$(_ja_urlencode "$jql")&fields=summary,labels,assignee,status,issuelinks"
       ;;
@@ -539,22 +539,22 @@ _ja_main() {
       [ -n "${2:-}" ] || _ja_usage 'claim-item needs <issueKey>'
       _ja_require_write "claim-item" || exit 1
       _ja_require_issue_key "$2" || exit 1
-      [ -n "${SGD_JIRA_CLAIM_TRANSITION_ID:-}" ] || {
-        _ja_err "claim-item refused: SGD_JIRA_CLAIM_TRANSITION_ID is not set — without the transition guard the claim is not single-winner, and an adapter that cannot guarantee atomic claim MUST fail loud (SPEC-105 DR3)"
+      [ -n "${SGE_JIRA_CLAIM_TRANSITION_ID:-}" ] || {
+        _ja_err "claim-item refused: SGE_JIRA_CLAIM_TRANSITION_ID is not set — without the transition guard the claim is not single-winner, and an adapter that cannot guarantee atomic claim MUST fail loud (SPEC-105 DR3)"
         exit 1
       }
-      _ja_transition "$2" "${SGD_JIRA_CLAIM_TRANSITION_ID}" "claim" || exit 1
+      _ja_transition "$2" "${SGE_JIRA_CLAIM_TRANSITION_ID}" "claim" || exit 1
       ;;
     release-item)
       # P4 — MUTATING, same ordering as claim-item.
       [ -n "${2:-}" ] || _ja_usage 'release-item needs <issueKey>'
       _ja_require_write "release-item" || exit 1
       _ja_require_issue_key "$2" || exit 1
-      [ -n "${SGD_JIRA_RELEASE_TRANSITION_ID:-}" ] || {
-        _ja_err "release-item refused: SGD_JIRA_RELEASE_TRANSITION_ID is not set (SPEC-105 DR3)"
+      [ -n "${SGE_JIRA_RELEASE_TRANSITION_ID:-}" ] || {
+        _ja_err "release-item refused: SGE_JIRA_RELEASE_TRANSITION_ID is not set (SPEC-105 DR3)"
         exit 1
       }
-      _ja_transition "$2" "${SGD_JIRA_RELEASE_TRANSITION_ID}" "release" || exit 1
+      _ja_transition "$2" "${SGE_JIRA_RELEASE_TRANSITION_ID}" "release" || exit 1
       ;;
     comment-item)
       # P5 — MUTATING. Boundary FIRST (before key/credential/host/project), so a
@@ -576,7 +576,7 @@ _ja_main() {
       _ja_require_create || exit 1
       [ -n "${2:-}" ] && [ "$#" -ge 3 ] || _ja_usage 'create-item needs <project-key> <summary> [<description>]'
       _ja_require_project_key "$2" || exit 1
-      local _ja_itype="${SGD_JIRA_ISSUETYPE:-Task}"
+      local _ja_itype="${SGE_JIRA_ISSUETYPE:-Task}"
       local _ja_fields
       _ja_fields="{\"project\":{\"key\":$(_ja_json_str "$2")},\"summary\":$(_ja_json_str "$3"),\"issuetype\":{\"name\":$(_ja_json_str "$_ja_itype")}"
       # Arity, not emptiness: an explicitly-supplied empty description is a
@@ -593,7 +593,7 @@ _ja_main() {
       # (#1150). CORRELATION CONVENTION: record the merged change as a
       # development-panel REMOTE LINK on the issue, globalId = the change URL so
       # a re-run is idempotent (Jira upserts on globalId) rather than a
-      # duplicate. When SGD_JIRA_CLOSE_TRANSITION_ID is configured the close
+      # duplicate. When SGE_JIRA_CLOSE_TRANSITION_ID is configured the close
       # transition is ALSO fired. Both the remote-link POST and the optional
       # transition fail LOUD on a non-2xx/non-204 — the linkage is never
       # silently swallowed, so a caller cannot record an unlinked merge as
@@ -609,16 +609,16 @@ _ja_main() {
       esac
       _ja_post_expect "link-close-on-merge (remote link)" "/rest/api/2/issue/$2/remotelink" \
         "{\"globalId\":$(_ja_json_str "$_ja_url"),\"object\":{\"url\":$(_ja_json_str "$_ja_url"),\"title\":$(_ja_json_str "$_ja_title")}}" >/dev/null
-      if [ -n "${SGD_JIRA_CLOSE_TRANSITION_ID:-}" ]; then
-        case "${SGD_JIRA_CLOSE_TRANSITION_ID}" in
-          ''|*[!0-9]*) _ja_err "invalid SGD_JIRA_CLOSE_TRANSITION_ID '${SGD_JIRA_CLOSE_TRANSITION_ID}' — must be numeric"; exit 1 ;;
+      if [ -n "${SGE_JIRA_CLOSE_TRANSITION_ID:-}" ]; then
+        case "${SGE_JIRA_CLOSE_TRANSITION_ID}" in
+          ''|*[!0-9]*) _ja_err "invalid SGE_JIRA_CLOSE_TRANSITION_ID '${SGE_JIRA_CLOSE_TRANSITION_ID}' — must be numeric"; exit 1 ;;
         esac
         local _ja_tstatus
         _ja_tstatus="$(_ja_api_post_status "/rest/api/2/issue/$2/transitions" \
-          "{\"transition\":{\"id\":$(_ja_json_str "${SGD_JIRA_CLOSE_TRANSITION_ID}")}}")" || exit 1
+          "{\"transition\":{\"id\":$(_ja_json_str "${SGE_JIRA_CLOSE_TRANSITION_ID}")}}")" || exit 1
         case "$_ja_tstatus" in
           204) : ;;
-          *) _ja_err "link-close-on-merge: close transition for '$2' failed (HTTP $_ja_tstatus) — the merge remote link was recorded but the close transition did not apply; not silently swallowed (check SGD_JIRA_CLOSE_TRANSITION_ID)"; exit 1 ;;
+          *) _ja_err "link-close-on-merge: close transition for '$2' failed (HTTP $_ja_tstatus) — the merge remote link was recorded but the close transition did not apply; not silently swallowed (check SGE_JIRA_CLOSE_TRANSITION_ID)"; exit 1 ;;
         esac
       fi
       ;;

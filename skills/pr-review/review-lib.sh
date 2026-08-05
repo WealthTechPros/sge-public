@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# review-lib.sh — sourced helpers for /sgd:pr-review (issue #820, epic #729).
+# review-lib.sh — sourced helpers for /sge:pr-review (issue #820, epic #729).
 #
 # Mechanical parsing extracted from SKILL.md so the model never re-derives or
 # re-types it per invocation (the pr-labels.sh pattern — scripts cost zero
 # context): bot-reviewer signal detection (#688), diff-risk classification
-# (#688), the sgd-phase5-verdict marker parse (pass-through mode), and the
+# (#688), the sge-phase5-verdict marker parse (pass-through mode), and the
 # cursor-paginated unresolved-review-thread query (#717, fail-closed).
 #
 # Usage — SOURCE it (do not execute; rl_phase5_verdict sets caller variables):
@@ -43,6 +43,16 @@
 #                                   a failed query is never "0 unresolved")
 #   rl_head_sha <pr>                print the PR head SHA (REST — reliable
 #                                   where GraphQL-by-number is flaky)
+#   rl_idempotency_check <pr> <state_json> <head_sha>
+#                                   MECHANICAL Stage 0 gate (#1973) — returns
+#                                   non-zero (refuse) when the PR is already
+#                                   reviewed at the current head or closed/merged;
+#                                   0 (proceed) otherwise. Prints an observable
+#                                   refusal message so a silent skip is never
+#                                   indistinguishable from the bug it replaces.
+#                                   Fails OPEN: any parse/fetch error → proceed
+#                                   (a wrong "proceed" wastes tokens; a wrong
+#                                   "refuse" skips a needed review — worse).
 #   rl_pr_state <pr>                one-line {state,draft,head,labels} JSON
 #                                   for the #699 idempotency short-circuit
 #   rl_ensure_closing_link <pr> <n> append "Fixes #n" to the PR body unless a
@@ -74,17 +84,17 @@
 #   rl_attest_pending <pr>          print the count of dispatched-but-unattested
 #                                   reviewers — pr-labels.sh `pass` refuses (exit
 #                                   5) while this is > 0, mirroring the #754
-#                                   SGD_REVIEW_ADVISORY exit-4 backstop (#883)
+#                                   SGE_REVIEW_ADVISORY exit-4 backstop (#883)
 #   rl_review_identity              print "app" | "pat" — the review identity mode
-#                                   (#862). app when wtp-sgd App creds are in the
+#                                   (#862). app when wtp-sge App creds are in the
 #                                   env; pat (LOGGED fallback) otherwise.
 #   rl_app_jwt                      print an RS256-signed App JWT (openssl)
 #   rl_app_installation_token       print an installation access token (verbatim
-#                                   from SGD_REVIEW_APP_TOKEN, else minted)
+#                                   from SGE_REVIEW_APP_TOKEN, else minted)
 #   rl_app_token_cached             print the App installation token, memoised
 #                                   for the shell (mint at most once/dispatch);
 #                                   non-zero + no output when no App creds (#1149)
-#   rl_gh <gh-args...>              run `gh` under the wtp-sgd App token (15k/hr
+#   rl_gh <gh-args...>              run `gh` under the wtp-sge App token (15k/hr
 #                                   App tier) when available, else the ambient
 #                                   PAT (5k/hr, warned once). App-auth-by-default
 #                                   transport — biggest rate-limit lever (#1149)
@@ -92,7 +102,24 @@
 #                                   post the verdict (APPROVE|REQUEST_CHANGES|
 #                                   COMMENT) as a REAL App-authored review when in
 #                                   app mode, else the PAT path with the
-#                                   self-authored --comment fallback (#862)
+#                                   self-authored --comment fallback (#862).
+#                                   Refuses (exit 6) a verdict declaring
+#                                   findings whose findings_comment is not
+#                                   `inline` or a verified URL (#1858)
+#   rl_post_findings_comment <pr> [file|-]
+#                                   post the findings comment and read it back
+#                                   by id before printing its URL; non-zero +
+#                                   no output on ANY failure — the caller must
+#                                   then fold the findings into the verdict
+#                                   body (`findings_comment: inline`), never
+#                                   post the verdict as if they landed (#1858)
+#   rl_verdict_findings_total <body> print blockers+majors+minors from the
+#                                   sge-verdict block ("" = no count triple)
+#   rl_verdict_findings_ref <body>  print the findings_comment: value ("" =
+#                                   field absent)
+#   rl_verdict_findings_unverified <pr> <body>
+#                                   exit 0 ("block") when declared findings
+#                                   have no verified delivery route (#1858)
 #   rl_is_rate_limit_error <text>   print 1|0 — does a `gh` stderr/output blob
 #                                   look like a GitHub rate-limit response
 #                                   (403 + "rate limit"/"API rate limit
@@ -108,7 +135,7 @@
 #                                   caller must treat that as unknown, not as
 #                                   "quota is fine").
 #   rl_rate_limit_exhausted [floor] print 1|0 — REST remaining <= floor
-#                                   (default 50, SGD_REVIEW_RATE_LIMIT_FLOOR)?
+#                                   (default 50, SGE_REVIEW_RATE_LIMIT_FLOOR)?
 #                                   Fails closed to 0 (assume NOT exhausted,
 #                                   i.e. do not spuriously abort a healthy
 #                                   session) when the status can't be read —
@@ -169,12 +196,12 @@ rl__repo() {
 
 # rl_scratch_file <pr> [label] -- print a PR-scoped, collision-proof scratch
 # path for a review draft/body/thread artefact (issue #1667). Two concurrent
-# /sgd:pr-review lanes (pr-monitor runs LANES=3 by default) MUST NOT share a
+# /sge:pr-review lanes (pr-monitor runs LANES=3 by default) MUST NOT share a
 # filename: the incident was two lanes both writing `review.md`, one overwriting
 # the other between drafting and posting, so a lane posted the WRONG PR's verdict
 # onto a PR — twice. The path is keyed to repo + PR + this shell's PID so no two
 # concurrent lanes — even reviewing the same PR — can ever collide:
-#   $TMPDIR/sgd-review-<repo-slug>-pr<N>-<pid>[.<label>]
+#   $TMPDIR/sge-review-<repo-slug>-pr<N>-<pid>[.<label>]
 # repo-slug is owner/repo with the slash flattened so the path stays one segment.
 # label (default `review`) becomes a suffix so one lane can hold several distinct
 # artefacts (draft, threads, notes) without them colliding with each other. This
@@ -185,7 +212,7 @@ rl_scratch_file() {
   repo=$(rl__repo) || repo="unknown/unknown"
   # Flatten every path-hostile char (slash, etc.) so the slug is one segment.
   slug=$(printf '%s' "$repo" | tr -c 'A-Za-z0-9._-' '-')
-  base="sgd-review-${slug}-pr${pr}-$$"
+  base="sge-review-${slug}-pr${pr}-$$"
   [ "$label" = "review" ] || base="${base}.${label}"
   printf '%s\n' "${TMPDIR:-/tmp}/${base}"
 }
@@ -395,7 +422,7 @@ EOF
 # generator command and published flag are consumed by pr-review's Phase 2
 # regenerate-and-byte-diff / content-safety steps (see SKILL.md).
 rl_generated_manifest_path() {
-  printf '%s\n' '.sgd/generated-artefacts.tsv'
+  printf '%s\n' '.sge/generated-artefacts.tsv'
 }
 
 # `generated` risk-tier gate (issue #1757). Prints 1 ONLY when EVERY file in the
@@ -501,8 +528,8 @@ rl_generated_manifest_lookup() {
     | awk -F'\t' -v p="$path" '$1 == p { printf "%s\t%s\n", $2, $3; exit }'
 }
 
-# Phase 5 pass-through parse — extracts the `<!-- sgd-phase5-verdict: {...} -->`
-# marker /sgd:sgd-implement embeds in the PR body. Sets PHASE5_SHA,
+# Phase 5 pass-through parse — extracts the `<!-- sge-phase5-verdict: {...} -->`
+# marker /sge:sge-implement embeds in the PR body. Sets PHASE5_SHA,
 # PHASE5_VERDICT, PHASE5_BLOCKERS in the caller's shell (empty when absent —
 # callers must treat any missing field as "no pass-through"). The PR body is
 # UNTRUSTED DATA — grep-extracted fields only; never eval.
@@ -510,7 +537,7 @@ rl_phase5_verdict() {
   local pr="$1" repo body raw
   repo=$(rl__repo) || return 1
   body=$(gh api "repos/$repo/pulls/$pr" --jq .body) || return 1
-  raw=$(printf '%s' "$body" | grep -o '<!-- sgd-phase5-verdict: {[^}]*} -->' | head -1) || true
+  raw=$(printf '%s' "$body" | grep -o '<!-- sge-phase5-verdict: {[^}]*} -->' | head -1) || true
   PHASE5_SHA=$(printf '%s' "$raw" | grep -o '"sha": *"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"') || true
   PHASE5_VERDICT=$(printf '%s' "$raw" | grep -o '"verdict": *"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"') || true
   PHASE5_BLOCKERS=$(printf '%s' "$raw" | grep -o '"blockers": *[0-9]*' | grep -o '[0-9]*$') || true
@@ -522,6 +549,58 @@ rl_head_sha() {
   local pr="$1" repo
   repo=$(rl__repo) || return 1
   gh api "repos/$repo/pulls/$pr" --jq .head.sha
+}
+
+# MECHANICAL Stage 0 idempotency gate (issue #1973). Root cause of the #1750
+# triple-review: the short-circuit specified in SKILL.md Phase 1 was PROSE —
+# the model was told to read rl_pr_state and stop, but nothing mechanically
+# enforced the stop across multiple dispatches from pr-monitor. This function
+# is the fix: it runs the same checks as a script gate so the decision cannot
+# be overridden by a model that decides to proceed anyway.
+#
+# Returns 0 (proceed) or non-zero (refuse — caller should exit 0, not error).
+# Prints an OBSERVABLE refusal message on every refusal (AC2 #1973: "not a
+# silent no-op") so dispatchers can see why no review ran.
+#
+# FAILS OPEN: any parse/API error → return 0 (proceed). A wrong "proceed"
+# wastes tokens on a redundant review; a wrong "refuse" skips a needed one.
+# The subsequent start-review claim guard and the review itself catch any
+# real issues.
+rl_idempotency_check() {
+  local pr="${1:?rl_idempotency_check: pr required}"
+  local state="${2:?rl_idempotency_check: state json required}"
+  local head="${3:-}"
+  local pr_state labels last_verdict last_sha repo
+  # Empty head (rl_head_sha failed) → can't verify idempotency → proceed.
+  [ -n "$head" ] || return 0
+
+  # 1. MERGED / CLOSED — no review needed.
+  pr_state=$(printf '%s' "$state" | jq -r '.state // ""' 2>/dev/null) || pr_state=""
+  case "$pr_state" in
+    MERGED|CLOSED|merged|closed)
+      echo "rl_idempotency_check: PR #${pr} is ${pr_state} — no review dispatched (issue #699, mechanical gate #1973)"
+      return 1 ;;
+  esac
+
+  # 2. pr-reviewed present AND latest sge-verdict commit matches head.
+  labels=$(printf '%s' "$state" | jq -r '.labels[]? // empty' 2>/dev/null) || labels=""
+  if printf '%s\n' "$labels" | grep -qx 'pr-reviewed'; then
+    repo=$(rl__repo) || return 0   # can't verify → proceed
+    last_verdict=$(gh api "repos/$repo/pulls/$pr/reviews" --jq \
+      '[.[].body // "" | select(contains("sge-verdict"))] | last // ""' 2>/dev/null) || last_verdict=""
+    if [ -n "$last_verdict" ]; then
+      last_sha=$(printf '%s' "$last_verdict" \
+        | grep -oE 'commit:[[:space:]]*[0-9a-f]+' \
+        | head -1 \
+        | grep -oE '[0-9a-f]{7,40}') || last_sha=""
+      if [ -n "$last_sha" ] && [ "$last_sha" = "$head" ]; then
+        echo "rl_idempotency_check: PR #${pr} already reviewed at head ${head:0:7} — refusing duplicate review (issue #699, mechanical gate #1973)"
+        return 2
+      fi
+    fi
+  fi
+
+  return 0
 }
 
 # One-line PR state for the concurrency/idempotency short-circuit (#699).
@@ -753,10 +832,10 @@ rl_reviewer_ran() {
 # dispatched Layer 2/3 reviewer is recorded as PENDING when dispatched, and can
 # only be cleared to ATTESTED by clearing rl_reviewer_ran. `pr-labels.sh pass`
 # refuses (exit 5) while any PENDING reviewer remains — the same shape as the
-# SGD_REVIEW_ADVISORY exit-4 backstop that #754 added to this exact flow.
+# SGE_REVIEW_ADVISORY exit-4 backstop that #754 added to this exact flow.
 #
 # The ledger is a per-PR append-only file keyed by repo+PR under a session-
-# stable dir (SGD_REVIEW_STATE_DIR, else TMPDIR/TEMP, else /tmp). A reviewer is
+# stable dir (SGE_REVIEW_STATE_DIR, else TMPDIR/TEMP, else /tmp). A reviewer is
 # PENDING when it has a `dispatch` line with no later `attest` line for the same
 # id. NO dispatch record => 0 pending => an inline / no-fan-out review passes
 # untouched (small PRs reviewed without specialists are unaffected). pr-labels.sh
@@ -765,10 +844,10 @@ rl_reviewer_ran() {
 # `_attest_pending` / `_ATTEST_FILE`.
 rl__attest_file() {
   local pr="${1:?rl__attest_file: pr required}"
-  local dir="${SGD_REVIEW_STATE_DIR:-${TMPDIR:-${TEMP:-/tmp}}}"
+  local dir="${SGE_REVIEW_STATE_DIR:-${TMPDIR:-${TEMP:-/tmp}}}"
   local repo="${GH_REPO:-local}"
   repo="${repo//[^A-Za-z0-9._-]/_}"   # flatten owner/repo → owner_repo for a filename
-  printf '%s/sgd-review-attest.%s.%s' "$dir" "$repo" "$pr"
+  printf '%s/sge-review-attest.%s.%s' "$dir" "$repo" "$pr"
 }
 
 # rl_attest_reset <pr> — start a clean ledger for a fresh review pass.
@@ -820,7 +899,7 @@ rl_attest_pending() {
 # The whole pipeline builds AND reviews under one shared human gh identity, so
 # GitHub blocks self-approval: every verdict degrades to a comment + the
 # pr-reviewed label, and required-review branch protection is unusable because
-# builder and reviewer are the same account. When the wtp-sgd GitHub App's
+# builder and reviewer are the same account. When the wtp-sge GitHub App's
 # credentials are present in the environment, these helpers post the verdict as
 # a REAL PR review authored by the App — a distinct identity from the human
 # builder — so an APPROVE satisfies required-review branch protection and the
@@ -830,58 +909,72 @@ rl_attest_pending() {
 #
 # SECURITY: every credential is read from the environment ONLY (Doppler-style);
 # nothing is hardcoded. Recognised vars (any one route enables App mode):
-#   SGD_REVIEW_APP_TOKEN            a pre-minted installation access token
+#   SGE_REVIEW_APP_TOKEN            a pre-minted installation access token
 #                                   (e.g. from actions/create-github-app-token) --
 #                                   preferred; needs no private-key handling here.
-#   SGD_REVIEW_APP_ID +            mint-it-here route: App (client) id, the App
-#   SGD_REVIEW_APP_PRIVATE_KEY      private key as literal PEM in the env, OR
-#     (or _PRIVATE_KEY_FILE) +      SGD_REVIEW_APP_PRIVATE_KEY_FILE pointing at it,
-#   SGD_REVIEW_APP_INSTALLATION_ID  and the installation id on the target org.
+#   SGE_REVIEW_APP_ID +            mint-it-here route: App (client) id, the App
+#   SGE_REVIEW_APP_PRIVATE_KEY      private key as literal PEM in the env, OR
+#     (or _PRIVATE_KEY_FILE) +      SGE_REVIEW_APP_PRIVATE_KEY_FILE pointing at it,
+#   SGE_REVIEW_APP_INSTALLATION_ID  and the installation id on the target org.
 # The private key, if passed literally, is written to a umask-077 temp file only
 # for the openssl call and removed immediately. Tokens are passed to a single
 # child process via GH_TOKEN and never echoed.
+
+# Back-compat alias (SGD -> SGE rebrand): the App-credential secrets on this
+# repo (and any consumer that hasn't rotated yet) are still provisioned under
+# the pre-rename SGD_REVIEW_APP_* names -- a secret rename is an out-of-band
+# admin action, not something a source diff can do. Alias them into the
+# canonical SGE_REVIEW_APP_* names here, ONCE, so every helper below keeps
+# working under either naming convention without a silent, unannounced
+# downgrade to PAT mode (which would quietly disable the builder != reviewer
+# separation-of-duties control, issue #862).
+: "${SGE_REVIEW_APP_TOKEN:=${SGD_REVIEW_APP_TOKEN:-}}"
+: "${SGE_REVIEW_APP_ID:=${SGD_REVIEW_APP_ID:-}}"
+: "${SGE_REVIEW_APP_PRIVATE_KEY:=${SGD_REVIEW_APP_PRIVATE_KEY:-}}"
+: "${SGE_REVIEW_APP_PRIVATE_KEY_FILE:=${SGD_REVIEW_APP_PRIVATE_KEY_FILE:-}}"
+: "${SGE_REVIEW_APP_INSTALLATION_ID:=${SGD_REVIEW_APP_INSTALLATION_ID:-}}"
 
 # rl_review_identity -- print the review identity mode: "app" or "pat".
 # app  = a complete App credential route is present in the env.
 # pat  = no (or incomplete) App credentials -- fall back to the shared gh user;
 #        the fallback is LOGGED to stderr (issue #862 asks for it to be logged).
 rl_review_identity() {
-  if [ -n "${SGD_REVIEW_APP_TOKEN:-}" ]; then
-    echo "pr-review: App-token mode -- pre-minted installation token present; verdict posts as the wtp-sgd App (builder != reviewer, issue #862)" >&2
+  if [ -n "${SGE_REVIEW_APP_TOKEN:-}" ]; then
+    echo "pr-review: App-token mode -- pre-minted installation token present; verdict posts as the wtp-sge App (builder != reviewer, issue #862)" >&2
     printf 'app\n'; return 0
   fi
-  if [ -n "${SGD_REVIEW_APP_ID:-}" ] \
-     && { [ -n "${SGD_REVIEW_APP_PRIVATE_KEY:-}" ] || [ -n "${SGD_REVIEW_APP_PRIVATE_KEY_FILE:-}" ]; } \
-     && [ -n "${SGD_REVIEW_APP_INSTALLATION_ID:-}" ]; then
-    echo "pr-review: App-token mode -- will mint an installation token from wtp-sgd App credentials (builder != reviewer, issue #862)" >&2
+  if [ -n "${SGE_REVIEW_APP_ID:-}" ] \
+     && { [ -n "${SGE_REVIEW_APP_PRIVATE_KEY:-}" ] || [ -n "${SGE_REVIEW_APP_PRIVATE_KEY_FILE:-}" ]; } \
+     && [ -n "${SGE_REVIEW_APP_INSTALLATION_ID:-}" ]; then
+    echo "pr-review: App-token mode -- will mint an installation token from wtp-sge App credentials (builder != reviewer, issue #862)" >&2
     printf 'app\n'; return 0
   fi
-  echo "pr-review: no complete wtp-sgd App credentials in env -- falling back to PAT/bot review identity; self-approval is blocked so the verdict lands as comment + pr-reviewed label (issue #862)" >&2
+  echo "pr-review: no complete wtp-sge App credentials in env -- falling back to PAT/bot review identity; self-approval is blocked so the verdict lands as comment + pr-reviewed label (issue #862)" >&2
   printf 'pat\n'
 }
 
 # rl__b64url -- read stdin, emit base64url with no padding (JWT segment encoding).
 rl__b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 
-# rl_app_jwt -- print an RS256-signed GitHub App JWT built from SGD_REVIEW_APP_ID
-# and the App private key (PEM literal in SGD_REVIEW_APP_PRIVATE_KEY, or the file
-# named by SGD_REVIEW_APP_PRIVATE_KEY_FILE). exp is 9 minutes out (< GitHub's
+# rl_app_jwt -- print an RS256-signed GitHub App JWT built from SGE_REVIEW_APP_ID
+# and the App private key (PEM literal in SGE_REVIEW_APP_PRIVATE_KEY, or the file
+# named by SGE_REVIEW_APP_PRIVATE_KEY_FILE). exp is 9 minutes out (< GitHub's
 # 10-minute max) with a 60s backdated iat for clock skew. Fails CLOSED (non-zero,
 # no output) when openssl, the App id, or the key is missing / signing fails.
 rl_app_jwt() {
   local app_id keyfile cleanup="" now iat exp header payload signing_input sig
-  app_id="${SGD_REVIEW_APP_ID:-}"
-  [ -n "$app_id" ] || { echo "rl_app_jwt: SGD_REVIEW_APP_ID unset -- cannot build App JWT" >&2; return 1; }
+  app_id="${SGE_REVIEW_APP_ID:-}"
+  [ -n "$app_id" ] || { echo "rl_app_jwt: SGE_REVIEW_APP_ID unset -- cannot build App JWT" >&2; return 1; }
   command -v openssl >/dev/null 2>&1 || { echo "rl_app_jwt: openssl not found -- cannot sign App JWT" >&2; return 1; }
-  if [ -n "${SGD_REVIEW_APP_PRIVATE_KEY_FILE:-}" ]; then
-    keyfile="${SGD_REVIEW_APP_PRIVATE_KEY_FILE}"
+  if [ -n "${SGE_REVIEW_APP_PRIVATE_KEY_FILE:-}" ]; then
+    keyfile="${SGE_REVIEW_APP_PRIVATE_KEY_FILE}"
     [ -r "$keyfile" ] || { echo "rl_app_jwt: private-key file not readable: $keyfile" >&2; return 1; }
-  elif [ -n "${SGD_REVIEW_APP_PRIVATE_KEY:-}" ]; then
+  elif [ -n "${SGE_REVIEW_APP_PRIVATE_KEY:-}" ]; then
     keyfile="$(mktemp)" || return 1
     cleanup="$keyfile"
-    ( umask 077; printf '%s\n' "${SGD_REVIEW_APP_PRIVATE_KEY}" > "$keyfile" )
+    ( umask 077; printf '%s\n' "${SGE_REVIEW_APP_PRIVATE_KEY}" > "$keyfile" )
   else
-    echo "rl_app_jwt: no private key (set SGD_REVIEW_APP_PRIVATE_KEY or _PRIVATE_KEY_FILE)" >&2; return 1
+    echo "rl_app_jwt: no private key (set SGE_REVIEW_APP_PRIVATE_KEY or _PRIVATE_KEY_FILE)" >&2; return 1
   fi
   now=$(date +%s); iat=$((now - 60)); exp=$((now + 540))
   header=$(printf '{"alg":"RS256","typ":"JWT"}' | rl__b64url)
@@ -893,17 +986,17 @@ rl_app_jwt() {
   printf '%s.%s\n' "$signing_input" "$sig"
 }
 
-# rl_app_installation_token -- print an installation access token for the wtp-sgd
-# App. If SGD_REVIEW_APP_TOKEN is set it is returned verbatim (no network). Else
+# rl_app_installation_token -- print an installation access token for the wtp-sge
+# App. If SGE_REVIEW_APP_TOKEN is set it is returned verbatim (no network). Else
 # it mints a JWT (rl_app_jwt) and exchanges it at
 # POST /app/installations/{id}/access_tokens via curl. Fails CLOSED on any error.
 rl_app_installation_token() {
-  if [ -n "${SGD_REVIEW_APP_TOKEN:-}" ]; then
-    printf '%s\n' "${SGD_REVIEW_APP_TOKEN}"; return 0
+  if [ -n "${SGE_REVIEW_APP_TOKEN:-}" ]; then
+    printf '%s\n' "${SGE_REVIEW_APP_TOKEN}"; return 0
   fi
   local inst jwt resp tok api
-  inst="${SGD_REVIEW_APP_INSTALLATION_ID:-}"
-  [ -n "$inst" ] || { echo "rl_app_installation_token: SGD_REVIEW_APP_INSTALLATION_ID unset" >&2; return 1; }
+  inst="${SGE_REVIEW_APP_INSTALLATION_ID:-}"
+  [ -n "$inst" ] || { echo "rl_app_installation_token: SGE_REVIEW_APP_INSTALLATION_ID unset" >&2; return 1; }
   command -v curl >/dev/null 2>&1 || { echo "rl_app_installation_token: curl not found -- cannot exchange JWT for a token" >&2; return 1; }
   jwt=$(rl_app_jwt) || return 1
   api="${GITHUB_API_URL:-https://api.github.com}"
@@ -920,9 +1013,9 @@ rl_app_installation_token() {
 
 # ---------------------------------------------------------------------------
 # App-auth by DEFAULT for gh transport (issue #1149, fix #1 — the biggest
-# lever). #862 already mints the wtp-sgd App installation token, but only
+# lever). #862 already mints the wtp-sge App installation token, but only
 # rl_post_verdict consumes it; every other gh call in the pipeline still draws
-# on the shared human PAT's 5000/hr REST quota. The wtp-sgd App installation
+# on the shared human PAT's 5000/hr REST quota. The wtp-sge App installation
 # token carries the 15000/hr App-installation tier — 3x headroom before any
 # other rate-limit mitigation matters. These two helpers let any call site
 # route a gh call through the App token when it is available, falling back
@@ -955,7 +1048,7 @@ rl_app_token_cached() {
   printf '%s\n' "$tok"
 }
 
-# rl_gh <gh-args...> -- run `gh` with the wtp-sgd App installation token as
+# rl_gh <gh-args...> -- run `gh` with the wtp-sge App installation token as
 # GH_TOKEN when available (15k/hr App tier), else transparently with the
 # ambient auth (PAT/GH_TOKEN already in the environment — 5k/hr). Drop-in for a
 # bare `gh` call: `rl_gh api ...`, `rl_gh pr view ...`. The fallback to PAT is
@@ -969,14 +1062,14 @@ rl_gh() {
     return $?
   fi
   if [ -z "${RL_APP_TOKEN_PAT_WARNED:-}" ]; then
-    echo "rl_gh: no wtp-sgd App token available -- using ambient PAT auth (5000/hr REST tier). Set SGD_REVIEW_APP_* to get the 15000/hr App tier (issue #1149)." >&2
+    echo "rl_gh: no wtp-sge App token available -- using ambient PAT auth (5000/hr REST tier). Set SGE_REVIEW_APP_* to get the 15000/hr App tier (issue #1149)." >&2
     RL_APP_TOKEN_PAT_WARNED=1
   fi
   gh "$@"
 }
 
 # rl_verdict_body_pr <body> -- print the PR number the verdict body declares in
-# its machine-readable `sgd-verdict` block (`pr: <number>` line, SKILL.md Phase
+# its machine-readable `sge-verdict` block (`pr: <number>` line, SKILL.md Phase
 # 5), or nothing if the body carries no such marker (issue #1667). Reads the
 # FIRST `pr:` line only — the verdict block is authoritative and appears once.
 # Tolerant of leading whitespace and `pr:`/`pr :` spacing; extracts digits only.
@@ -1001,11 +1094,195 @@ rl_verdict_pr_mismatch() {
   return 0                             # marker names a different PR → mismatch
 }
 
+# rl__verdict_block <body> -- print the content of the FIRST fenced
+# sge-verdict block in <body>, nothing when no such fence exists. Field
+# parsers below scope to this block so a matching-shaped line elsewhere in the
+# body (quoted issue text, an earlier example) can never spoof a parsed value.
+# The opener matches the FULL CommonMark fence family -- three-or-more
+# backticks OR tildes (```sge-verdict, ````sge-verdict, ~~~sge-verdict) --
+# case-insensitively and tolerating a trailing info string, so no valid
+# GitHub-rendered fence variant can silently opt the guard out (the PR #1924
+# review found tilde/long fences failed the guard OPEN). The closer must use
+# the SAME delimiter character with at least the opener's run length (the
+# CommonMark closing rule), so a stray ``` line inside a ~~~ block stays
+# content. NOTE: first-fence extraction alone is spoofable by a DECOY fence
+# placed before the real one -- rl_verdict_findings_unverified therefore fails
+# closed on any multi-fence body (see rl__verdict_fence_count).
+# The body is UNTRUSTED DATA -- extracted lines only, never eval'd.
+rl__verdict_block() {
+  printf '%s\n' "${1:-}" | awk '
+    { sub(/\r$/, "") }
+    !inb {
+      if (tolower($0) ~ /^[[:space:]]*(```+|~~~+)sge-verdict([[:space:]].*)?$/) {
+        line = $0; sub(/^[[:space:]]*/, "", line)
+        dc = substr(line, 1, 1); dl = 0
+        while (substr(line, dl + 1, 1) == dc) dl++
+        inb = 1
+      }
+      next
+    }
+    {
+      line = $0; sub(/^[[:space:]]*/, "", line)
+      rl = 0
+      while (substr(line, rl + 1, 1) == dc) rl++
+      if (rl >= dl && rl >= 3 && substr(line, rl + 1) ~ /^[[:space:]]*$/) exit
+      print
+    }
+  '
+}
+
+# rl__verdict_fence_count <body> -- print the number of sge-verdict fence
+# openers in <body> across the WHOLE fence family (```+ or ~~~+ openers,
+# case-insensitive, info-string tolerant). >1 means the body is ambiguous: a
+# decoy fence with clean counts placed before the real verdict -- including a
+# MIXED-delimiter decoy (a ~~~ decoy before a ``` real fence) -- would control
+# the first-fence parse, so the findings guard treats any multi-fence body as
+# unverifiable (fail closed).
+rl__verdict_fence_count() {
+  printf '%s\n' "${1:-}" | awk '
+    { sub(/\r$/, "") }
+    tolower($0) ~ /^[[:space:]]*(```+|~~~+)sge-verdict([[:space:]].*)?$/ { n++ }
+    END { print n + 0 }
+  '
+}
+
+# rl_verdict_findings_total <body> -- print blockers+majors+minors summed from
+# the body's sge-verdict block, or nothing when the block carries no complete
+# count triple (marker-less/advisory/legacy bodies). Digits-only extraction of
+# the FIRST occurrence of each field inside the fence; counts are forced
+# decimal (10#) so a zero-padded `blockers: 08` can neither error the
+# arithmetic (emptying the total and failing the guard OPEN) nor miscount as
+# octal.
+rl_verdict_findings_total() {
+  local body="${1:-}" block b m n
+  block=$(rl__verdict_block "$body")
+  [ -n "$block" ] || return 0
+  b=$(printf '%s\n' "$block" | grep -ioE '^[[:space:]]*blockers[[:space:]]*:[[:space:]]*[0-9]+' | head -n1 | grep -oE '[0-9]+')
+  m=$(printf '%s\n' "$block" | grep -ioE '^[[:space:]]*majors[[:space:]]*:[[:space:]]*[0-9]+'   | head -n1 | grep -oE '[0-9]+')
+  n=$(printf '%s\n' "$block" | grep -ioE '^[[:space:]]*minors[[:space:]]*:[[:space:]]*[0-9]+'   | head -n1 | grep -oE '[0-9]+')
+  [ -n "$b" ] && [ -n "$m" ] && [ -n "$n" ] || return 0
+  printf '%s\n' "$((10#$b + 10#$m + 10#$n))"
+}
+
+# rl_verdict_findings_ref <body> -- print the `findings_comment:` value declared
+# in the body's sge-verdict block (issue #1858): a comment URL, `inline`, or
+# `none`; nothing when the field is absent (legacy bodies) or there is no fence.
+rl_verdict_findings_ref() {
+  local body="${1:-}"
+  rl__verdict_block "$body" \
+    | grep -ioE '^[[:space:]]*findings_comment[[:space:]]*:[[:space:]]*[^[:space:]]+' \
+    | head -n1 \
+    | sed -E 's/^[[:space:]]*[Ff][Ii][Nn][Dd][Ii][Nn][Gg][Ss]_[Cc][Oo][Mm][Mm][Ee][Nn][Tt][[:space:]]*:[[:space:]]*//'
+}
+
+# rl_post_findings_comment <pr> [file|-] -- post the findings comment and VERIFY
+# it exists before reporting success (issue #1858). The #1849 residual: a
+# dispatch that succeeds posts its verdict, but the SEPARATE findings-comment
+# POST fails silently -- the daemon's artefact check requires only the
+# sge-verdict fence, so the run reads as complete while the actionable findings
+# were never delivered. Verification norm: a POST that "ran" is not a comment
+# that EXISTS -- so after the POST this reads the comment back by id
+# (independent GET) and only then prints the comment URL. FAILS CLOSED (non-zero,
+# no output) on POST failure, a response with no numeric id, read-back failure,
+# an empty read-back body, or an empty input body. The caller (SKILL.md Phase 6)
+# must react to a failure by folding the findings INTO the verdict body
+# (`findings_comment: inline`) -- never by posting the verdict as if the
+# findings had landed.
+rl_post_findings_comment() {
+  local pr="${1:?rl_post_findings_comment: pr required}" src="${2:--}" repo body resp cid readback url
+  repo=$(rl__repo) || return 1
+  if [ "$src" = "-" ]; then
+    body=$(cat)
+  else
+    body=$(cat "$src" 2>/dev/null) || return 1
+  fi
+  [ -n "${body//[$' \t\r\n']/}" ] || return 1
+  resp=$(rl_gh api --method POST "repos/${repo}/issues/${pr}/comments" -f body="$body" 2>/dev/null) || return 1
+  cid=$(printf '%s' "$resp" | jq -r '.id // empty' 2>/dev/null)
+  [[ "$cid" =~ ^[0-9]+$ ]] || return 1
+  readback=$(rl_gh api "repos/${repo}/issues/comments/${cid}" --jq '.body // empty' 2>/dev/null) || return 1
+  [ -n "${readback//[$' \t\r\n']/}" ] || return 1
+  url=$(printf '%s' "$resp" | jq -r '.html_url // empty' 2>/dev/null)
+  # Fallback must stay URL-shaped: its only consumer is the anchored-URL check
+  # in rl_verdict_findings_unverified, which a bare "issuecomment-<id>" string
+  # would always fail (PR #1924 review finding).
+  [ -n "$url" ] || url="https://github.com/${repo}/pull/${pr}#issuecomment-${cid}"
+  printf '%s\n' "$url"
+}
+
+# rl_verdict_findings_unverified <pr> <body> -- exit 0 (TRUE, "block the post")
+# when the body's sge-verdict block declares findings (blockers+majors+minors
+# > 0) whose delivery cannot be proven: findings_comment absent, `none`, or a
+# URL that is not this repo+PR's own verified findings comment (issue #1858).
+# Exit 1 (FALSE, safe to post) when the verdict is clean (total 0), declares
+# `findings_comment: inline` (self-contained body), declares a URL that
+# read-back-verifies AGAINST THIS PR, or carries no count triple at all
+# (marker-less/advisory/legacy bodies -- like the #1667 guard, this blocks
+# only on a positive signal so it can never wedge a legitimate non-verdict
+# post). Two deliberate fail-closed hardenings:
+#   * multi-fence bodies block outright -- a decoy ```sge-verdict fence with
+#     clean counts placed before the real one would otherwise control the
+#     first-fence parse and fail the guard OPEN;
+#   * the URL must be anchored to https://github.com/<repo>/pull/<pr> AND its
+#     comment's issue_url must read back as this PR -- existence of SOME
+#     readable comment anywhere is not delivery of THESE findings.
+rl_verdict_findings_unverified() {
+  local pr="${1:?rl_verdict_findings_unverified: pr required}" body="${2:-}" fcount total ref refnorm cid repo rjson rbody iurl
+  fcount=$(rl__verdict_fence_count "$body")
+  [ "$fcount" -gt 1 ] && return 0      # decoy-fence ambiguity -> block
+  if [ "$fcount" -eq 0 ]; then
+    # Substring backstop (PR #1924 review): the downstream artefact check
+    # (check-review-independence.sh) accepts a verdict on a bare
+    # contains("sge-verdict") substring test. A body the consumer would read
+    # as a verdict but this guard cannot parse into a fence (a blockquoted
+    # fence, a future delimiter variant) must fail CLOSED, not fall through
+    # the "not a verdict body" path. Truly marker-less bodies still pass.
+    case "$(printf '%s' "$body" | tr '[:upper:]' '[:lower:]')" in
+      *sge-verdict*) return 0 ;;       # consumer-visible marker, unparseable fence -> block
+      *) return 1 ;;                   # marker-less body -> not a verdict
+    esac
+  fi
+  total=$(rl_verdict_findings_total "$body")
+  [ -n "$total" ] || return 1          # fenced but no count triple -> legacy verdict body
+  [ "$total" -gt 0 ] || return 1       # clean verdict -> nothing to deliver
+  ref=$(rl_verdict_findings_ref "$body")
+  # Normalise the VALUE for the literal comparisons (the field NAME already
+  # matches case-insensitively): `INLINE`/`None` must behave like their
+  # lowercase forms, not fall through to the URL branch.
+  refnorm=$(printf '%s' "$ref" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+  [ "$refnorm" = "inline" ] && return 1  # findings are in the verdict body itself
+  case "$refnorm" in
+    ""|none) return 0 ;;               # findings declared but no delivery route
+  esac
+  # A URL reference: it must name THIS repo and THIS PR (anchored -- scheme,
+  # host, owner, repo, PR number all fixed), carry an `issuecomment-<id>`
+  # fragment (bare trailing digits would let a plain PR URL misparse the PR
+  # number as a comment id), and the comment must read back non-empty WITH an
+  # issue_url binding it to this PR. Fail closed on every mismatch or error.
+  repo=$(rl__repo) || return 0
+  [ -n "$repo" ] || return 0           # rl__repo can emit empty on exit 0 -- still fail closed
+  case "$ref" in
+    "https://github.com/${repo}/pull/${pr}#issuecomment-"*) : ;;
+    *) return 0 ;;                     # foreign host/repo/PR or malformed -> block
+  esac
+  cid=$(printf '%s' "$ref" | grep -oE '#issuecomment-[0-9]+$' | grep -oE '[0-9]+')
+  [ -n "$cid" ] || return 0
+  rjson=$(rl_gh api "repos/${repo}/issues/comments/${cid}" 2>/dev/null) || return 0
+  rbody=$(printf '%s' "$rjson" | jq -r '.body // empty' 2>/dev/null)
+  [ -n "${rbody//[$' \t\r\n']/}" ] || return 0
+  iurl=$(printf '%s' "$rjson" | jq -r '.issue_url // empty' 2>/dev/null)
+  case "$iurl" in
+    "https://api.github.com/repos/${repo}/issues/${pr}") : ;;
+    *) return 0 ;;                     # comment exists but belongs to another issue/PR -> block
+  esac
+  return 1
+}
+
 # rl_post_verdict <pr> <event> [body] -- post the review verdict.
 #   event: APPROVE | REQUEST_CHANGES | COMMENT
 #   body:  positional arg, or read from stdin when omitted.
 # App mode (rl_review_identity == app): posts a REAL review authored by the
-# wtp-sgd App via POST repos/{repo}/pulls/{pr}/reviews using the installation
+# wtp-sge App via POST repos/{repo}/pulls/{pr}/reviews using the installation
 # token (GH_TOKEN). On any App-side failure it falls back -- logged -- to the PAT
 # path. PAT mode: `gh pr review`, retrying as --comment (with the recommendation
 # stated in-body) when GitHub rejects --approve/--request-changes on a
@@ -1033,12 +1310,22 @@ rl_post_verdict() {
     echo "rl_post_verdict: REFUSING to post — the draft body names PR #$(rl_verdict_body_pr "$body") but the target is PR #${pr} (issue #1667: stale/foreign draft collision). Re-draft against PR #${pr} and retry." >&2
     return 5
   fi
+  # Findings-delivery guard (issue #1858). A verdict that DECLARES findings must
+  # prove they are reachable: `findings_comment: inline` (self-contained body)
+  # or a URL whose comment read-back-verifies. Otherwise the verdict is refused
+  # BEFORE any network write — the #1849 residual was a successful dispatch
+  # whose findings-comment POST failed silently, leaving a fenced verdict the
+  # daemon accepts with no findings anywhere.
+  if rl_verdict_findings_unverified "$pr" "$body"; then
+    echo "rl_post_verdict: REFUSING to post — the verdict declares $(rl_verdict_findings_total "$body") finding(s) but findings_comment is '$(rl_verdict_findings_ref "$body")' and no verified findings comment exists (issue #1858). Post the findings via rl_post_findings_comment first, or fold them into the verdict body and set 'findings_comment: inline'." >&2
+    return 6
+  fi
   mode=$(rl_review_identity)
   if [ "$mode" = "app" ]; then
     if tok=$(rl_app_installation_token); then
       if GH_TOKEN="$tok" gh api --method POST "repos/${repo}/pulls/${pr}/reviews" \
            -f "event=${event}" -f "body=${body}" >/dev/null 2>&1; then
-        echo "rl_post_verdict: posted ${event} review on PR #${pr} as the wtp-sgd App -- real approval, builder != reviewer (issue #862)" >&2
+        echo "rl_post_verdict: posted ${event} review on PR #${pr} as the wtp-sge App -- real approval, builder != reviewer (issue #862)" >&2
         return 0
       fi
       echo "rl_post_verdict: App-authored review POST failed -- falling back to PAT identity (issue #862)" >&2
@@ -1068,7 +1355,7 @@ rl_post_verdict() {
 # ---------------------------------------------------------------------------
 # Rate-limit detection + fail-loud stall reporting (issue #1147).
 #
-# INCIDENT: a /sgd:pr-review dispatch against PR #1144 ran 3+ hours and burned
+# INCIDENT: a /sge:pr-review dispatch against PR #1144 ran 3+ hours and burned
 # 268k tokens because it silently wedged retrying rate-limited `gh` (REST)
 # calls — `gh api rate_limit` independently confirmed `remaining: 0` during the
 # same window — instead of failing loudly or switching to GraphQL, which had a
@@ -1119,13 +1406,13 @@ rl_rate_limit_status() {
 }
 
 # rl_rate_limit_exhausted [floor] — print 1|0. remaining <= floor (default 50,
-# override via SGD_REVIEW_RATE_LIMIT_FLOOR)? FAILS CLOSED TO 0 (assume not
+# override via SGE_REVIEW_RATE_LIMIT_FLOOR)? FAILS CLOSED TO 0 (assume not
 # exhausted) when rl_rate_limit_status itself can't be read — this helper
 # feeds a LOUD-FAILURE decision, so it must never fabricate a positive signal
 # from an absence of data; an unreadable quota is a separate, unrelated
 # problem the caller's normal error handling already covers.
 rl_rate_limit_exhausted() {
-  local floor="${1:-${SGD_REVIEW_RATE_LIMIT_FLOOR:-50}}" status remaining
+  local floor="${1:-${SGE_REVIEW_RATE_LIMIT_FLOOR:-50}}" status remaining
   status=$(rl_rate_limit_status) || { echo 0; return 0; }
   remaining=$(printf '%s' "$status" | awk '{print $1}')
   [[ "$remaining" =~ ^[0-9]+$ ]] || { echo 0; return 0; }

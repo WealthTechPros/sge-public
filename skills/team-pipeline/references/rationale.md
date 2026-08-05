@@ -75,11 +75,11 @@ keeps agents narrow, fast, and observable. The orchestrator's stall detection
 (> 20 min no PR) only works if compliant agents open their draft PR early.
 
 The **full review** — `/code-review` + `/security-review` + full test suite —
-happens in the dedicated review agent (Phase 3d / `/sgd:pr-review`). Decoupling
+happens in the dedicated review agent (Phase 3d / `/sge:pr-review`). Decoupling
 it from the build agent is what makes parallel pipeline progress possible. The
-lean contract is deliberately **not** a full `/sgd:sgd-implement` dispatch (that
-burned 20–50 min per agent), but it keeps sgd-implement's one non-negotiable
-gate: before building, every lane runs `/sgd:governance-trace` headlessly and,
+lean contract is deliberately **not** a full `/sge:sge-implement` dispatch (that
+burned 20–50 min per agent), but it keeps sge-implement's one non-negotiable
+gate: before building, every lane runs `/sge:governance-trace` headlessly and,
 on a blocking verdict or low-confidence match, parks the issue with
 `outcome: "blocked"` instead of building. Speed is bought by capping recon and
 deferring the full quality battery — never by skipping governance.
@@ -88,12 +88,12 @@ deferring the full quality battery — never by skipping governance.
 
 ## Duration Mode — the two former issue-swarm contradictions, fixed
 
-Duration Mode was folded in from `/sgd:issue-swarm` (#808, epic #730); that
+Duration Mode was folded in from `/sge:issue-swarm` (#808, epic #730); that
 skill is now a router stub to this mode. Two contradictions in the old
 issue-swarm text are retired here:
 
 - **Lanes run the Phase 3c Lean Agent Contract — never a full
-  `/sgd:sgd-implement` dispatch.** Duration mode changes *when the pipeline
+  `/sge:sge-implement` dispatch.** Duration mode changes *when the pipeline
   stops*, not *what a lane does*. The old issue-swarm Phase 5 text that told
   lanes to drive an issue to a reviewed, green PR contradicted its own
   lean-contract invariant; the reviewed-green-PR outcome belongs to the
@@ -120,7 +120,7 @@ The orchestrator state (`/tmp/team-pipeline-*.json`) is **session-local and
 ephemeral** — it does not survive container reclaim. For unattended runs that
 must span sessions, drive the pipeline as a
 [recurring loop](../../loops/SKILL.md#d-recurring--cross-session-loop): wrap the
-invocation in `/loop <interval> /sgd:team-pipeline …` or schedule a `send_later`
+invocation in `/loop <interval> /sge:team-pipeline …` or schedule a `send_later`
 self-check-in to relaunch and resume. Because `/tmp` is a within-run cache only,
 the **durable layer** that lets a fresh run resume safely is the pushed worktree
 branches, their draft PRs, and the `agent-lock` GitHub labels. Phase 0.5 already
@@ -160,14 +160,14 @@ Claude Orchestrator (this session)
 +-- Issue locking: GitHub agent-lock label <- durable, cross-agent safe
 |
 +-- PR Monitor Agent [always-on, spawned first — named Task, stoppable]
-|   +-- /sgd:pr-monitor loop -> /sgd:pr-fix as needed -> reports to state file
+|   +-- /sge:pr-monitor loop -> /sge:pr-fix as needed -> reports to state file
 |
 +-- Implementation Agents [0..N, resource-gated — named Tasks, stoppable]
-|   +-- Slot 1: lean contract #ISSUE_A: /sgd:governance-trace gate -> build -> PR (draft) -> signals done
-|   +-- Slot 2: lean contract #ISSUE_B: /sgd:governance-trace gate -> build -> PR (draft) -> signals done
+|   +-- Slot 1: lean contract #ISSUE_A: /sge:governance-trace gate -> build -> PR (draft) -> signals done
+|   +-- Slot 2: lean contract #ISSUE_B: /sge:governance-trace gate -> build -> PR (draft) -> signals done
 |   +-- (slot opens) -> resource check -> spawn next or wait
 |
 +-- Review Agents [one per PR, spawned by orchestrator — named Tasks, stoppable]
-    +-- review-<PR_A>: /sgd:pr-review #PR_A -> approve or request changes -> undraft
-    +-- review-<PR_B>: /sgd:pr-review #PR_B -> approve or request changes -> undraft
+    +-- review-<PR_A>: /sge:pr-review #PR_A -> approve or request changes -> undraft
+    +-- review-<PR_B>: /sge:pr-review #PR_B -> approve or request changes -> undraft
 ```

@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/WealthTechPros/sgd/main/skills/exit-report/schema.json",
-  "title": "SGD orchestrated-skill exit report",
-  "description": "The one machine-readable exit-report shape every orchestrated SGD skill emits at the end of a run — consumed by orchestrators (team-pipeline, pr-monitor, issue-swarm) to decide the next move. See skills/exit-report/SKILL.md for the contract, emission channels, and mappings from legacy shapes.",
+  "$id": "https://raw.githubusercontent.com/WealthTechPros/sge/main/skills/exit-report/schema.json",
+  "title": "SGE orchestrated-skill exit report",
+  "description": "The one machine-readable exit-report shape every orchestrated SGE skill emits at the end of a run — consumed by orchestrators (team-pipeline, pr-monitor, issue-swarm) to decide the next move. See skills/exit-report/SKILL.md for the contract, emission channels, and mappings from legacy shapes.",
   "type": "object",
   "required": ["skill", "runId", "outcomes", "stopReason"],
   "properties": {
@@ -55,7 +55,7 @@
     "questionsPerRun": {
       "type": "integer",
       "minimum": 0,
-      "description": "Spec-quality metric (SPEC-093, #1235): count of SPEC-093 tier-b decision-journal entries across all lanes this run — ambiguities the agent resolved via the most-reversible-option fallback rather than a spec decision rule. Target trend → 0. Present on team-pipeline runs under --unattended (or SGD_UNATTENDED=1); 0 on attended runs. A value above 0 names which specs lack a '## Decision rules & defaults' table. See docs/specs/README.md."
+      "description": "Spec-quality metric (SPEC-093, #1235): count of SPEC-093 tier-b decision-journal entries across all lanes this run — ambiguities the agent resolved via the most-reversible-option fallback rather than a spec decision rule. Target trend → 0. Present on team-pipeline runs under --unattended (or SGE_UNATTENDED=1); 0 on attended runs. A value above 0 names which specs lack a '## Decision rules & defaults' table. See docs/specs/README.md."
     }
   },
   "additionalProperties": true,
@@ -68,7 +68,7 @@
           "type": "string",
           "pattern": "^[a-z][a-z0-9-]*:.+$",
           "description": "Stable key for the work item, as <kind>:<id>.",
-          "examples": ["pr:812", "issue:806", "lane:2", "repo:WealthTechPros/sgd"]
+          "examples": ["pr:812", "issue:806", "lane:2", "repo:WealthTechPros/sge"]
         },
         "status": {
           "description": "Terminal state of this item. success = goal reached; partial = real progress, goal not reached; blocked = structurally blocked, needs a human decision; thrashing = retry bound hit with no progress (do not re-dispatch); failed = attempted and did not succeed; skipped = deliberately not attempted (ineligible, claimed elsewhere, deduped).",
@@ -106,7 +106,7 @@
           "type": "string",
           "minLength": 1,
           "description": "Reference to the filed follow-up — \"#N\" for same-repo, \"owner/repo#N\" cross-repo, or a URL.",
-          "examples": ["#823", "WealthTechPros/sgd#823"]
+          "examples": ["#823", "WealthTechPros/sge#823"]
         },
         "summary": {
           "type": "string",

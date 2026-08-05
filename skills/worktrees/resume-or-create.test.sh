@@ -64,25 +64,25 @@ check "resume exit code 0"                 "$rc_resume" "0"
 check "resume reports free claim"          "$(echo "$out" | grep '^claim:')"  "claim:free"
 
 # --- Fresh claim by ANOTHER agent -> backoff (exit 10) ---
-printf 'other-agent %s\n' "$(date +%s)" > "$WT/.sgd-wt-claim"
+printf 'other-agent %s\n' "$(date +%s)" > "$WT/.sge-wt-claim"
 check "claim-state held-fresh (other agent)" "$(roc_claim_state "$WT")" "held-fresh"
 out="$(roc_decide 42 "$ROOT" 2>/dev/null)"; rc_backoff=$?
 check "held-fresh -> verdict backoff" "$(echo "$out" | grep '^verdict:')" "verdict:backoff"
 check "backoff exit code 10"          "$rc_backoff" "10"
 
 # --- My own fresh claim -> resume (mine), not backoff ---
-SGD_AGENT_ID="me" roc_claim "$WT"
-check "claim-state mine" "$(SGD_AGENT_ID=me roc_claim_state "$WT")" "mine"
-out="$(SGD_AGENT_ID=me roc_decide 42 "$ROOT" 2>/dev/null)"; rc_mine=$?
+SGE_AGENT_ID="me" roc_claim "$WT"
+check "claim-state mine" "$(SGE_AGENT_ID=me roc_claim_state "$WT")" "mine"
+out="$(SGE_AGENT_ID=me roc_decide 42 "$ROOT" 2>/dev/null)"; rc_mine=$?
 check "mine -> verdict resume"    "$(echo "$out" | grep '^verdict:')" "verdict:resume"
 check "mine resume exit code 0"   "$rc_mine" "0"
 
 # --- Expired claim (older than TTL) -> free -> resume, takeover allowed ---
-printf 'other-agent %s\n' "$(( $(date +%s) - 3600 ))" > "$WT/.sgd-wt-claim"
+printf 'other-agent %s\n' "$(( $(date +%s) - 3600 ))" > "$WT/.sge-wt-claim"
 check "expired claim -> free" "$(roc_claim_state "$WT")" "free"
 
 # --- Malformed claim timestamp -> free (fail safe) ---
-printf 'other-agent notanumber\n' > "$WT/.sgd-wt-claim"
+printf 'other-agent notanumber\n' > "$WT/.sge-wt-claim"
 check "malformed claim -> free" "$(roc_claim_state "$WT")" "free"
 
 # --- Non-git root -> exit 3 ---

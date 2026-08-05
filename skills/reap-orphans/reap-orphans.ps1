@@ -1,4 +1,4 @@
-# /sgd:reap-orphans — Safe Process Reaper (Windows)
+# /sge:reap-orphans — Safe Process Reaper (Windows)
 #
 # Bundled script for the reap-orphans skill (issue #822). Kills orphaned
 # claude/node/bash processes whose parent is already dead, protects the

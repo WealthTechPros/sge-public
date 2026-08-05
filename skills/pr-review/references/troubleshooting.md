@@ -4,7 +4,7 @@
 
 ## "Still waiting on CI" repeated across many turns (silent re-wake stall, issue #1681)
 
-**Symptom.** A dispatched `/sgd:pr-review` (or `/sgd:pr-fix`) subagent reaches the CI-wait
+**Symptom.** A dispatched `/sge:pr-review` (or `/sge:pr-fix`) subagent reaches the CI-wait
 step, reports something like "waiting for the CI monitor to report all checks settled" or
 "holding here until the background watch completes", and ends its turn. It is then silently
 re-invoked over and over — 10–20+ wake cycles per PR — each time re-reading full context and

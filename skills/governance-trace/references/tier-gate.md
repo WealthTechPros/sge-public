@@ -110,4 +110,4 @@ proceed to Steps 1–5:
 The `tierGate` field is an additive extension to the standard Step 7 shape; callers that
 do not know about it can ignore it. The verdict, layers, and all other fields are
 structurally identical to a full-fork result and require no changes in callers (e.g.
-`sgd-implement` Phase 0.5 routes on `verdict` alone).
+`sge-implement` Phase 0.5 routes on `verdict` alone).

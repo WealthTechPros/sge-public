@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 /**
- * compute-roi.mjs — bundled ROI aggregator for the /sgd:roi-report skill.
+ * compute-roi.mjs — bundled ROI aggregator for the /sge:roi-report skill.
  *
  * Behaviour-preserving port of `computeROI()` from
  * platform/packages/token-governance/src/roi.ts (issue #823, epic #729).
- * The skill previously showed a pseudo-TypeScript import of
- * `@wealthtechpros/token-governance`; this script is the real, runnable
- * equivalent so the skill can branch on a deterministic exit code and render
- * the report from a stable JSON contract.
+ * The skill previously showed a pseudo-TypeScript import of an internal
+ * token-governance package; this script is the real, runnable equivalent —
+ * fully self-contained, with no external dependency — so the skill can branch
+ * on a deterministic exit code and render the report from a stable JSON
+ * contract.
  *
  * Usage:
  *   node compute-roi.mjs [--input <path>]     # default: read stdin
@@ -35,7 +36,7 @@
  *
  * Output (stdout): a single ROIReport JSON object. ⚠ STABLE OUTPUT CONTRACT —
  * downstream consumers (e.g. the drift-hillclimb token-economy dimension,
- * sgd#831) parse this shape; do not rename or remove fields:
+ * sge#831) parse this shape; do not rename or remove fields:
  *   { governedValuePerToken,
  *     totalInputTokens, totalOutputTokens, totalEstimatedCost,
  *     governedInputTokens, governedOutputTokens, governedEstimatedCost,
@@ -54,11 +55,11 @@
  *   2 — invalid input (unreadable file, malformed JSON, or summaries not an
  *       array) => the skill reports the error and degrades gracefully
  *
- * ⚠ Accuracy caveat (sgd#857): the token totals in SpecCostSummary derive from
+ * ⚠ Accuracy caveat (sge#857): the token totals in SpecCostSummary derive from
  * the plugin's self-reporting metering hook, which is known to UNDER-report
  * true API token consumption by roughly 2–4×. Costs in this report are
  * therefore a floor, not a ceiling; treat cross-org comparisons as relative
- * until real telemetry (sgd#857) lands. This script aggregates the numbers it
+ * until real telemetry (sge#857) lands. This script aggregates the numbers it
  * is given; it does not correct for the skew.
  *
  * UNTRUSTED DATA: summaries/prStats originate from JSONL rows, Cortex

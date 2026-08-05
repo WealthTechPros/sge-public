@@ -9,7 +9,7 @@ argument-hint: "[target path] [--dry-run] [--focus <path|smell>]"
 Systematically restructure existing code — smell analysis, risk-ordered plan, approval gate, incremental execution with a green quality baseline throughout — without changing behaviour.
 
 ## Out of scope
-- Implementing new features or fixing bugs (use `/sgd:sgd-implement`)
+- Implementing new features or fixing bugs (use `/sge:sge-implement`)
 - Refactoring without a passing test baseline
 - Making structural changes and behavioural changes in the same increment
 
@@ -29,10 +29,10 @@ Systematic, behaviour-preserving refactoring: analyse code smells in parallel, a
 Examples:
 
 ```
-/sgd:refactor src/billing                          # full flow on one module
-/sgd:refactor src/billing --dry-run                # plan + artifact only, change nothing
-/sgd:refactor src --focus duplication --dry-run    # duplication inventory across src, plan only
-/sgd:refactor src/api --focus src/api/handlers     # full flow, narrowed scope
+/sge:refactor src/billing                          # full flow on one module
+/sge:refactor src/billing --dry-run                # plan + artifact only, change nothing
+/sge:refactor src --focus duplication --dry-run    # duplication inventory across src, plan only
+/sge:refactor src/api --focus src/api/handlers     # full flow, narrowed scope
 ```
 
 ---
@@ -69,7 +69,7 @@ Launch the repo's quality suite **as a background task** so it runs while Phase 
 **Record the results mechanically** — exact pass/fail counts, the named failing tests, lint/type error counts, coverage and duplication figures. This recorded baseline is the contract every increment is compared against in Phase 5.
 
 - **Pre-existing reds** are recorded as *known-red*: they are not yours to fix and do not block the refactor, but they make the comparison set explicit — anything red later that is not on the known-red list is a regression.
-- **No test coverage over the target** → do not refactor blind. Plan characterization tests as the first increment(s), written via `/sgd:tdd-workflow` (Phase 5).
+- **No test coverage over the target** → do not refactor blind. Plan characterization tests as the first increment(s), written via `/sge:tdd-workflow` (Phase 5).
 
 ---
 
@@ -142,14 +142,14 @@ Every increment must be independently executable, verifiable against the baselin
 
 ---
 
-## Phase 4: SGD Governance (conditional — L6 IMPACT)
+## Phase 4: SGE Governance (conditional — L6 IMPACT)
 
-**Only if** the repo is SGD-governed (it carries governed artefacts — specs, capability model, DAG manifest — per its CLAUDE.md) **and** the plan touches spec-covered code. Non-SGD repos, or refactors entirely outside spec-covered code: skip this phase cleanly and silently.
+**Only if** the repo is SGE-governed (it carries governed artefacts — specs, capability model, DAG manifest — per its CLAUDE.md) **and** the plan touches spec-covered code. Non-SGE repos, or refactors entirely outside spec-covered code: skip this phase cleanly and silently.
 
 Run an **L6 IMPACT pass** before executing:
 
 1. Identify which specs and capabilities reference the modules being refactored (search the spec artefacts for the affected paths/symbols); record them in the plan artifact's `impactedSpecs`.
-2. If any increment **moves an interface** (public API renamed, relocated, or re-shaped), update the DAG manifest and the referencing spec artefacts **in the same increment** that moves it, so governance never points at code that no longer exists. Commit with the `Spec:` trailer via `/sgd:commit`.
+2. If any increment **moves an interface** (public API renamed, relocated, or re-shaped), update the DAG manifest and the referencing spec artefacts **in the same increment** that moves it, so governance never points at code that no longer exists. Commit with the `Spec:` trailer via `/sge:commit`.
 3. If the impact pass reveals a spec whose acceptance criteria would be invalidated, stop and surface it — that is scope change, not refactoring.
 
 ---
@@ -159,11 +159,11 @@ Run an **L6 IMPACT pass** before executing:
 Work through the approved increments **in plan order**. For each:
 
 1. **Verify** — quality suite green relative to baseline before starting.
-2. **Characterization tests first** — if the increment is marked `needsCharacterizationTests`, write them via `/sgd:tdd-workflow` (the canonical Red/Green/Refactor inner loop — do not restate its mechanics here) before restructuring anything.
+2. **Characterization tests first** — if the increment is marked `needsCharacterizationTests`, write them via `/sge:tdd-workflow` (the canonical Red/Green/Refactor inner loop — do not restate its mechanics here) before restructuring anything.
 3. **Apply** one focused change — exactly the increment's refactoring, nothing opportunistic.
 4. **Compare against baseline** — run the repo's quality suite and diff the results against the Phase 1 record.
 5. **Revert-on-red (hard rule):** any check that is red now but was green (or absent) at baseline means the increment is reverted — `git restore` / reset the increment's changes, no exceptions, no fixing forward inside the increment. Then either re-plan that increment with a safer technique or skip it and note it in the final report. Known-red items from the baseline do not trigger this rule.
-6. **Commit the slice** via `/sgd:commit --no-push` (quality gates and trailers apply; push is deferred to the finish line).
+6. **Commit the slice** via `/sge:commit --no-push` (quality gates and trailers apply; push is deferred to the finish line).
 
 ---
 
@@ -171,7 +171,7 @@ Work through the approved increments **in plan order**. For each:
 
 1. **Validate improvements** — run the full quality suite a final time and compare against baseline: duplication before/after, coverage before/after, lines of code before/after (if meaningful). Behaviour-preserving means the test outcomes match the baseline exactly (minus any known-reds you were explicitly asked to leave).
 2. **Review the final diff** with the bundled `code-reviewer` agent before opening the PR; address or explicitly defer its findings.
-3. **Finish line — push + PR.** Final commit via `/sgd:commit` (pushes), then open a PR per the repo's convention, summarising: increments executed, increments reverted/skipped (and why), before/after metrics, and the L6 IMPACT results if Phase 4 ran. A refactor that stops at "done locally" is not done.
+3. **Finish line — push + PR.** Final commit via `/sge:commit` (pushes), then open a PR per the repo's convention, summarising: increments executed, increments reverted/skipped (and why), before/after metrics, and the L6 IMPACT results if Phase 4 ran. A refactor that stops at "done locally" is not done.
 4. **Emit SkillRunRecord.** Before finishing, append one `SkillRunRecord` (schema, `platform/packages/token-governance` — #727) to `memory/skill-runs.jsonl`:
    ```bash
    jq -nc \
@@ -180,7 +180,7 @@ Work through the approved increments **in plan order**. For each:
      --argjson pr <PR_NUMBER from step 3> \
      --arg verdict "<done|reverted|skipped — done if step 3 opened the PR; reverted/skipped if every increment hit the revert-on-red rule>" \
      --arg phaseReached "Phase 6" \
-     --arg sessionId "${SGD_SESSION_ID:-unknown-session}" \
+     --arg sessionId "${SGE_SESSION_ID:-unknown-session}" \
      --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
      '{skill:$skill, repo:$repo, pr:$pr, verdict:$verdict, phaseReached:$phaseReached, sessionId:$sessionId, timestamp:$timestamp}' \
      >> "$(git rev-parse --show-toplevel)/memory/skill-runs.jsonl"
@@ -206,9 +206,9 @@ For refactors spanning **10+ files**, prefer ultracode / Workflow orchestration:
 
 ## Safety Guidelines
 
-1. Never refactor without tests — add characterization tests first (via `/sgd:tdd-workflow`)
+1. Never refactor without tests — add characterization tests first (via `/sge:tdd-workflow`)
 2. One refactoring at a time
-3. Commit often — one slice per increment, via `/sgd:commit --no-push`
+3. Commit often — one slice per increment, via `/sge:commit --no-push`
 4. Preserve behaviour — refactoring doesn't change what the code does; the baseline comparison is the proof
 5. New red → revert the increment. Always.
-6. Document any breaking API changes (and update SGD artefacts per Phase 4 where governed)
+6. Document any breaking API changes (and update SGE artefacts per Phase 4 where governed)

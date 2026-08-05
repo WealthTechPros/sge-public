@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# monitor-lib.sh — the mechanical (bash) half of /sgd:pr-monitor.
+# monitor-lib.sh — the mechanical (bash) half of /sge:pr-monitor.
 #
 # Bundled, SOURCED library (pr-labels.sh pattern — scripts cost zero context):
 # every embedded function body that used to be restated inline in
@@ -94,7 +94,7 @@
 
 # CLAIM_LABELS_RE: alternation of in-flight claim labels — "pr-reviewing" (the
 # review mutex, #699) and "pr-fixing" (the fix-in-flight mutex owned by
-# /sgd:pr-fix, #1174), plus any further claim label named in the repo's CLAUDE.md.
+# /sge:pr-fix, #1174), plus any further claim label named in the repo's CLAUDE.md.
 # Both defaults are honoured so a lane skips a PR another session is reviewing OR
 # fixing — without pr-fixing here, two monitors would each dispatch a fix agent
 # onto the same red PR (issue #1174).
@@ -102,7 +102,7 @@ CLAIM_LABELS_RE="${CLAIM_LABELS_RE:-pr-reviewing|pr-fixing}"
 
 # DRAFT_ORPHAN_MINUTES: how long a label-less draft must be quiet (no `updatedAt`
 # activity) before the orphan carve-out (issue #755) makes it eligible for a first
-# /sgd:pr-review pass. A draft the author is actively pushing to stays excluded.
+# /sge:pr-review pass. A draft the author is actively pushing to stays excluded.
 DRAFT_ORPHAN_MINUTES="${DRAFT_ORPHAN_MINUTES:-30}"
 
 # A claim is a LEASE. Default 30 min — long enough that a live review (which
@@ -122,13 +122,13 @@ STALE_DRAFT_MINUTES="${STALE_DRAFT_MINUTES:-45}"
 # Resolved at startup from the repo's CLAUDE.md if it names one differently.
 MERGE_GATE_LABEL="${MERGE_GATE_LABEL:-pr-reviewed}"
 
-# The known-flake registry (issue #1571). See .sgd/known-flakes.yaml's own header
+# The known-flake registry (issue #1571). See .sge/known-flakes.yaml's own header
 # for the full contract and the load-bearing invariant: this registry NEVER
 # authorises merging over a red required check — it only lets a failing check be
 # CLASSIFIED (reporting-only) or targeted for a rerun. An unregistered OR expired
 # failing check is ALWAYS HOLD. KNOWN_FLAKES_REPO scopes matches to this repo when
 # an entry names one; leave it unset (or an entry's repo empty) to match any repo.
-KNOWN_FLAKES_FILE="${KNOWN_FLAKES_FILE:-.sgd/known-flakes.yaml}"
+KNOWN_FLAKES_FILE="${KNOWN_FLAKES_FILE:-.sge/known-flakes.yaml}"
 
 # A PR is spec-only if EVERY changed file matches the repo's spec globs.
 is_spec_pr() {
@@ -264,7 +264,7 @@ named_failing_checks() {
 # in a YAML scalar and is not IFS-whitespace, so empty fields survive intact.
 #   check \037 repo \037 owner \037 expires \037 policy \037 evidence
 # Dependency-free (no yq/python) — the same constrained-YAML awk style as the
-# .sgd/test-map.yml loader. Only lines inside the top-level `known_flakes:` block
+# .sge/test-map.yml loader. Only lines inside the top-level `known_flakes:` block
 # are read; a new top-level key (column-0 `key:`) ends the block. A record starts
 # at ANY new `- ` list item (keys may be in any order) and accumulates its keys
 # until the next item or the block end; a record with no `check:` is dropped.
@@ -341,7 +341,7 @@ classify_failing_check() { # $1=check name  [$2=today YYYY-MM-DD]  [$3=registry 
 # required check (issue #1148). This is the case the dead-session stale-claim
 # takeover deliberately does NOT catch: a LIVE review lane (recent commit or
 # activity → is_stale_claim returns 1 → fresh) that saw red CI and, per
-# pr-review Phase 7, should have handed off to /sgd:pr-fix but did not — leaving
+# pr-review Phase 7, should have handed off to /sge:pr-fix but did not — leaving
 # the PR held indefinitely with no visible failure reason. A fresh claim with all
 # checks green is a healthy in-flight review → NOT a stall (return 1).
 held_review_stall() {
@@ -373,12 +373,12 @@ post_stall_comment() {
   names=$(named_failing_checks "$pr")
   [ -n "$names" ] || return 0
   head=$(gh pr view "$pr" --json headRefOid --jq '.headRefOid' 2>/dev/null)
-  marker="<!-- sgd:held-review-stall ${head} -->"
+  marker="<!-- sge:held-review-stall ${head} -->"
   # Paginate the marker lookup over ALL comments — `gh pr view --json comments`
   # returns only the default (first) page, so on a busy PR the per-head marker
   # could fall off the end and this idempotency check would post a duplicate
   # every cycle. `gh api --paginate` walks every page (issue #1206). The marker
-  # is a controlled `<!-- sgd:held-review-stall <hex-sha> -->` string (no
+  # is a controlled `<!-- sge:held-review-stall <hex-sha> -->` string (no
   # jq-metacharacters), so it is inlined into the filter — gh's --jq takes only
   # a filter string, not jq's --arg.
   existing=$(gh api --paginate "repos/{owner}/{repo}/issues/$pr/comments" \
@@ -388,7 +388,7 @@ post_stall_comment() {
     return 0
   fi
   local body
-  body=$(printf '%s\n**Held review — red required check(s), no forward progress (issue #1148).** This PR holds a `pr-reviewing` claim but has failing required check(s):\n\n%s\n\nThe review gate cannot open over red CI. Per `pr-review` Phase 7, this must hand off to `/sgd:pr-fix` (spec-drift / lint / format failures are control-preserving-resolvable there). Surfacing the check name so this is not a silent stall.' "$marker" "$(printf '%s\n' "$names" | sed 's/^/- /')")
+  body=$(printf '%s\n**Held review — red required check(s), no forward progress (issue #1148).** This PR holds a `pr-reviewing` claim but has failing required check(s):\n\n%s\n\nThe review gate cannot open over red CI. Per `pr-review` Phase 7, this must hand off to `/sge:pr-fix` (spec-drift / lint / format failures are control-preserving-resolvable there). Surfacing the check name so this is not a silent stall.' "$marker" "$(printf '%s\n' "$names" | sed 's/^/- /')")
   gh pr comment "$pr" --body "$body" >/dev/null 2>&1
 }
 
@@ -445,7 +445,7 @@ stale_draft_lane() {
   local pr=$1 head marker existing failing body
   is_stale_draft "$pr" || return 1
   head=$(gh pr view "$pr" --json headRefOid --jq '.headRefOid' 2>/dev/null)
-  marker="<!-- sgd:stale-draft-lane ${head} -->"
+  marker="<!-- sge:stale-draft-lane ${head} -->"
   failing=$(gh pr checks "$pr" --json state \
     --jq "[.[] | select($FAILING_CHECK_JQ)] | length" 2>/dev/null)
   [[ "$failing" =~ ^[0-9]+$ ]] || failing=1   # unreadable -> treat as red (do not auto-ready)
@@ -467,7 +467,7 @@ stale_draft_lane() {
   local names
   names=$(named_failing_checks "$pr")
   echo "WARNING: PR #$pr — abandoned RED draft (no commit for >${STALE_DRAFT_MINUTES}m, failing check(s)); flagging, not readying" >&2
-  body=$(printf '%s\n**Abandoned draft — red CI (issue #1248).** This draft had no new commit for over %s minutes and has failing required check(s):\n\n%s\n\nIts implementer is presumed to have died mid-run, leaving it invisible to every review/merge lane (drafts are excluded). It is NOT being auto-readied over red CI — route it to `/sgd:pr-fix` (or fix and re-push), then it will be readied on the next pass. Surfacing so it is not a silent zero-cost cycle.' "$marker" "$STALE_DRAFT_MINUTES" "$(printf '%s\n' "$names" | sed 's/^/- /')")
+  body=$(printf '%s\n**Abandoned draft — red CI (issue #1248).** This draft had no new commit for over %s minutes and has failing required check(s):\n\n%s\n\nIts implementer is presumed to have died mid-run, leaving it invisible to every review/merge lane (drafts are excluded). It is NOT being auto-readied over red CI — route it to `/sge:pr-fix` (or fix and re-push), then it will be readied on the next pass. Surfacing so it is not a silent zero-cost cycle.' "$marker" "$STALE_DRAFT_MINUTES" "$(printf '%s\n' "$names" | sed 's/^/- /')")
   gh pr comment "$pr" --body "$body" >/dev/null 2>&1
   return 0
 }
@@ -511,7 +511,7 @@ pr_ready_for_merge() {
 # duration-independent signal the old <30s heuristic missed entirely: two real
 # runs cancelled after 30m+ (one after `Test Files 156 passed`, one with the
 # suite `skipped` because `actions/checkout` died) both classified as CODE FAIL
-# and burned a /sgd:pr-fix agent hunting a bug that did not exist. A fix agent is
+# and burned a /sge:pr-fix agent hunting a bug that did not exist. A fix agent is
 # the single most expensive action the monitor takes, so this check gates it.
 #
 # The signal is the RUN's own `conclusion` (`cancelled`/`timed_out`), plus the
@@ -591,7 +591,7 @@ is_infra_failure() {
 # escape, not a same-run retry. Echoes the action (`update-branch` / `fresh-rerun`
 # / `noop:<reason>`) so the caller can log it.
 CANCELLED_RERUN_CAP="${CANCELLED_RERUN_CAP:-2}"
-CANCELLED_RERUN_STATE="${CANCELLED_RERUN_STATE:-${TMPDIR:-/tmp}/sgd-prmon-rerun-attempts}"
+CANCELLED_RERUN_STATE="${CANCELLED_RERUN_STATE:-${TMPDIR:-/tmp}/sge-prmon-rerun-attempts}"
 escape_cancelled_run() {
   local pr=$1 run_id=$2 ledger attempts
   # Prefer a rebase-driven fresh run: fixes the stale base AND re-triggers CI on a
@@ -706,7 +706,7 @@ post_update_branch_blocked_comment() { # $1=pr  [$2=holder worktree path]
   local pr=$1 holder="${2:-}" head marker existing body
   echo "WARNING: PR #$pr — CONFLICTING but update-branch is UNSAFE: a local worktree holds its branch${holder:+ ($holder)}; not rebasing (would strand that worktree, issue #1666). Re-sync the worktree, then it rebases next cycle." >&2
   head=$(gh pr view "$pr" --json headRefOid --jq '.headRefOid' 2>/dev/null)
-  marker="<!-- sgd:update-branch-blocked ${head} -->"
+  marker="<!-- sge:update-branch-blocked ${head} -->"
   existing=$(gh api --paginate "repos/{owner}/{repo}/issues/$pr/comments" \
     --jq "[.[] | select(.body | contains(\"$marker\"))] | length" 2>/dev/null \
     | awk '{s+=$1} END{print s+0}')
@@ -888,7 +888,7 @@ _github_degraded_indicator() {
 # Idempotently park a PR blocked by a GitHub degradation event (issue #1434,
 # runbook docs/fleet-deployment-config.md) with ONE `github-degraded` comment,
 # so the GITHUB DEGRADED action is a mechanical helper instead of hand-done
-# prose. While degraded, reruns and /sgd:pr-fix / /sgd:pr-review dispatch are
+# prose. While degraded, reruns and /sge:pr-fix / /sge:pr-review dispatch are
 # suppressed (the SKILL.md GITHUB DEGRADED row) — the failure has no diff cause.
 #
 # Idempotent PER HEAD SHA **and** PER INDICATOR: the marker embeds both the head
@@ -906,14 +906,14 @@ post_github_degraded_comment() {
   # Only a genuinely healthy indicator is a no-op — everything else parks.
   [ "$indicator" = "none" ] && return 0
   head=$(gh pr view "$pr" --json headRefOid --jq '.headRefOid' 2>/dev/null)
-  marker="<!-- sgd:github-degraded ${head} ${indicator} -->"
+  marker="<!-- sge:github-degraded ${head} ${indicator} -->"
   existing=$(gh api --paginate "repos/{owner}/{repo}/issues/$pr/comments" \
     --jq "[.[] | select(.body | contains(\"$marker\"))] | length" 2>/dev/null \
     | awk '{s+=$1} END{print s+0}')
   if [ "${existing:-0}" -gt 0 ]; then
     return 0
   fi
-  body=$(printf '%s\n**Parked — GitHub degraded (`%s`).** Per the outage runbook (`docs/fleet-deployment-config.md`), reruns and `/sgd:pr-fix` / `/sgd:pr-review` dispatch are suppressed while GitHub is degraded — the failure has no diff cause. This monitor re-checks each cycle and resumes routing (with a single rerun) once `scripts/github-status.sh` reports full recovery (`none`). Posted once per head-SHA + indicator, so it is not re-posted every cycle.' "$marker" "$indicator")
+  body=$(printf '%s\n**Parked — GitHub degraded (`%s`).** Per the outage runbook (`docs/fleet-deployment-config.md`), reruns and `/sge:pr-fix` / `/sge:pr-review` dispatch are suppressed while GitHub is degraded — the failure has no diff cause. This monitor re-checks each cycle and resumes routing (with a single rerun) once `scripts/github-status.sh` reports full recovery (`none`). Posted once per head-SHA + indicator, so it is not re-posted every cycle.' "$marker" "$indicator")
   gh pr comment "$pr" --body "$body" >/dev/null 2>&1
 }
 

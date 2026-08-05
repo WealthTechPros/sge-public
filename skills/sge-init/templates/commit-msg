@@ -1,0 +1,50 @@
+#!/usr/bin/env sh
+# SGE change protocol: commit-msg hook — warning phase.
+#
+# Nudges contributors to include either a `Spec: <SPEC|SGD|SGE>-NNN` trailer or an
+# `SGE-Override: <STEP>; <reason>` trailer on every commit, so each commit
+# traces back to an approved spec (or records an intentional bypass). Does not
+# block — once Phase 2 enforcement lands this becomes a hard requirement.
+#
+# Scaffolded by /sge:sge-init. See docs/sge/change-protocol.md.
+
+COMMIT_MSG_FILE="$1"
+
+# Skip merge commits, fixups, squashes, reverts, and empty templates.
+if grep -qE '^(Merge|fixup!|squash!|Revert)' "$COMMIT_MSG_FILE"; then
+  exit 0
+fi
+if [ ! -s "$COMMIT_MSG_FILE" ]; then
+  exit 0
+fi
+
+# Accept either repo's spec-id convention: SPEC-NNN, or legacy SGD-NNN /
+# newly-minted SGE-NNN.
+if grep -qE '^Spec:\s*(SPEC|SGD|SGE)-[0-9]+' "$COMMIT_MSG_FILE"; then
+  exit 0
+fi
+# Accept the SGE-Override trailer (and the legacy SGD-Override spelling, so
+# historical commits keep validating).
+if grep -qE '^(SGD|SGE)-Override:\s*[A-Z]+;\s*.{10,}' "$COMMIT_MSG_FILE"; then
+  exit 0
+fi
+
+cat <<'EOF'
+
+⚠️  SGE warning — commit lacks a change-protocol trailer.
+
+Add one of the following trailers to the commit message:
+
+  Spec: SPEC-NNN          (or SGD-NNN)
+    Link this commit to the feature spec it implements.
+
+  SGE-Override: <STEP>; <reason, ≥10 chars>
+    Intentional bypass (governance/infra/docs change with no single spec).
+    Logged for audit. STEP ∈ { LOCATE, READ, IMPACT, PROPOSE, IMPLEMENT, TEST, UPDATE, ALL }
+
+This is a warning only for now — the commit continues. Phase 2 enforcement will
+make this blocking. See docs/sge/change-protocol.md.
+
+EOF
+
+exit 0

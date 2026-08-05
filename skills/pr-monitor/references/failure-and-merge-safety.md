@@ -1,7 +1,7 @@
 # Failure classification & merge-safety — field evidence
 
 Deep context for three field-reported pr-monitor defects (issues #1665, #1666,
-#1668), all found running `/sgd:pr-monitor` on a real unattended session. The
+#1668), all found running `/sge:pr-monitor` on a real unattended session. The
 SKILL.md classification table and merge-readiness section carry the operating
 rules; this file carries the evidence and the reasoning, so the skill body stays
 lean. The mechanics live in [`../monitor-lib.sh`](../monitor-lib.sh), executably
@@ -14,7 +14,7 @@ covered by `skills/tests/pr-monitor-cancelled-run-classification.test.sh`,
 The shipped `is_infra_failure()` classified a run as infra **only** when its
 longest job ran under 30 s. Two real runs this session were genuinely infra yet
 far outside that window, so both fell through to CODE FAIL and burned a
-`/sgd:pr-fix` agent — the single most expensive action the monitor takes —
+`/sge:pr-fix` agent — the single most expensive action the monitor takes —
 hunting a bug that did not exist:
 
 | PR | Duration | `conclusion` | Reality |

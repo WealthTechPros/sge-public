@@ -1,12 +1,12 @@
 ---
-description: Canonical reference for targeting the right GitHub repo when an SGD skill is invoked outside the target repo's checkout — the GH_REPO / cd convention for cross-repo and hub (control-session) dispatch, the startup echo check, and the raw-git pitfall. gh-heavy skills link here instead of restating the boilerplate; this file is not a user command.
+description: Canonical reference for targeting the right GitHub repo when an SGE skill is invoked outside the target repo's checkout — the GH_REPO / cd convention for cross-repo and hub (control-session) dispatch, the startup echo check, and the raw-git pitfall. gh-heavy skills link here instead of restating the boilerplate; this file is not a user command.
 disable-model-invocation: true
 ---
 
 # GH Repo Targeting
 
 ## Role
-Define the single cross-repo / control-session repo-targeting convention (`GH_REPO` or `cd`) that all gh-heavy SGD skills reference — a shared reference file, not a user command.
+Define the single cross-repo / control-session repo-targeting convention (`GH_REPO` or `cd`) that all gh-heavy SGE skills reference — a shared reference file, not a user command.
 
 ## Out of scope
 - Resolving a repo name to a local checkout path and `cd`-ing there (that is the shared `with-repo-cwd` helper — see *Raw `git` and the filesystem* below)
@@ -17,14 +17,14 @@ Define the single cross-repo / control-session repo-targeting convention (`GH_RE
 
 The single source of truth for the **"Target repo — cross-repo / control-session
 invocation"** rule, previously copy-pasted into every gh-heavy skill
-(`pr-monitor`, `pr-fix`, `pr-review`, `qa-audit`, `sgd-implement`,
+(`pr-monitor`, `pr-fix`, `pr-review`, `qa-audit`, `sge-implement`,
 `implement-issue`, …). Those skills link here; the wording below is canonical.
 
 ---
 
 ## The rule
 
-> SGD skills act on the repo in the **current working directory**. When a
+> SGE skills act on the repo in the **current working directory**. When a
 > skill is dispatched from a directory that is *not* the target repo — a
 > Tier-0 control/orchestrator session (e.g. a hub repo like `wtp-org`), or a
 > remote/worktree agent that hasn't `cd`-ed yet — every `gh` call, every

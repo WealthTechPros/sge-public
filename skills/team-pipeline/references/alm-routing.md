@@ -38,7 +38,7 @@ echo "[Pre-flight] alm-backend: $ALM"
 | **Phase 6** — find-or-create tracking issue | P10 `search` | `"$IR" search "pipeline runs" --state open --limit 1 \| jq …` |
 | **Pre-flight** — dispatch-label resolution | P9 `dispatch-label` | `"$IR" dispatch-label` |
 
-The preferred discovery path (`/sgd:available-issues`) already reads through
+The preferred discovery path (`/sge:available-issues`) already reads through
 `$IR`, so it inherits Jira routing with no per-call change here.
 
 ### Config prerequisites (Jira)
@@ -46,11 +46,11 @@ The preferred discovery path (`/sgd:available-issues`) already reads through
 A Jira backend needs, in the pipeline's environment (Doppler-injected — never in
 the repo, never logged):
 
-- `SGD_ALM_BACKEND=jira`
-- `SGD_JIRA_PROJECT` — the project key P1 `list-dispatchable` enumerates
+- `SGE_ALM_BACKEND=jira`
+- `SGE_JIRA_PROJECT` — the project key P1 `list-dispatchable` enumerates
   (required for `$IR list`; `$IR view <issueKey>` does not need it).
-- `SGD_JIRA_BASE_URL` + `SGD_JIRA_HOSTS` (allow-list) and a credential
-  (`SGD_JIRA_BEARER`, or `SGD_JIRA_EMAIL` + `SGD_JIRA_API_TOKEN`) — checked by
+- `SGE_JIRA_BASE_URL` + `SGE_JIRA_HOSTS` (allow-list) and a credential
+  (`SGE_JIRA_BEARER`, or `SGE_JIRA_EMAIL` + `SGE_JIRA_API_TOKEN`) — checked by
   `scripts/jira-adapter.sh` at the first call; a missing credential or unlisted
   host **fails loud before any network call**.
 
@@ -61,7 +61,7 @@ derived from the Jira status **category** (DR2), never a localised status name.
 ### Mutating tracker writes route through `$IW` (SPEC-105 S3, #1701)
 
 All **mutating** issue operations — the tracker-side writes the pipeline and
-`pr-monitor`/`pr-review`/`sgd-implement` perform (claim notices, triage/exit-report
+`pr-monitor`/`pr-review`/`sge-implement` perform (claim notices, triage/exit-report
 comments, decomposition children, close-on-merge linkage) — route through the
 single seam `scripts/issue-write.sh` (`$IW`), the write-path analogue of `$IR`.
 It resolves the ALM backend the same way (fail loud on an unrecognised value,
@@ -79,7 +79,7 @@ IW="${CLAUDE_PLUGIN_ROOT:-.}/scripts/issue-write.sh"
 | `ALM` | Action |
 |---|---|
 | `github` (unset/empty) | `comment`/`create` delegate to `gh` byte-identically; `close-link` is DECLARATIVE — `$IW` prints the `Closes #N` token to embed in the PR body (it does not edit the PR) |
-| `jira` | `comment`→**P5 `comment-item`**, `create`→**P6 `create-item`** (needs `SGD_JIRA_PROJECT` + the caller's `JIRA_ADAPTER_ALLOW_CREATE=1`), `close-link`→**P8 `link-close-on-merge`** (records a remote link on the item — Jira has no native PR link, #1150 — plus a close transition when `SGD_JIRA_CLOSE_TRANSITION_ID` is set; a failed write is surfaced loud, never swallowed) |
+| `jira` | `comment`→**P5 `comment-item`**, `create`→**P6 `create-item`** (needs `SGE_JIRA_PROJECT` + the caller's `JIRA_ADAPTER_ALLOW_CREATE=1`), `close-link`→**P8 `link-close-on-merge`** (records a remote link on the item — Jira has no native PR link, #1150 — plus a close transition when `SGE_JIRA_CLOSE_TRANSITION_ID` is set; a failed write is surfaced loud, never swallowed) |
 | *unrecognised* | **fail loud** naming the value (DR1); no `gh` and no Jira REST write |
 
 | Phase / step | Write op | Port call |

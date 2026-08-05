@@ -2,8 +2,8 @@
 /**
  * fork-util.mjs — async governance-trace fork dispatch helpers (#1264).
  *
- * Used by sgd-implement Phase 0.5 and the Phase 3 JOIN gate to dispatch the
- * /sgd:governance-trace fork asynchronously (without blocking on the verdict)
+ * Used by sge-implement Phase 0.5 and the Phase 3 JOIN gate to dispatch the
+ * /sge:governance-trace fork asynchronously (without blocking on the verdict)
  * and then join the verdict at the Edit/Write gate before any production code
  * is written.
  *
@@ -19,7 +19,7 @@
  *   node fork-util.mjs register --handle-id <id> --output-file <path>
  *     Record that a fork was dispatched and will write its verdict JSON
  *     (governance-trace Step-7 shape) to <output-file>.
- *     Writes /tmp/sgd-fork-<id>.json with { outputFile, registeredAt }.
+ *     Writes /tmp/sge-fork-<id>.json with { outputFile, registeredAt }.
  *     Stdout: JSON { ok: true, handleId, outputFile }
  *     Exit 0 on success, 1 on bad args.
  *
@@ -35,7 +35,7 @@
  *     Stdout: JSON { handleId, resolved: bool, outputFile, registeredAt }
  *     Exit 0 (even when not yet resolved; exit 2 if handle is unknown).
  *
- * Handle records live at /tmp/sgd-fork-<id>.json and are ephemeral —
+ * Handle records live at /tmp/sge-fork-<id>.json and are ephemeral —
  * processes that restart won't see them, which is expected: a session restart
  * means re-running the skill from the beginning anyway.
  *
@@ -86,7 +86,7 @@ function resolveTmpPath(p) {
 
 /** Resolve the path for the handle record file. */
 function handlePath(id) {
-  return pathJoin(HANDLE_DIR, `sgd-fork-${id}.json`);
+  return pathJoin(HANDLE_DIR, `sge-fork-${id}.json`);
 }
 
 /** Parse CLI args into { command, flags }. Flags with a value use --key val. */

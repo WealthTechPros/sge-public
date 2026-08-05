@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * select-gap.test.mjs — unit tests for the SGD-044-S3 improvement-sweep PICK
- * step (sgd#833). Node built-in test runner only (node:test + node:assert),
+ * step (sge#833). Node built-in test runner only (node:test + node:assert),
  * no external deps — repo convention (see scripts/*.test.mjs).
  *
  * Proves the acceptance invariants that are testable at the pick layer:
@@ -142,7 +142,7 @@ const skillLow = { dial: 'skill-quality', available: true, leverage: 0.1, trendD
 test('pick: the highest-leverage dial is selected and maps to its drift-hillclimb command', () => {
   const { selected } = selectHighestLeverageGap([tokenMid, coherenceHigh, skillLow], { minLeverage: 0.05 });
   assert.equal(selected.dial, 'coherence');
-  assert.equal(selected.command, '/sgd:drift-hillclimb --max-rounds 1');
+  assert.equal(selected.command, '/sge:drift-hillclimb --max-rounds 1');
 });
 
 test('pick: token dial maps to the token-economy dimension command', () => {
@@ -151,7 +151,7 @@ test('pick: token dial maps to the token-economy dimension command', () => {
     { minLeverage: 0.05 },
   );
   assert.equal(selected.dial, 'token-economy');
-  assert.equal(selected.command, '/sgd:drift-hillclimb --dimension token-economy --max-rounds 1');
+  assert.equal(selected.command, '/sge:drift-hillclimb --dimension token-economy --max-rounds 1');
 });
 
 test('pick: NEVER selects more than one dial — one PR per cycle by construction', () => {
@@ -197,7 +197,7 @@ test('pick: all dials below threshold → selected null (a documented no-op cycl
 
 test('cycle record: an acted cycle carries the measured before→after delta and exactly one PR', () => {
   const sel = selectHighestLeverageGap([coherenceHigh, tokenMid, skillLow], { minLeverage: 0.05 });
-  const rec = buildCycleRecord(sel, { repo: 'sgd', timestamp: '2026-07-09T00:00:00Z', status: 'acted', prNumber: 900, before: 68, after: 71 });
+  const rec = buildCycleRecord(sel, { repo: 'sge', timestamp: '2026-07-09T00:00:00Z', status: 'acted', prNumber: 900, before: 68, after: 71 });
   assert.equal(rec.status, 'acted');
   assert.equal(rec.selectedDial, 'coherence');
   assert.equal(rec.prNumber, 900);

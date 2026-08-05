@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 /**
  * score-skill-quality.mjs — the script-anchored MEASURE step for
- * `/sgd:drift-hillclimb --dimension skill-quality` (sgd#832, parent #676).
+ * `/sge:drift-hillclimb --dimension skill-quality` (sge#832, parent #676).
  *
  * Joins two durable substrates — never re-derives either:
- *   - the #737 mechanical scan (`skills/sgd-skill-audit/assets/scan-skills.sh`
+ *   - the #737 mechanical scan (`skills/sge-skill-audit/assets/scan-skills.sh`
  *     JSON output: SQ-0/SQ-3/SQ-4/SQ-5 pass/fail per skill) — the *quality*
  *     signal.
  *   - `memory/skill-runs.jsonl` — SkillRunRecord rows (#727 producer) — call
  *     counts x verdicts, windowed by recency — the *utilisation* signal.
  *
- * It surfaces TWO lanes (sgd#832 acceptance):
+ * It surfaces TWO lanes (sge#832 acceptance):
  *   - utilisation: a skill with zero runs inside the window (default 30d) is
  *     a deprecation CANDIDATE. This script never deletes anything — the
  *     hill-climb governor turns candidates into an issue for a human to
@@ -26,7 +26,7 @@
  *
  * `--scan` is REQUIRED (unlike the runs sidecar, there is no sensible
  * default location for a one-shot scan's JSON — the caller runs
- * `scan-skills.sh ... > file` first, mirroring how sgd-align consumes its
+ * `scan-skills.sh ... > file` first, mirroring how sge-align consumes its
  * own JSON). A missing/unreadable/malformed --scan file is a harness error.
  *
  * Output (stdout): a single JSON verdict. STABLE CONTRACT — the
@@ -60,7 +60,7 @@
 import { readFileSync } from 'node:fs';
 
 // Success verdicts across the four SkillRunRecord-emitting skills (types.ts):
-//   sgd-implement: "merged"; sgd-review: "pass"; sgd-preflight: "ready";
+//   sge-implement: "merged"; sge-review: "pass"; sge-preflight: "ready";
 //   refactor: "done". "approved" is accepted as a pr-review synonym.
 // Everything else (blocked, failed, fail, not_ready, reverted, skipped, ...)
 // counts as a "bad" run for the thrash-rate calculation — the complement.

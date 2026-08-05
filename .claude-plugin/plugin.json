@@ -1,6 +1,6 @@
 {
   "name": "sge",
-  "version": "4.32.12",
+  "version": "4.33.0",
   "description": "WealthTech Pros SGE methodology plugin — shared skills for all WTP repos",
   "author": {
     "name": "WealthTech Pros",
@@ -8,6 +8,6 @@
     "url": "https://wealthtechpros.com"
   },
   "repository": "https://github.com/WealthTechPros/sge-public",
-  "license": "LicenseRef-WTP-SGD-Commercial",
+  "license": "LicenseRef-WTP-SGE-Commercial",
   "homepage": "https://wealthtechpros.com"
 }

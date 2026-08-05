@@ -1,6 +1,6 @@
 # Seam-evidence gate — dual-backend surfaces must name (and ship) a parity/seam test
 
-The actionable Phase 4 **seam-evidence convention** for `/sgd:pr-review`, held here to keep the SKILL
+The actionable Phase 4 **seam-evidence convention** for `/sge:pr-review`, held here to keep the SKILL
 body within its size budget — the full mechanics behind the one-line §4.4 pointer (issue #1228,
 methodology spec **SPEC-102**). Nothing here is a new control the SKILL body cannot express; it is
 the detail the pointer defers.
@@ -14,7 +14,7 @@ real seam"*. The fix is methodology, not a one-repo lint: the governing spec mus
 parity/seam test**, and the merge gate must confirm that named test actually exists.
 
 This generalises a co-change lint that some downstream repos already run as a one-repo convention
-into the SGD methodology itself. It is stated in **backend-shape terms** (demo/mock vs
+into the SGE methodology itself. It is stated in **backend-shape terms** (demo/mock vs
 real/warehouse) that any repo maps onto its own surfaces — **no client or product repo is named**.
 
 ## When the gate fires (dual-backend detection)
@@ -45,13 +45,13 @@ For a PR whose diff touches a dual-backend surface with a governing spec:
    or an `rg`/`grep` for the test name/tag). A spec that **names** a seam test the code never grew is
    worse than silence — it reads as covered. Named-but-absent → **flag**.
 
-**Severity & posture** (consistent with Phase 4.2's advisory-for-non-SGD stance):
+**Severity & posture** (consistent with Phase 4.2's advisory-for-non-SGE stance):
 
-- Governing SGD spec present, surface dual-backend, seam test **unnamed or absent** →
+- Governing SGE spec present, surface dual-backend, seam test **unnamed or absent** →
   `{severity:"major", category:"traceability", finding:"dual-backend surface: no present parity/seam test"}`.
   A `major` does not by itself refuse a `pass`, but it is a fix-inline / comment finding the verdict
   must carry — never silently dropped.
-- **No** governing spec (non-SGD repo, or a chore) → **advisory only**: emit a `minor` note, never a
+- **No** governing spec (non-SGE repo, or a chore) → **advisory only**: emit a `minor` note, never a
   blocker — the same reason Phase 4.2 never blocks an untraceable chore.
 - Named seam test **present** and resolvable → record `seam_evidence: <test-ref>` in the verdict
   notes; nothing to flag.

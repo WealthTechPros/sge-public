@@ -10,8 +10,8 @@
 # checkout, not this worktree). Either condition makes the worktree's own
 # `tsc`/test claims untrustworthy: tests pass or fail against the wrong tree.
 #
-# This guard is the single mechanical check both /sgd:tidy-worktrees and
-# /sgd:pr-review run BEFORE they trust (or publish) any verification claim for
+# This guard is the single mechanical check both /sge:tidy-worktrees and
+# /sge:pr-review run BEFORE they trust (or publish) any verification claim for
 # such a worktree. It answers two yes/no questions and prints a verdict:
 #
 #   1. Is the worktree behind its base ref?  (base has commits the worktree
@@ -132,7 +132,7 @@
 set -uo pipefail
 
 # Default base ref when the caller omits one. origin/main is the merge target
-# for every SGD-managed repo; a rescued worktree is "stale" relative to it.
+# for every SGE-managed repo; a rescued worktree is "stale" relative to it.
 RG_DEFAULT_BASE="${RG_DEFAULT_BASE:-origin/main}"
 
 # rg_behind_base <worktree> [base-ref]

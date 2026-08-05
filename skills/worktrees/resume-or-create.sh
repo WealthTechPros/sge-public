@@ -4,7 +4,7 @@
 # When an agent is dispatched on issue N, a predecessor agent may already have
 # created a worktree (`../<repo>-worktrees/issue-N` OR the team-pipeline
 # in-repo `.worktrees/issue-N`) and/or a branch (`(feat|feature|fix|chore)/…
-# issue-N…`, `feat/sgd-<slug>`) before dying or stalling. Creating a NEW
+# issue-N…`, `feat/sge-<slug>`) before dying or stalling. Creating a NEW
 # worktree/branch then either collides with the old one (`git worktree add`
 # refuses a second checkout of a branch) or orphans the predecessor's
 # committed progress. This helper answers ONE question before any
@@ -35,8 +35,8 @@
 #
 # Verdict rules:
 #   backoff — an existing worktree carries a FRESH claim lease owned by ANOTHER
-#             live agent (younger than SGD_WT_CLAIM_TTL_MIN, default 30 min, and
-#             not this agent's SGD_AGENT_ID). Do NOT steal it; report and stop.
+#             live agent (younger than SGE_WT_CLAIM_TTL_MIN, default 30 min, and
+#             not this agent's SGE_AGENT_ID). Do NOT steal it; report and stop.
 #   resume  — an existing worktree for issue N is found and is not
 #             another-agent-fresh-claimed (free, mine, or stale claim to take
 #             over). Caller MUST run rescue-guard.sh assess before trusting it.
@@ -55,14 +55,14 @@
 
 set -uo pipefail
 
-# Claim lease TTL — mirror pr-labels.sh's SGD_*_CLAIM_TTL_MIN (default 30 min).
+# Claim lease TTL — mirror pr-labels.sh's SGE_*_CLAIM_TTL_MIN (default 30 min).
 # A claim younger than this owned by another agent means "live, back off".
-RG_WT_CLAIM_TTL_MIN="${SGD_WT_CLAIM_TTL_MIN:-30}"
+RG_WT_CLAIM_TTL_MIN="${SGE_WT_CLAIM_TTL_MIN:-30}"
 # Marker file written inside a worktree to lease it. Kept out of git by living
 # under .git-adjacent scratch: a plain dotfile at the worktree root, which the
 # in-repo `.worktrees/` exception already gitignores and the sibling layout is
 # outside any repo tree. Contents: "<agent-id> <epoch-seconds>".
-RG_CLAIM_FILE=".sgd-wt-claim"
+RG_CLAIM_FILE=".sge-wt-claim"
 
 # roc_find_worktree <issue> <repo-root>
 # Prints the path of an existing worktree for issue <issue>, or nothing.
@@ -88,7 +88,7 @@ roc_find_worktree() {
 roc_find_branch() {
   local issue="$1" root="$2"
   git -C "$root" for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null \
-    | grep -E "^(feat|feature|fix|chore)/(sgd-[0-9]+-.*)?issue-${issue}([^0-9]|$)" \
+    | grep -E "^(feat|feature|fix|chore)/(sge-[0-9]+-.*)?issue-${issue}([^0-9]|$)" \
     | head -n1
 }
 
@@ -110,7 +110,7 @@ roc_open_pr() {
 # roc_claim_state <worktree>
 # Reads the claim lease inside <worktree> and classifies it:
 #   free        — no claim, or an EXPIRED claim (older than the TTL)
-#   mine        — a fresh claim whose agent id == $SGD_AGENT_ID
+#   mine        — a fresh claim whose agent id == $SGE_AGENT_ID
 #   held-fresh  — a fresh claim owned by a DIFFERENT agent (back off)
 roc_claim_state() {
   local wt="$1"
@@ -125,7 +125,7 @@ roc_claim_state() {
   if [ "$age_min" -ge "$RG_WT_CLAIM_TTL_MIN" ]; then
     echo "free"; return 0
   fi
-  if [ -n "${SGD_AGENT_ID:-}" ] && [ "$owner" = "$SGD_AGENT_ID" ]; then
+  if [ -n "${SGE_AGENT_ID:-}" ] && [ "$owner" = "$SGE_AGENT_ID" ]; then
     echo "mine"
   else
     echo "held-fresh"
@@ -136,7 +136,7 @@ roc_claim_state() {
 roc_claim() {
   local wt="$1"
   [ -d "$wt" ] || return 3
-  printf '%s %s\n' "${SGD_AGENT_ID:-unknown}" "$(date +%s)" > "$wt/$RG_CLAIM_FILE"
+  printf '%s %s\n' "${SGE_AGENT_ID:-unknown}" "$(date +%s)" > "$wt/$RG_CLAIM_FILE"
 }
 
 # roc_release <worktree> — drop the claim lease (best effort).

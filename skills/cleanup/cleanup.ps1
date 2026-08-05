@@ -1,10 +1,10 @@
-# /sgd:cleanup — Dev-Box Reset (Windows)
+# /sge:cleanup — Dev-Box Reset (Windows)
 #
 # Bundled script for the cleanup skill (issue #822). Kills Playwright /
 # headless Chromium / stale-node test runners (CommandLine/ExecutablePath
 # filtered so live user browsers and claude-in-chrome MCP sessions are never
 # touched), optionally shuts down WSL, and reports RAM freed. Chain
-# /sgd:reap-orphans afterwards. See ../SKILL.md for the full contract.
+# /sge:reap-orphans afterwards. See ../SKILL.md for the full contract.
 #
 # Usage: pwsh -File cleanup.ps1 [-DryRun] [-NoWSL]
 param(
@@ -103,7 +103,7 @@ if (-not $DryRun) {
   $aFree = [math]::Round($os2.FreePhysicalMemory/1MB,2)
   Write-Output ""
   Write-Output "=== cleanup done. RAM freed ~$([math]::Round($aFree-$bFree,2)) GB (now $aFree GB free) ==="
-  Write-Output "Running /sgd:reap-orphans next to catch remaining claude/node/bash orphans..."
+  Write-Output "Running /sge:reap-orphans next to catch remaining claude/node/bash orphans..."
 } else {
   Write-Output ""
   Write-Output "=== cleanup dry-run complete ==="

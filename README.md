@@ -14,11 +14,11 @@ This repo is the home of **SGE** end-to-end — methodology first, platform seco
 
 | Skill | Command | Purpose |
 |---|---|---|
-| `sgd-init` | `/sge:init` | Interactive onboarding for a new product/repo — interviews the user, then proposes the SGE seed (Vision, capability model, anchor specs with Gherkin, ADR-0001, stakeholder questions) |
-| `sgd-implement` | `/sge:sgd-implement [N]` | End-to-end SGE feature implementation — entry criteria, complexity sizing, TDD, review, PR |
-| `sgd-preflight` | `/sge:sgd-preflight [SGD-NNN]` | Pre-implementation checklist — read spec, check deps, plan files |
-| `sgd-review` | `/sge:sgd-review [SGD-NNN]` | Review implementation against spec — acceptance criteria, degradation, patterns, quality gates |
-| `sgd-align` | `/sge:align [--apply]` | Bidirectional cascade alignment: forward (Vision → Capability → Spec → Tests → Code) raises a GitHub issue per drift gap; reverse reconciles existing open issues against current scope, proposing (and with `--apply`, closing/updating) when scope moves — idempotent, advisory-first, never auto-mutates human issues |
+| `sge-init` | `/sge:init` | Interactive onboarding for a new product/repo — interviews the user, then proposes the SGE seed (Vision, capability model, anchor specs with Gherkin, ADR-0001, stakeholder questions) |
+| `sge-implement` | `/sge:sge-implement [N]` | End-to-end SGE feature implementation — entry criteria, complexity sizing, TDD, review, PR |
+| `sge-preflight` | `/sge:sge-preflight [SGD-NNN]` | Pre-implementation checklist — read spec, check deps, plan files |
+| `sge-review` | `/sge:sge-review [SGD-NNN]` | Review implementation against spec — acceptance criteria, degradation, patterns, quality gates |
+| `sge-align` | `/sge:align [--apply]` | Bidirectional cascade alignment: forward (Vision → Capability → Spec → Tests → Code) raises a GitHub issue per drift gap; reverse reconciles existing open issues against current scope, proposing (and with `--apply`, closing/updating) when scope moves — idempotent, advisory-first, never auto-mutates human issues |
 | `atomic-audit` | `/sge:atomic-audit [path]` | Stack-agnostic atomic-design adoption audit — auto-detect the UI stack (web + mobile/native), score six dimensions (tokens, primitive layer, composition, catalog, testing, enforcement) to an L0–L3 maturity tier, and emit a remediation roadmap. Report-only, advisory |
 | `tdd-workflow` | `/sge:tdd-workflow` | Strict incremental TDD — one failing test, minimum green, refactor, repeat |
 | `qa-audit` | `/sge:qa-audit` | Verify PR against linked issue, post evidence comment |
@@ -26,17 +26,17 @@ This repo is the home of **SGE** end-to-end — methodology first, platform seco
 | `pr-fix` | `/sge:pr-fix [pr]` | Drive one PR's CI to green — read failures, reproduce locally, fix root cause (never suppress) |
 | `pr-monitor` | `/sge:pr-monitor` | Watch the 3 oldest non-spec PRs, fix oldest-first, backfill as they merge |
 | `deep-dive` | `/sge:deep-dive <N>` | Investigate an issue in depth — trace to code, weigh options, discuss, record the decision back on the issue (no implementation) |
-| `implement-issue` | `/sge:implement-issue [N]` | Router — non-SGE issues now route into `/sge:sgd-implement`, which handles both spec and no-spec issues |
+| `implement-issue` | `/sge:implement-issue [N]` | Router — non-SGE issues now route into `/sge:sge-implement`, which handles both spec and no-spec issues |
 | `refactor` | `/sge:refactor [target]` | Systematic SOLID refactoring with quality gates |
 | `tidy-worktrees` | `/sge:tidy-worktrees [--force]` | **Safe** worktree/branch tidy — audits for uncommitted/unpushed work before removing anything; `--force` = audited fast sweep that executes one confirmed deletion plan |
-| `commit` | `/sge:commit [--no-push]` | Quality-gated commit and push — canonical owner of the SGD trailer convention; `--no-push` for slice commits |
-| `sgd-ai-inventory` | `/sge:sgd-ai-inventory [add\|review\|report]` | FS AI-governance register — machine-readable AI use-case inventory (risk tiering, EU AI Act, Consumer Duty, DORA fields) with vendor due-diligence template. Advisory, propose-only |
+| `commit` | `/sge:commit [--no-push]` | Quality-gated commit and push — canonical owner of the SGE trailer convention; `--no-push` for slice commits |
+| `sge-ai-inventory` | `/sge:sge-ai-inventory [add\|review\|report]` | FS AI-governance register — machine-readable AI use-case inventory (risk tiering, EU AI Act, Consumer Duty, DORA fields) with vendor due-diligence template. Advisory, propose-only |
 | `team-pipeline` | `/sge:team-pipeline [--agents N] [--module <name>] [--dry-run]` | Parallel multi-agent pipeline — one PR monitor agent + N implementation agents + review agents per PR; continuously works issues from the queue until exhausted |
 | `prod-reliability-playbook` | `/sge:prod-reliability-playbook [note]` | **Why a "simple" fix takes all day** — the five failure modes that turn a one-line fix into a lost day (diagnosis-loop cost, silent fallbacks, prod-only feedback, no fast green path, serial debugging), their preventions, and an incident triage checklist. Advisory, stack-agnostic |
-| `drift-hillclimb` | `/sge:drift-hillclimb [--target N] [--metric C..] [--dry-run]` | **Metric hill-climb loop** — the actor that *raises* the SGE Audit Score (the `/sge:sgd-align` per-check governance-coherence rollup — distinct from the platform's canonical SM-2 `coherence_score`), not just measures it. Consumes `/sge:sgd-align`'s scorecard, picks the highest-leverage drift gap, opens ONE bounded PR to close it, re-measures with an independent sweep, repeats until the target is hit or a bound stops it. PR-first, bounded, Governor-gated |
-| `issue-loop` | `/sge:issue-loop [--repo owner/repo] [--max-issues N] [--dry-run]` | **Serial issue-drain loop** (SPEC-065) — works the backlog one issue at a time through the full SGE pipeline (pick via `/sge:available-issues --mode autonomous-next` → gate → full `/sge:sgd-implement` as a stoppable sub-agent → `/sge:pr-review` gate → merge-wait) until the queue is empty. Queue-empty-bounded serial counterpart to `/sge:issue-swarm`; the only shape that drains `serialGroups`. Thrash-skips (`loop-skip`) and systemic-halts; Governor-gated |
+| `drift-hillclimb` | `/sge:drift-hillclimb [--target N] [--metric C..] [--dry-run]` | **Metric hill-climb loop** — the actor that *raises* the SGE Audit Score (the `/sge:sge-align` per-check governance-coherence rollup — distinct from the platform's canonical SM-2 `coherence_score`), not just measures it. Consumes `/sge:sge-align`'s scorecard, picks the highest-leverage drift gap, opens ONE bounded PR to close it, re-measures with an independent sweep, repeats until the target is hit or a bound stops it. PR-first, bounded, Governor-gated |
+| `issue-loop` | `/sge:issue-loop [--repo owner/repo] [--max-issues N] [--dry-run]` | **Serial issue-drain loop** (SPEC-065) — works the backlog one issue at a time through the full SGE pipeline (pick via `/sge:available-issues --mode autonomous-next` → gate → full `/sge:sge-implement` as a stoppable sub-agent → `/sge:pr-review` gate → merge-wait) until the queue is empty. Queue-empty-bounded serial counterpart to `/sge:issue-swarm`; the only shape that drains `serialGroups`. Thrash-skips (`loop-skip`) and systemic-halts; Governor-gated |
 
-> **Which mode runs my work?** See the **[execution-modes decision matrix](docs/execution-modes.md)** — the canonical map of when to use `sgd-implement`, `team-pipeline`, `available-issues`, `fleet-dispatch`, `pr-monitor`, or Autopilot, with every skill in the plugin accounted for.
+> **Which mode runs my work?** See the **[execution-modes decision matrix](docs/execution-modes.md)** — the canonical map of when to use `sge-implement`, `team-pipeline`, `available-issues`, `fleet-dispatch`, `pr-monitor`, or Autopilot, with every skill in the plugin accounted for.
 
 > **Commands first, automation later.** The skills above are the supported entry point — run them by hand, one at a time. On-demand pipelines (`team-pipeline`, `issue-swarm`, `pr-monitor`) and always-on **Autopilot** pods are an *optional, opt-in* evolution that runs the very same skills; nothing here is deprecated by them. See **[Autopilot — optional automation stage](docs/autopilot.md)** for the adoption ladder, pipeline diagram, label state machine, and human control points.
 
@@ -54,17 +54,17 @@ Bundled, stack-agnostic specialist agents (a repo MAY override any of these with
 
 The plugin ships two hooks:
 
-- **`SessionStart` (`hooks/session-start.sh`)** — at the start of a session it surfaces an SGE intro: on the **first session of the day** (or whenever an update is available) a framed box with the installed version/status, live skill+agent counts, and the "start here" commands; on later sessions the same day it falls back to a **one-line** summary. When the published version on `main` is newer than the installed one it nudges `/plugin update sge` so repos stay on the latest methodology skills (passive nudge by default — a hook can't mutate the version-pinned cache itself; `SGD_AUTO_UPDATE=auto` turns it into a run-now directive). The box throttle is a per-repo date stamp kept in `.git/sgd-intro-state` (never committed); `SGD_INTRO_STATE` and `SGD_TODAY` override the location/date. The version check honours `SGD_REMOTE_VERSION` as an override (non-empty forces the comparison version for pinned/air-gapped installs; empty skips the check). Any failure — no network, no `curl`/`gh`, unreadable `plugin.json` — degrades to a summary-only line or a silent no-op and never blocks session start.
-- **`PostToolUse` (`hooks/pr-created.sh`)** — whenever a PR is created via `gh pr create` in a session with the plugin installed, it triggers `/sge:pr-review` on the new PR so nothing misses the merge gate. Default is an in-session nudge; set `SGD_AUTO_REVIEW=headless` to launch the review as an independent background `claude -p` run instead. PRs opened outside Claude Code still need `/sge:pr-monitor` or a CI backstop.
+- **`SessionStart` (`hooks/session-start.sh`)** — at the start of a session it surfaces an SGE intro: on the **first session of the day** (or whenever an update is available) a framed box with the installed version/status, live skill+agent counts, and the "start here" commands; on later sessions the same day it falls back to a **one-line** summary. When the published version on `main` is newer than the installed one it nudges `/plugin update sge` so repos stay on the latest methodology skills (passive nudge by default — a hook can't mutate the version-pinned cache itself; `SGE_AUTO_UPDATE=auto` turns it into a run-now directive). The box throttle is a per-repo date stamp kept in `.git/sge-intro-state` (never committed); `SGE_INTRO_STATE` and `SGE_TODAY` override the location/date. The version check honours `SGE_REMOTE_VERSION` as an override (non-empty forces the comparison version for pinned/air-gapped installs; empty skips the check). Any failure — no network, no `curl`/`gh`, unreadable `plugin.json` — degrades to a summary-only line or a silent no-op and never blocks session start.
+- **`PostToolUse` (`hooks/pr-created.sh`)** — whenever a PR is created via `gh pr create` in a session with the plugin installed, it triggers `/sge:pr-review` on the new PR so nothing misses the merge gate. Default is an in-session nudge; set `SGE_AUTO_REVIEW=headless` to launch the review as an independent background `claude -p` run instead. PRs opened outside Claude Code still need `/sge:pr-monitor` or a CI backstop.
 
-## Memory (`sgd-memory` MCP)
+## Memory (`sge-memory` MCP)
 
-The plugin registers one optional MCP server, **`sgd-memory`**, via a `.mcp.json` at the plugin root. It is a lightweight, persistent memory store for SGE skills — now backed by **`sgd-cortex`** (SPEC-052): a WTP-owned, vendored server on Node's built-in `node:sqlite`, shipped as a single committed bundle with no runtime install. It replaced the third-party `mcp-memory-libsql`.
+The plugin registers one optional MCP server, **`sge-memory`**, via a `.mcp.json` at the plugin root. It is a lightweight, persistent memory store for SGE skills — now backed by **`sge-cortex`** (SPEC-052): a WTP-owned, vendored server on Node's built-in `node:sqlite`, shipped as a single committed bundle with no runtime install. It replaced the third-party `mcp-memory-libsql`.
 
-- The store lives in a local SQLite file under the consumer repo's git-ignored `memory/` directory; the server resolves that path via `CLAUDE_PROJECT_DIR` so memory stays **per-repo** (see [`docs/sgd-memory.md`](docs/sgd-memory.md)) — never committed.
-- It is **optional and non-blocking**: skills degrade gracefully when it is absent. Skills that use it should always pass an explicit namespace (`sgd:pipeline-state`, `sgd:review-verdicts`, `sgd:decisions`, `sgd:conflict-map`).
+- The store lives in a local SQLite file under the consumer repo's git-ignored `memory/` directory; the server resolves that path via `CLAUDE_PROJECT_DIR` so memory stays **per-repo** (see [`docs/sge-memory.md`](docs/sge-memory.md)) — never committed.
+- It is **optional and non-blocking**: skills degrade gracefully when it is absent. Skills that use it should always pass an explicit namespace (`sge:pipeline-state`, `sge:review-verdicts`, `sge:decisions`, `sge:conflict-map`).
 
-See [`docs/sgd-memory.md`](docs/sgd-memory.md) for details. (Wiring individual skills to it is follow-up work.)
+See [`docs/sge-memory.md`](docs/sge-memory.md) for details. (Wiring individual skills to it is follow-up work.)
 
 ## Supply-chain governance (SGD-048)
 
@@ -100,7 +100,7 @@ Run these commands once per machine inside Claude Code.
 /plugin install sge
 ```
 
-On Claude Code CLI this installs at **user scope**, not per repo: the SGE commands (`/sge:init`, `/sge:sgd-implement`, etc.) become available in every Claude Code session on your machine, whatever project you are working in. There is nothing to repeat per project and nothing to commit to a repo to make it work. On GitHub Copilot CLI the same command works, but skill loading can additionally be gated per repository — see [`docs/copilot-cli-install.md`](docs/copilot-cli-install.md).
+On Claude Code CLI this installs at **user scope**, not per repo: the SGE commands (`/sge:init`, `/sge:sge-implement`, etc.) become available in every Claude Code session on your machine, whatever project you are working in. There is nothing to repeat per project and nothing to commit to a repo to make it work. On GitHub Copilot CLI the same command works, but skill loading can additionally be gated per repository — see [`docs/copilot-cli-install.md`](docs/copilot-cli-install.md).
 
 **Keep it up to date:**
 ```
@@ -182,7 +182,7 @@ git config core.hooksPath .githooks
 
 That wires both tracked hooks (see [`.githooks/README.md`](.githooks/README.md)):
 
-- **`commit-msg`** — every commit in this repo must carry a `Spec: SPEC-NNN`/`SGD-NNN` or `SGD-Override: <STEP>; <reason>` trailer (see `skills/sgd-init/templates/change-protocol.md` — the protocol template this repo authors for every onboarded repo, and, as of this workflow, also dogfoods on itself). `/sge:commit` emits this automatically, but the hook catches commits made outside it too. It warns; it does not block. The `require-commit-trailer.yml` CI workflow is the actual enforcement point — it fails the PR check if any commit lacks the trailer, so a locally-skipped warning is still caught before merge.
+- **`commit-msg`** — every commit in this repo must carry a `Spec: SPEC-NNN`/`SGD-NNN`/`SGE-NNN` or `SGD-Override`/`SGE-Override: <STEP>; <reason>` trailer (see `skills/sge-init/templates/change-protocol.md` — the protocol template this repo authors for every onboarded repo, and, as of this workflow, also dogfoods on itself). `/sge:commit` emits this automatically, but the hook catches commits made outside it too. It warns; it does not block. The `require-commit-trailer.yml` CI workflow is the actual enforcement point — it fails the PR check if any commit lacks the trailer, so a locally-skipped warning is still caught before merge.
 - **`prepare-commit-msg`** — appends an `Agent-Id: claude-code/<session>` trailer to **agent-authored** commits, so Zero-Trust control ZT-5 / C11 (wtp-org#373) is verifiable from git history. No-op for human commits. **Agent sessions working in this repo must enable the hook** so their commits carry the trailer.
 
 `agent-id-hook-check.yml` verifies the Agent-Id hook is vendored and tracked executable; it cannot see your local `core.hooksPath`, so the step above is still required per clone.
@@ -191,13 +191,13 @@ That wires both tracked hooks (see [`.githooks/README.md`](.githooks/README.md))
 
 ### 4. Test-evidence (TDD) gate
 
-Issue #784's layered TDD process gate, dogfooded on this repo (`.sgd/test-map.yml`, `mode: advisory`):
+Issue #784's layered TDD process gate, dogfooded on this repo (`.sge/test-map.yml`, `mode: advisory`):
 
-- **`hooks/tdd-guard.sh`** (in-session, ships with the plugin, no install step) — warns after an Edit/Write on a production-path file with no test evidence recorded this session; set `SGD_ENFORCE=tdd` to make it block instead.
-- **`.githooks/commit-msg` / `/sge:commit`** — a staged implementation-only slice needs an `SGD-Override: TDD; <reason>` trailer to commit (reuses the same trailer convention as above).
+- **`hooks/tdd-guard.sh`** (in-session, ships with the plugin, no install step) — warns after an Edit/Write on a production-path file with no test evidence recorded this session; set `SGE_ENFORCE=tdd` to make it block instead.
+- **`.githooks/commit-msg` / `/sge:commit`** — a staged implementation-only slice needs an `SGD-Override`/`SGE-Override: TDD; <reason>` trailer to commit (reuses the same trailer convention as above).
 - **`require-test-evidence.yml`** — the CI backstop. Fails (once `mode: blocking`) a PR whose diff touches a production path with no test-path change, unless a commit carries the `TDD` override.
 
-All three read `.sgd/test-map.yml` for this repo's production/test/exempt path globs; see that file's header for the schema. `/sge:sgd-align`'s **C14** check trends the resulting TDD-evidence rate and override count over time.
+All three read `.sge/test-map.yml` for this repo's production/test/exempt path globs; see that file's header for the schema. `/sge:sge-align`'s **C14** check trends the resulting TDD-evidence rate and override count over time.
 
 ---
 

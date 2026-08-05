@@ -102,9 +102,9 @@ high-confidence findings over a long list of speculative ones.
 Your final message IS the review payload — return the structured report, not a
 conversational reply.
 
-## Structured output (when dispatched by /sgd:pr-review)
+## Structured output (when dispatched by /sge:pr-review)
 
-When `/sgd:pr-review` dispatches you, append a fenced JSON array of findings
+When `/sge:pr-review` dispatches you, append a fenced JSON array of findings
 after the report above — its aggregator parses only this block:
 
 ```json
@@ -118,4 +118,4 @@ after the report above — its aggregator parses only this block:
 One element per finding (Blockers → `blocker`, Major → `major`, Minor →
 `minor`); an empty array `[]` means a clean pass. When used standalone, the
 prose report remains the payload — the JSON block is only required under
-`/sgd:pr-review`.
+`/sge:pr-review`.

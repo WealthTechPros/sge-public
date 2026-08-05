@@ -1,5 +1,5 @@
 ---
-description: Use when a pull request needs runtime/behavioural QA — when the merge decision needs evidence that the change actually works in the running app (not just that the diff looks right), when a linked issue's acceptance criteria or an SGD spec's Gherkin scenarios must be exercised against a live build, when /sgd:pr-review Phase 4 wants a QA report comment for a high-risk PR, or when a UI/API change needs captured behavioural evidence before sign-off. This skill starts the app, exercises the feature, and posts evidence; it applies no merge-gate labels. For reviewing the diff itself and owning the pr-reviewed gate label, use /sgd:pr-review instead.
+description: Use when a pull request needs runtime/behavioural QA — when the merge decision needs evidence that the change actually works in the running app (not just that the diff looks right), when a linked issue's acceptance criteria or an SGE spec's Gherkin scenarios must be exercised against a live build, when /sge:pr-review Phase 4 wants a QA report comment for a high-risk PR, or when a UI/API change needs captured behavioural evidence before sign-off. This skill starts the app, exercises the feature, and posts evidence; it applies no merge-gate labels. For reviewing the diff itself and owning the pr-reviewed gate label, use /sge:pr-review instead.
 argument-hint: <pr-number>
 context: fork
 ---
@@ -10,28 +10,28 @@ context: fork
 Verify a pull request's behaviour at runtime — start the app, exercise each acceptance criterion, capture evidence, and post a structured report — without owning the merge gate.
 
 ## Out of scope
-- Reviewing the diff or managing merge-gate labels (that is `/sgd:pr-review`)
+- Reviewing the diff or managing merge-gate labels (that is `/sge:pr-review`)
 - Implementing fixes (hand findings back to the PR author)
 - Inferring a pass from code review — all passes require observed runtime behaviour
 
 Runtime/behavioural QA of a pull request: check out the PR in an isolated worktree, start the app, exercise each acceptance criterion against the running build, capture evidence, and post a structured report comment on the PR.
 
-**Division of labour with /sgd:pr-review** — differentiated by execution model, not depth:
+**Division of labour with /sge:pr-review** — differentiated by execution model, not depth:
 
-| | /sgd:qa-audit | /sgd:pr-review |
+| | /sge:qa-audit | /sge:pr-review |
 |---|---|---|
 | Operates on | The **running app** (starts it, drives it) | The **diff** (review agents + test suite) |
 | Output | Evidence report comment (`qa-audit-report`) | Inline findings + verdict |
 | Gate labels | **None** — never touches `pr-reviewing`/`pr-reviewed` | Owns the label state machine |
 
-/sgd:pr-review Phase 4.3 consumes this skill's report comment as runtime evidence, so the report format in Step 6 — including the head-SHA-pinned `qa-audit-verdict` block — is a stable contract — keep its structure and the `qa-audit-report` marker intact.
+/sge:pr-review Phase 4.3 consumes this skill's report comment as runtime evidence, so the report format in Step 6 — including the head-SHA-pinned `qa-audit-verdict` block — is a stable contract — keep its structure and the `qa-audit-report` marker intact.
 
 Runs as `context: fork`: the audit is self-contained (own worktree, own server, advisory output only), so it is safe to run forked and in the background. Because a forked context cannot itself spawn further subagents, Step 5's default execution is inline-sequential, not per-criterion fan-out — see Step 5.
 
 ## Usage
 
 ```
-/sgd:qa-audit <pr-number>
+/sge:qa-audit <pr-number>
 ```
 
 > **Target repo — cross-repo / control-session invocation.** Apply the shared repo-targeting convention — [`gh-repo`](../gh-repo/SKILL.md) — before anything else: these steps act on the repo in the **current working directory**, so from a directory that is *not* the target repo (a control/orchestrator session, or before `cd`-ing into the PR's worktree) resolve + `cd` via the shared helper — `cd "$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh resolve owner/repo)" || exit 1` (fail-loud, never falls through to the ambient hub cwd) — and run the startup echo it defines. Because QA runs the target repo's build and dev-server from cwd, the `cd` (not a bare `export GH_REPO`) is required. Same-repo: leave `GH_REPO` unset; cwd detection is used.
@@ -41,7 +41,7 @@ Runs as `context: fork`: the audit is self-contained (own worktree, own server, 
 - PR snapshot: !`gh pr view "$ARGUMENTS" --json number,title,body,url,headRefName,baseRefName,state,isDraft,labels,changedFiles 2>/dev/null || echo "NO_PR_SNAPSHOT — pass a PR number; from another repo export GH_REPO=owner/repo or cd into the target repo first."`
 - Changed files: !`gh pr diff "$ARGUMENTS" --name-only 2>/dev/null || echo "(no diff — set GH_REPO=owner/repo or cd into the target repo)"`
 
-> The preload above is advisory: under subagent dispatch `$ARGUMENTS` may not be threaded into the forked context, so it can read `NO_PR_SNAPSHOT` even though the dispatch prompt named the PR. When the invocation itself carries the PR number, resolve it from there and fetch the snapshot/diff yourself — never stop on an empty preload alone (sgd issue #1764).
+> The preload above is advisory: under subagent dispatch `$ARGUMENTS` may not be threaded into the forked context, so it can read `NO_PR_SNAPSHOT` even though the dispatch prompt named the PR. When the invocation itself carries the PR number, resolve it from there and fetch the snapshot/diff yourself — never stop on an empty preload alone (sge issue #1764).
 
 ---
 
@@ -55,7 +55,7 @@ Runs as `context: fork`: the audit is self-contained (own worktree, own server, 
    gh issue view "$ISSUE_NUMBER" --json title,body,labels
    ```
 
-2. **SGD spec linkage.** If the issue (or PR body) references a `SPEC-NNN`, locate that spec in the repo (spec location per the repo's CLAUDE.md) and extract its **Gherkin acceptance scenarios**. Each scenario becomes a QA criterion that must be verified **at runtime**, and each gets a traceability line in the report (scenario → evidence).
+2. **SGE spec linkage.** If the issue (or PR body) references a `SPEC-NNN`, locate that spec in the repo (spec location per the repo's CLAUDE.md) and extract its **Gherkin acceptance scenarios**. Each scenario becomes a QA criterion that must be verified **at runtime**, and each gets a traceability line in the report (scenario → evidence).
 
 3. **No linked issue — graceful degradation.** Derive the acceptance criteria from the PR description and changed files instead, and say so explicitly in the report: *"Criteria derived from PR description — no linked issue found."* Do not silently invent requirements; if the PR body is too thin to derive any criterion, report that as a finding.
 
@@ -78,7 +78,7 @@ HEAD_SHA=$(git rev-parse HEAD)
 
 Then install dependencies / prepare the environment per the repo's CLAUDE.md. All subsequent steps run inside `$WT`.
 
-**Pin `$HEAD_SHA` now.** This is the commit every criterion below is actually exercised against — it is what makes the Step 6 report verifiable evidence rather than a claim. If the PR gets new commits after this checkout, this report describes the *old* head; carry `$HEAD_SHA` through to Step 6 unchanged (re-running Step 2 to re-pin is the only way to cover new commits, exactly as `/sgd:pr-review` re-pins before its own verdict, issue #397).
+**Pin `$HEAD_SHA` now.** This is the commit every criterion below is actually exercised against — it is what makes the Step 6 report verifiable evidence rather than a claim. If the PR gets new commits after this checkout, this report describes the *old* head; carry `$HEAD_SHA` through to Step 6 unchanged (re-running Step 2 to re-pin is the only way to cover new commits, exactly as `/sge:pr-review` re-pins before its own verdict, issue #397).
 
 ---
 
@@ -127,7 +127,7 @@ Whatever the rung: test edge cases and failure paths, not just the happy path, a
 
 ## Step 5: Verify each criterion
 
-**Execution doctrine (fork-safe by default).** This skill declares `context: fork` (line 4) — it is normally invoked *as* a forked subagent, and a forked subagent cannot itself spawn further subagents (no nested spawning; the same constraint `/sgd:pr-review` documents at its own line 27). So the default path here is **inline-sequential verification, not fan-out**:
+**Execution doctrine (fork-safe by default).** This skill declares `context: fork` (line 4) — it is normally invoked *as* a forked subagent, and a forked subagent cannot itself spawn further subagents (no nested spawning; the same constraint `/sge:pr-review` documents at its own line 27). So the default path here is **inline-sequential verification, not fan-out**:
 
 - Work through the criteria list from Step 1 one at a time (still only exercising runtime behaviour via the Step 4 ladder).
 - This is the default for every invocation, not just "trivial" PRs — it is what actually executes under `context: fork`.
@@ -167,7 +167,7 @@ cat > /tmp/qa-report-$1.md <<EOF
 ## QA Audit Report
 
 **PR:** #$1 · **Branch:** \`$BRANCH\` · **Head SHA:** \`$HEAD_SHA\`
-**Audited by:** Claude (Automated QA — /sgd:qa-audit)
+**Audited by:** Claude (Automated QA — /sge:qa-audit)
 **Criteria source:** [linked issue #N / SPEC-NNN Gherkin scenarios / PR description (no linked issue)]
 
 ### Requirements Verification
@@ -209,9 +209,9 @@ gh pr comment $1 --body-file /tmp/qa-report-$1.md
 
 Fill the bracketed placeholders with real content before posting — the table rows **and** the `qa-audit-verdict` block's `criteria` list come directly from the Step 5 result objects (`requirement`/`status`), not retyped independently. `head_sha` is `$HEAD_SHA` from Step 2/above — the commit actually exercised in `$WT`, never the PR's current tip if new commits landed mid-audit.
 
-**Format stability:** the leading `<!-- qa-audit-report -->` marker, the section headings above, and the fenced ` ```qa-audit-verdict ` YAML block (mirroring `/sgd:pr-review`'s own `sgd-verdict` block and its `commit:` field) are how /sgd:pr-review Phase 4.3 finds and parses this comment. Keep all three stable; add new sections only after `### Recommendation`, and only after the `qa-audit-verdict` block.
+**Format stability:** the leading `<!-- qa-audit-report -->` marker, the section headings above, and the fenced ` ```qa-audit-verdict ` YAML block (mirroring `/sge:pr-review`'s own `sge-verdict` block and its `commit:` field) are how /sge:pr-review Phase 4.3 finds and parses this comment. Keep all three stable; add new sections only after `### Recommendation`, and only after the `qa-audit-verdict` block.
 
-**Why `head_sha` matters.** /sgd:pr-review Phase 4.3 compares this `head_sha` against the PR's current `headRefOid` before trusting this report as evidence. A QA pass recorded against an old head must not vouch for commits pushed afterward — same stale-head class pr-review already guards against for its own verdict (issue #397). If the PR gets new commits after this report posts, re-run `/sgd:qa-audit` against the new head; don't assume the old report still applies.
+**Why `head_sha` matters.** /sge:pr-review Phase 4.3 compares this `head_sha` against the PR's current `headRefOid` before trusting this report as evidence. A QA pass recorded against an old head must not vouch for commits pushed afterward — same stale-head class pr-review already guards against for its own verdict (issue #397). If the PR gets new commits after this report posts, re-run `/sge:qa-audit` against the new head; don't assume the old report still applies.
 
 ---
 
@@ -226,7 +226,7 @@ git worktree remove "$WT" --force
 
 ## Guidelines
 
-- **No gate labels.** Never add or remove `pr-reviewing`/`pr-reviewed` — /sgd:pr-review owns that state machine.
+- **No gate labels.** Never add or remove `pr-reviewing`/`pr-reviewed` — /sge:pr-review owns that state machine.
 - Test edge cases, not just the happy path; reference exact acceptance criteria wording.
 - A criterion verified only by reading the diff is not verified — this skill's whole value is runtime evidence.
 - Be honest: if something doesn't work, mark it `fail` with the evidence; if it couldn't be exercised, mark it `blocked` and say why. Never soften a `fail` into the prose.

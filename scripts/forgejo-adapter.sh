@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # forgejo-adapter.sh — thin Forgejo/Gitea REST adapter seam (ADR-0010, #1236).
 #
-# Enabler slice for the #1146 non-GitHub-host epic. `gh`-based SGD skills
+# Enabler slice for the #1146 non-GitHub-host epic. `gh`-based SGE skills
 # assume the issue tracker is GitHub. A repo whose `origin` points at a
 # self-hosted Forgejo (or Gitea — they share one REST surface) instead fails
-# before Step 0 of skills like /sgd:sgd-align. This adapter is the single seam
+# before Step 0 of skills like /sge:sge-align. This adapter is the single seam
 # every downstream host-agnostic skill slice (read-issues, read-PRs, mutating
 # pr-review, dispatch) will route through when `with-repo-cwd.sh host` reports
 # `forgejo`. This slice ships the READ path (repo-resolve first) and the
@@ -39,7 +39,7 @@
 #       Print two lines: the owner/name slug and the derived API base URL.
 #       Pure/local — no network. This is the read-path seam every other op
 #       builds on. When given owner/name (no host in the value) a <host> arg
-#       (or SGD_FORGEJO_DEFAULT_HOST) is required to derive the API base.
+#       (or SGE_FORGEJO_DEFAULT_HOST) is required to derive the API base.
 #   forgejo-adapter.sh get-repo    <origin-url-or-owner/name> [<host>]     (read)
 #   forgejo-adapter.sh list-issues <origin-url-or-owner/name> [<host>]     (read)
 #   forgejo-adapter.sh list-issues-filtered <origin-url-or-owner/name> [<query-string>] [<host>]  (read)
@@ -145,7 +145,7 @@ _fa_json_str() { # <raw-text>  -> stdout: quoted JSON string literal
 }
 
 # Reuse with-repo-cwd.sh's host classifier (_wrc_host_kind) as the single
-# source of truth for the SGD_FORGEJO_HOSTS / SGD_GITHUB_HOSTS allow-list — do
+# source of truth for the SGE_FORGEJO_HOSTS / SGE_GITHUB_HOSTS allow-list — do
 # NOT fork a second allow-list here. Sourcing only defines functions (that file
 # guards its own `set -e`/CLI behind a BASH_SOURCE==$0 check), so this is a
 # pure include with no side effects.
@@ -204,13 +204,13 @@ _fa_slug_of() {
 
 # Derive the API base URL from a value + optional explicit host.
 # Sets _FA_API_BASE. host precedence: <host> arg > host in the URL value >
-# SGD_FORGEJO_DEFAULT_HOST. Fails loud when none is available.
+# SGE_FORGEJO_DEFAULT_HOST. Fails loud when none is available.
 _fa_api_base_of() { # <value> [<host>]
   local v="$1" host="${2:-}"
   [ -n "$host" ] || host="$(_fa_url_host "$v")"
-  [ -n "$host" ] || host="${SGD_FORGEJO_DEFAULT_HOST:-}"
+  [ -n "$host" ] || host="${SGE_FORGEJO_DEFAULT_HOST:-}"
   [ -n "$host" ] || {
-    _fa_err "no host for '$v' — pass it as the last arg or set SGD_FORGEJO_DEFAULT_HOST"
+    _fa_err "no host for '$v' — pass it as the last arg or set SGE_FORGEJO_DEFAULT_HOST"
     return 1
   }
   _FA_API_BASE="https://${host}/api/v1"
@@ -220,7 +220,7 @@ _fa_api_base_of() { # <value> [<host>]
 # authenticated call. The operator PAT is attached to requests to this host,
 # so an unlisted host (attacker-supplied owner/name/URL, or a typo) must be
 # REFUSED — never leak the token to it. We reuse with-repo-cwd's classifier so
-# there is ONE allow-list (SGD_FORGEJO_HOSTS / SGD_GITHUB_HOSTS), not a fork.
+# there is ONE allow-list (SGE_FORGEJO_HOSTS / SGE_GITHUB_HOSTS), not a fork.
 # A host classified `github` or `unknown` is always refused — this adapter
 # only ever authenticates to Forgejo/Gitea hosts.
 #
@@ -228,8 +228,8 @@ _fa_api_base_of() { # <value> [<host>]
 # ROUTING convenience — it must never gate a credential, because an attacker
 # can register gitea.<anything> and a cloned repo's `origin` is
 # attacker-influenced data. Token attachment therefore additionally requires
-# EXPLICIT trust: the bare host must appear in SGD_FORGEJO_HOSTS (';'-separated)
-# or equal SGD_FORGEJO_DEFAULT_HOST. Set SGD_FORGEJO_TRUST_SUBSTRING=1 to
+# EXPLICIT trust: the bare host must appear in SGE_FORGEJO_HOSTS (';'-separated)
+# or equal SGE_FORGEJO_DEFAULT_HOST. Set SGE_FORGEJO_TRUST_SUBSTRING=1 to
 # opt in to substring-classified hosts (NOT recommended outside dev).
 # The host may carry a :port (e.g. git.example.com:3000); classification and
 # allow-list matching key on the bare host, so we strip the port — and also
@@ -240,27 +240,27 @@ _fa_require_allowed_host() { # <api-base>
   hostport="${base#https://}"; hostport="${hostport%%/*}"   # host[:port]
   host="$(_fa_lower "${hostport%%:*}")"                     # bare host
   # Explicit trust first — an explicit listing IS the trust decision.
-  if [ -n "${SGD_FORGEJO_HOSTS:-}" ]; then
-    local fjs=(); IFS=';' read -r -a fjs <<< "$(_fa_lower "$SGD_FORGEJO_HOSTS")"
+  if [ -n "${SGE_FORGEJO_HOSTS:-}" ]; then
+    local fjs=(); IFS=';' read -r -a fjs <<< "$(_fa_lower "$SGE_FORGEJO_HOSTS")"
     for entry in "${fjs[@]}"; do
       h="${entry%%:*}"                                      # tolerate host:port entries
       [ -n "$h" ] && [ "$host" = "$h" ] && return 0
     done
   fi
-  if [ -n "${SGD_FORGEJO_DEFAULT_HOST:-}" ]; then
-    h="$(_fa_lower "$SGD_FORGEJO_DEFAULT_HOST")"; h="${h%%:*}"
+  if [ -n "${SGE_FORGEJO_DEFAULT_HOST:-}" ]; then
+    h="$(_fa_lower "$SGE_FORGEJO_DEFAULT_HOST")"; h="${h%%:*}"
     [ "$host" = "$h" ] && return 0
   fi
   # Not explicitly trusted: a substring-classified host is only accepted with
   # the explicit opt-in; everything else is refused before the token exists.
   kind="$(_wrc_host_kind "$host")"
-  if [ "$kind" = "forgejo" ] && [ "${SGD_FORGEJO_TRUST_SUBSTRING:-0}" = "1" ]; then
+  if [ "$kind" = "forgejo" ] && [ "${SGE_FORGEJO_TRUST_SUBSTRING:-0}" = "1" ]; then
     return 0
   fi
   if [ "$kind" = "forgejo" ]; then
-    _fa_err "refusing authenticated call to host '$hostport' — its name merely resembles a Forgejo/Gitea host, which is routing, not trust; the operator token is only sent to hosts explicitly listed in SGD_FORGEJO_HOSTS (';'-separated) or SGD_FORGEJO_DEFAULT_HOST (or set SGD_FORGEJO_TRUST_SUBSTRING=1 to opt in)"
+    _fa_err "refusing authenticated call to host '$hostport' — its name merely resembles a Forgejo/Gitea host, which is routing, not trust; the operator token is only sent to hosts explicitly listed in SGE_FORGEJO_HOSTS (';'-separated) or SGE_FORGEJO_DEFAULT_HOST (or set SGE_FORGEJO_TRUST_SUBSTRING=1 to opt in)"
   else
-    _fa_err "refusing authenticated call to host '$hostport' (classified '$kind', not an allow-listed Forgejo host) — add it to SGD_FORGEJO_HOSTS (';'-separated) to permit; the operator token is never sent to an unlisted host"
+    _fa_err "refusing authenticated call to host '$hostport' (classified '$kind', not an allow-listed Forgejo host) — add it to SGE_FORGEJO_HOSTS (';'-separated) to permit; the operator token is never sent to an unlisted host"
   fi
   return 1
 }
@@ -513,7 +513,7 @@ _fa_main() {
     # ── PR label state-machine ops (issue #1239) ──────────────────────────────
 
     pr-label-status)
-      # Print "reviewing=<bool> reviewed=<bool>" for the SGD gate labels on a PR.
+      # Print "reviewing=<bool> reviewed=<bool>" for the SGE gate labels on a PR.
       # Mirrors pr-labels.sh label_status output contract exactly.           (read)
       [ -n "${2:-}" ] && [ -n "${3:-}" ] \
         || _fa_usage 'pr-label-status needs <origin-url-or-owner/name> <pr-num>'

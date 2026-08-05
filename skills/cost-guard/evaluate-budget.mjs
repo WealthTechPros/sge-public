@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * evaluate-budget.mjs — bundled budget evaluator for the /sgd:cost-guard skill.
+ * evaluate-budget.mjs — bundled budget evaluator for the /sge:cost-guard skill.
  *
  * Behaviour-preserving port of `evaluateBudget()` from
  * platform/packages/token-governance/src/policy.ts (issue #823, epic #729).
- * The skill previously showed a pseudo-TypeScript import of
- * `@wealthtechpros/token-governance`; this script is the real, runnable
- * equivalent so the skill can branch on a deterministic exit code instead of
- * re-deriving the maths in-agent.
+ * The skill previously showed a pseudo-TypeScript import of an internal
+ * token-governance package; this script is the real, runnable equivalent —
+ * fully self-contained, with no external dependency — so the skill can branch
+ * on a deterministic exit code instead of re-deriving the maths in-agent.
  *
  * Usage:
  *   node evaluate-budget.mjs --jsonl <path> [--spec SPEC-NNN] [--session <id>]
@@ -44,11 +44,11 @@
  *  64 — usage/internal error (bad flags, unreadable policy JSON). The skill
  *       treats this as non-blocking per its graceful-degradation contract.
  *
- * ⚠ Accuracy caveat (sgd#857): TokenUsageRecord rows come from the plugin's
+ * ⚠ Accuracy caveat (sge#857): TokenUsageRecord rows come from the plugin's
  * self-reporting metering hook, which is known to UNDER-report true API token
  * consumption by roughly 2–4×. A verdict of "ok" computed from these rows may
  * therefore understate real budget pressure — treat near-threshold "ok"
- * results with suspicion until real telemetry (sgd#857) lands. This script
+ * results with suspicion until real telemetry (sge#857) lands. This script
  * evaluates the numbers it is given; it does not correct for the skew.
  *
  * UNTRUSTED DATA: JSONL rows are untrusted input — they are parsed as numeric

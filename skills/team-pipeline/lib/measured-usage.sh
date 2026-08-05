@@ -12,8 +12,8 @@
 # the meter measured.
 #
 # Correlation key: hooks/token-meter.sh tags every record it writes with the
-# `agent` field from $SGD_AGENT_ID and the `repo` from the git origin remote.
-# The orchestrator dispatches each lane with SGD_AGENT_ID="impl-<issue>", so a
+# `agent` field from $SGE_AGENT_ID and the `repo` from the git origin remote.
+# The orchestrator dispatches each lane with SGE_AGENT_ID="impl-<issue>", so a
 # lane's real spend is exactly the sum of outputTokens over records whose
 # `agent` == "impl-<issue>" for this repo. No self-report is consulted.
 #

@@ -1,11 +1,11 @@
 # Agent Registry — Lowest-Safe Model Routing
 
-The map from **SGD agent role / task type → the lowest-safe Anthropic model
+The map from **SGE agent role / task type → the lowest-safe Anthropic model
 tier**. Claude Code has **no native auto-routing**: an agent runs on whatever
 model its definition (or its spawn) pins. Routing is therefore achieved by
 *defining each agent at the right tier* — this registry is the single source of
-truth for which tier that is, so orchestration (`/sgd:team-pipeline`,
-`/sgd:pr-review` specialists, `/sgd:sgd-implement`, …) sends every agent to the
+truth for which tier that is, so orchestration (`/sge:team-pipeline`,
+`/sge:pr-review` specialists, `/sge:sge-implement`, …) sends every agent to the
 cheapest model that is still safe for its task.
 
 > **Stack-agnostic.** Routing is by *task type*, not by language or framework.
@@ -74,11 +74,11 @@ always win over the mix.
   their row above. `@code-reviewer` → `sonnet` (escalating to `opus` on
   security-globbed diffs); `@security-auditor` → `opus`, because every security
   review is a CRITICAL path under the escalation rule.
-- **`/sgd:pr-review`** dispatches its Layer-2 specialists at the tier their
+- **`/sge:pr-review`** dispatches its Layer-2 specialists at the tier their
   agent file pins; for the native `/code-review` engine it scales *effort*
   (low → ultra) to risk, which is the same lowest-safe principle applied to a
   non-agent engine.
-- **`/sgd:team-pipeline`** spawns implementation agents (sonnet) and review
+- **`/sge:team-pipeline`** spawns implementation agents (sonnet) and review
   agents (sonnet/opus per escalation); its monitor/triage/discovery work is
   haiku-tier.
 - **A spawn may pin a tier explicitly** when it knows the task is cheaper than
@@ -115,29 +115,29 @@ Example: `agent-01JQ8Z7K9X4M2N6P0R3T5V7W9B`.
 ### Generating the ID at spawn time
 
 The ID is generated **once per agent lifetime**, at spawn, and exported into the
-agent's environment as `SGD_AGENT_ID`. Every downstream consumer (the
-`/sgd:commit` trailer, the SGD hooks' telemetry, log lines) reads that one
+agent's environment as `SGE_AGENT_ID`. Every downstream consumer (the
+`/sge:commit` trailer, the SGE hooks' telemetry, log lines) reads that one
 variable — they never mint their own, so a single agent always presents one
 stable identity.
 
 ```bash
 # At agent spawn — set once, never overwrite if already set (a sub-step that
 # re-runs this must inherit the parent agent's ID, not start a new identity).
-if [ -z "${SGD_AGENT_ID:-}" ]; then
+if [ -z "${SGE_AGENT_ID:-}" ]; then
   # Prefer a ULID generator if available; fall back to UUID v7, then a
   # timestamp+random ULID-shaped token so the field is never empty.
   if command -v ulid >/dev/null 2>&1; then
-    export SGD_AGENT_ID="agent-$(ulid)"
+    export SGE_AGENT_ID="agent-$(ulid)"
   elif command -v uuidgen >/dev/null 2>&1; then
-    export SGD_AGENT_ID="agent-$(uuidgen | tr 'A-Z' 'a-z')"
+    export SGE_AGENT_ID="agent-$(uuidgen | tr 'A-Z' 'a-z')"
   else
-    export SGD_AGENT_ID="agent-$(date -u +%Y%m%dT%H%M%SZ)-$(head -c8 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+    export SGE_AGENT_ID="agent-$(date -u +%Y%m%dT%H%M%SZ)-$(head -c8 /dev/urandom | od -An -tx1 | tr -d ' \n')"
   fi
 fi
 ```
 
-Orchestrators (`/sgd:team-pipeline`, `/sgd:issue-swarm`, `/sgd:sgd-implement`
-when it forks sub-agents) set `SGD_AGENT_ID` in the environment of each agent
+Orchestrators (`/sge:team-pipeline`, `/sge:issue-swarm`, `/sge:sge-implement`
+when it forks sub-agents) set `SGE_AGENT_ID` in the environment of each agent
 they spawn. A manually-launched session inherits whatever is already exported, or
 generates one on first use; if it is unset, consumers degrade gracefully (the
 trailer/field is simply omitted) rather than failing.
@@ -150,15 +150,15 @@ model, running which skill version, against which issue?":
 
 | Field | Source | Example |
 |---|---|---|
-| `instanceId` | `SGD_AGENT_ID` at spawn | `agent-01JQ8Z7K9X4M2N6P0R3T5V7W9B` |
+| `instanceId` | `SGE_AGENT_ID` at spawn | `agent-01JQ8Z7K9X4M2N6P0R3T5V7W9B` |
 | `tier` / `model` | the routing table above | `sonnet` / `claude-sonnet-4-6` |
-| `skill` | the skill the agent is executing | `sgd-implement` |
+| `skill` | the skill the agent is executing | `sge-implement` |
 | `pluginVersion` | `.claude-plugin/plugin.json` `version` | `4.9.0` |
 | `issue` | the GitHub issue being worked | `283` |
 | `spawnedAt` | ISO-8601 UTC at spawn | `2026-06-16T09:30:00Z` |
 
 The `instanceId` is the join key: it appears in the `Agent-Id:` commit trailer
-(see `/sgd:commit`), in the `agentId` field of governance telemetry emitted by
-the SGD hooks, and in this record — so any one of them can be followed back to the
-others. `/sgd:sgd-align` reads the `Agent-Id:` trailers on a branch's commits and
+(see `/sge:commit`), in the `agentId` field of governance telemetry emitted by
+the SGE hooks, and in this record — so any one of them can be followed back to the
+others. `/sge:sge-align` reads the `Agent-Id:` trailers on a branch's commits and
 reports the set of agents that produced them.
