@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# pr-labels.sh — the single state machine for the SGD review-gate labels.
+# pr-labels.sh — the single state machine for the SGE review-gate labels.
 #
 #   pr-reviewing  (amber)  review in progress
 #   pr-reviewed   (green)  merge-gate label required by branch protection
 #   pr-fixing     (amber)  CI-fix in progress — a fix-in-flight mutex (#1174)
 #
 # pr-reviewing / pr-reviewed are MUTUALLY EXCLUSIVE — a PR must never carry both.
-# This script is the only place that transition logic lives; /sgd:pr-review owns
-# the review transitions, /sgd:pr-monitor verifies them, /sgd:pr-fix marks
+# This script is the only place that transition logic lives; /sge:pr-review owns
+# the review transitions, /sge:pr-monitor verifies them, /sge:pr-fix marks
 # staleness AND owns the pr-fixing claim (claim-fix / release-fix below).
 #
 # pr-fixing is orthogonal to the review pair: it is a cross-session claim that
-# ONE /sgd:pr-fix agent is driving this PR's CI to green, so a second monitor
+# ONE /sge:pr-fix agent is driving this PR's CI to green, so a second monitor
 # does not dispatch a duplicate fix agent onto a branch already being
 # force-pushed (issue #1174). It mirrors pr-reviewing's concurrency guard (#699)
 # and stale-claim lease (#396) exactly, with its own TTL knob.
@@ -21,7 +21,7 @@
 #                                             claim review   (+pr-reviewing, -pr-reviewed)
 #                                             Concurrency guard (#699): refuses (exit 3)
 #                                             when another run holds a FRESH pr-reviewing
-#                                             claim (younger than SGD_REVIEW_CLAIM_TTL_MIN,
+#                                             claim (younger than SGE_REVIEW_CLAIM_TTL_MIN,
 #                                             default 30 minutes). Stale claims are taken
 #                                             over; --force-claim overrides deliberately.
 #   pr-labels.sh pass <pr> [--auto-merge] [--expect-head <sha>] [--skip-claim-check]
@@ -49,7 +49,7 @@
 #                                             fail-closed on pre-check error (#717).
 #                                             Follow-up preservation gate (#859): refuses
 #                                             (exit 6) when the PR body — or the review text
-#                                             fed via SGD_REVIEW_FOLLOWUP_TEXT/_FILE —
+#                                             fed via SGE_REVIEW_FOLLOWUP_TEXT/_FILE —
 #                                             declares a follow-up ("follow-up", "deferred",
 #                                             "future PR", …) with no nearby issue reference,
 #                                             so a follow-up cannot evaporate when the linked
@@ -69,24 +69,32 @@
 #                                             new review cycle promotes normally.
 #                                             Reports "pass, held for human sign-off".
 #   pr-labels.sh apply-hold <pr>              apply the `hold` label (+hold); used by
-#                                             /sgd:pr-review when a `HOLD:` marker is
+#                                             /sge:pr-review when a `HOLD:` marker is
 #                                             found in the PR body or a security MAJOR
 #                                             finding requires human sign-off.
 #   pr-labels.sh stale <pr>                   new commits after a pass (-pr-reviewed)
 #   pr-labels.sh claim-fix <pr> [--force-claim]
 #                                             claim a CI-fix (+pr-fixing). The
-#                                             /sgd:pr-fix mutex (issue #1174),
+#                                             /sge:pr-fix mutex (issue #1174),
 #                                             mirroring start-review's #699 guard:
 #                                             refuses (exit 3) when another run
 #                                             holds a FRESH pr-fixing claim
-#                                             (younger than SGD_FIX_CLAIM_TTL_MIN,
+#                                             (younger than SGE_FIX_CLAIM_TTL_MIN,
 #                                             default 30 minutes). Stale claims are
 #                                             taken over; --force-claim overrides.
 #   pr-labels.sh release-fix <pr>             release a CI-fix claim (-pr-fixing).
 #                                             The binding termination contract —
-#                                             /sgd:pr-fix MUST call this on exit so
+#                                             /sge:pr-fix MUST call this on exit so
 #                                             a crashed fix frees the lane within
 #                                             the lease window. Idempotent.
+#   pr-labels.sh sync-check <pr> <new-head>   strip pr-reviewed when the latest
+#                                             sge-verdict's commit does not cover
+#                                             <new-head> (issue #1941). Called on
+#                                             pull_request:synchronize to keep the
+#                                             gate label honest after a push. Posts
+#                                             a comment naming the superseded SHA.
+#                                             No-op when pr-reviewed is absent or
+#                                             when the verdict covers the new head.
 #   pr-labels.sh status <pr>                  print "reviewing=<bool> reviewed=<bool> hold=<bool>"
 #                                             (Forgejo keeps the two-field form — #1419)
 #                                             (issue #1147: falls back to a
@@ -100,7 +108,7 @@
 #   - adds tolerate the label already being present
 #   - removals tolerate the label being absent (non-zero + known message → silent skip)
 #   - `pass` refuses draft PRs and verifies the swap actually took (with retry)
-#   - when SGD_REVIEW_ADVISORY=1 in the environment, `pass` refuses (exit 4):
+#   - when SGE_REVIEW_ADVISORY=1 in the environment, `pass` refuses (exit 4):
 #     an advisory / review-only dispatch may post a verdict comment but must
 #     never move the pr-reviewed gate or arm auto-merge (issue #754). Subagents
 #     inherit the parent env, so a dispatcher exports one variable and the
@@ -109,7 +117,7 @@
 #     the per-PR attestation ledger never cleared rl_reviewer_ran (issue #883) —
 #     the mechanical backstop that forces the guard to be consulted, mirroring
 #     the exit-4 advisory gate. `start-review` resets the ledger; review-lib.sh
-#     writes it (rl_reviewer_dispatch/rl_reviewer_attest). SGD_REVIEW_ATTEST_SKIP=1
+#     writes it (rl_reviewer_dispatch/rl_reviewer_attest). SGE_REVIEW_ATTEST_SKIP=1
 #     bypasses it for a genuinely inline review with no dispatched specialists.
 #   - `pass` refuses (exit 6) when a declared follow-up in the PR body / review
 #     text has no issue reference (issue #859) — a follow-up whose only home is a
@@ -160,14 +168,14 @@ usage() {
 #
 # A JSON metadata block is posted alongside the pr-reviewing label so any
 # actor can verify liveness and ownership without a timeline API call.
-# Format:  ```sgd-claim-metadata\n{"owner":"<id>","claimedAt":"<ISO>","ttl":N}\n```
+# Format:  ```sge-claim-metadata\n{"owner":"<id>","claimedAt":"<ISO>","ttl":N}\n```
 # The label remains the real mutex; the comment is enrichment metadata.
 # ---------------------------------------------------------------------------
 
-CLAIM_COMMENT_FENCE="sgd-claim-metadata"
+CLAIM_COMMENT_FENCE="sge-claim-metadata"
 # Default TTL for a claim comment in seconds. Heartbeat comments (fence
-# sgd-claim-heartbeat) posted by the review daemon extend the effective window.
-CLAIM_COMMENT_TTL="${SGD_REVIEW_CLAIM_TTL:-900}"
+# sge-claim-heartbeat) posted by the review daemon extend the effective window.
+CLAIM_COMMENT_TTL="${SGE_REVIEW_CLAIM_TTL:-900}"
 
 # _claim_repo_full: canonical owner/repo for API calls. Prefers GH_REPO;
 # falls back to gh detection. Prints nothing on failure.
@@ -175,7 +183,7 @@ _claim_repo_full() {
   printf '%s' "${GH_REPO:-$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || true)}"
 }
 
-# find_claim_comment: return the latest sgd-claim-metadata comment as raw JSON,
+# find_claim_comment: return the latest sge-claim-metadata comment as raw JSON,
 # or empty string if none. Silent on failure — callers check for non-empty.
 find_claim_comment() {
   local _rf
@@ -190,7 +198,7 @@ find_claim_comment() {
 }
 
 # parse_claim_metadata <comment-json>: extract the JSON object from inside the
-# sgd-claim-metadata code block. Prints the JSON or nothing on failure.
+# sge-claim-metadata code block. Prints the JSON or nothing on failure.
 parse_claim_metadata() {
   local body meta
   body=$(printf '%s' "${1:-}" | jq -r '.body // empty' 2>/dev/null) || return 0
@@ -220,11 +228,11 @@ claim_comment_live() {
 }
 
 # post_claim_comment: post the JSON claim comment alongside the pr-reviewing
-# label. Owner is SGD_AGENT_ID if set, else the system hostname. Best-effort —
+# label. Owner is SGE_AGENT_ID if set, else the system hostname. Best-effort —
 # a failure is logged but does not abort the claim (the label is the real mutex).
 post_claim_comment() {
   local owner claimed_at body _rf
-  owner="${SGD_AGENT_ID:-$(hostname 2>/dev/null || echo "unknown")}"
+  owner="${SGE_AGENT_ID:-$(hostname 2>/dev/null || echo "unknown")}"
   claimed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   body="$(printf '```%s\n{"owner":"%s","claimedAt":"%s","ttl":%d}\n```' \
     "$CLAIM_COMMENT_FENCE" "$owner" "$claimed_at" "$CLAIM_COMMENT_TTL")"
@@ -243,7 +251,7 @@ post_claim_comment() {
   fi
 }
 
-# delete_claim_comment: delete the latest sgd-claim-metadata comment on the PR.
+# delete_claim_comment: delete the latest sge-claim-metadata comment on the PR.
 # Idempotent: no-op if none is found or the deletion fails (best-effort).
 delete_claim_comment() {
   local comment_json comment_id _rf
@@ -292,20 +300,20 @@ fi
 
 ensure_labels() {
   # Idempotent — creates if missing, updates colour/description if present.
-  gh label create "$REVIEWING" --color FBCA04 --description "PR review in progress (SGD)"     --force >/dev/null
-  gh label create "$REVIEWED"  --color 0E8A16 --description "Reviewed via SGD PR-review gate" --force >/dev/null
+  gh label create "$REVIEWING" --color FBCA04 --description "PR review in progress (SGE)"     --force >/dev/null
+  gh label create "$REVIEWED"  --color 0E8A16 --description "Reviewed via SGE PR-review gate" --force >/dev/null
 }
 
 # The pr-fixing claim label is only created by the fix path (claim-fix), so the
 # review path never materialises a label it does not use. Same idempotent shape.
 ensure_fixing_label() {
-  gh label create "$FIXING" --color FBCA04 --description "CI-fix in progress (SGD pr-fix)" --force >/dev/null
+  gh label create "$FIXING" --color FBCA04 --description "CI-fix in progress (SGE pr-fix)" --force >/dev/null
 }
 
 # The hold label is only created by apply-hold / the pr-review skill when it
 # detects a HOLD: marker or a security MAJOR finding.  Same idempotent shape.
 ensure_hold_label() {
-  gh label create "$HOLD" --color B60205 --description "Held for human sign-off (SGD)" --force >/dev/null
+  gh label create "$HOLD" --color B60205 --description "Held for human sign-off (SGE)" --force >/dev/null
 }
 
 # hold_status -- print "hold=<bool>" for the hold label (issue #1393). Thin
@@ -361,11 +369,11 @@ rate_limit_status() {
 }
 
 # rate_limit_exhausted [floor] -- true if REST remaining <= floor (default 50,
-# SGD_REVIEW_RATE_LIMIT_FLOOR). Fails CLOSED TO FALSE (assume not exhausted)
+# SGE_REVIEW_RATE_LIMIT_FLOOR). Fails CLOSED TO FALSE (assume not exhausted)
 # when the status can't be read — this feeds a loud-failure decision and must
 # never fabricate a positive signal from missing data.
 rate_limit_exhausted() {
-  local floor="${1:-${SGD_REVIEW_RATE_LIMIT_FLOOR:-50}}" status remaining
+  local floor="${1:-${SGE_REVIEW_RATE_LIMIT_FLOOR:-50}}" status remaining
   status=$(rate_limit_status) || return 1
   remaining=$(printf '%s' "$status" | awk '{print $1}')
   [[ "$remaining" =~ ^[0-9]+$ ]] || return 1
@@ -609,7 +617,7 @@ SELF_LABEL_CHECK_NAME="Require pr-reviewed label"
 
 assert_required_checks_green() {
   local raw rc err errfile
-  errfile=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/sgd-rcg.$$")
+  errfile=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/sge-rcg.$$")
   # --required narrows to genuinely-required checks so an optional red check
   # does not block arming. --json forces machine output; capture regardless of
   # gh's pass/fail/pending exit code so set -euo pipefail does not abort here.
@@ -674,7 +682,7 @@ assert_required_checks_green() {
 # was armed.
 #
 # This gate greps the PR body (and any review text the caller feeds via
-# SGD_REVIEW_FOLLOWUP_TEXT / SGD_REVIEW_FOLLOWUP_FILE) for follow-up markers and
+# SGE_REVIEW_FOLLOWUP_TEXT / SGE_REVIEW_FOLLOWUP_FILE) for follow-up markers and
 # REFUSES the pass (return 1 → no label swap, no auto-merge arm) if any marker
 # line lacks an issue reference (#N / issues/N / GH-N) within a small lookahead
 # window — a heading like "## Follow-ups" immediately above a list of items each
@@ -683,7 +691,7 @@ assert_required_checks_green() {
 # tells the reviewer to file the issue first — exactly the manual #847
 # remediation. Cheap, mechanical, fits the pr-labels.sh script-extraction
 # pattern (#820). --skip-followup-check bypasses it (mirrors --skip-thread-check);
-# SGD_FOLLOWUP_MARKERS / SGD_FOLLOWUP_LOOKAHEAD tune the markers and window.
+# SGE_FOLLOWUP_MARKERS / SGE_FOLLOWUP_LOOKAHEAD tune the markers and window.
 # Fails CLOSED: an unreadable PR body refuses rather than arming blind.
 assert_followups_preserved() {
   local body rc extra=""
@@ -707,16 +715,16 @@ assert_followups_preserved() {
   # The review's own text, when the caller feeds it (Phase 8 exports it before
   # promoting) — so a follow-up declared only in the review, never in the PR
   # body, is caught too. Both channels are optional; absent = body-only scan.
-  [[ -n "${SGD_REVIEW_FOLLOWUP_TEXT:-}" ]] && extra+=$'\n'"${SGD_REVIEW_FOLLOWUP_TEXT}"
-  if [[ -n "${SGD_REVIEW_FOLLOWUP_FILE:-}" && -r "${SGD_REVIEW_FOLLOWUP_FILE}" ]]; then
-    extra+=$'\n'"$(cat "${SGD_REVIEW_FOLLOWUP_FILE}")"
+  [[ -n "${SGE_REVIEW_FOLLOWUP_TEXT:-}" ]] && extra+=$'\n'"${SGE_REVIEW_FOLLOWUP_TEXT}"
+  if [[ -n "${SGE_REVIEW_FOLLOWUP_FILE:-}" && -r "${SGE_REVIEW_FOLLOWUP_FILE}" ]]; then
+    extra+=$'\n'"$(cat "${SGE_REVIEW_FOLLOWUP_FILE}")"
   fi
 
   local markers issueref look negations
   # Lowercased ERE (the awk below lowercases each line before matching).
-  markers="${SGD_FOLLOWUP_MARKERS:-follow[ -]?up|deferred|future pr|separate pr|later pr|in a follow}"
+  markers="${SGE_FOLLOWUP_MARKERS:-follow[ -]?up|deferred|future pr|separate pr|later pr|in a follow}"
   issueref='#[0-9]+|issues/[0-9]+|gh-[0-9]+'
-  look="${SGD_FOLLOWUP_LOOKAHEAD:-3}"
+  look="${SGE_FOLLOWUP_LOOKAHEAD:-3}"
   [[ "$look" =~ ^[0-9]+$ ]] || look=3
   # Negation cue words (issue #1027): a marker match is NOT a declared
   # follow-up when one of these directly precedes it (within the 3 words
@@ -724,7 +732,7 @@ assert_followups_preserved() {
   # "not a follow-up", "no separate PR is needed"). Apostrophes are stripped
   # from the prefix BEFORE it is split into words, so contracted negations
   # ("isn't"/"doesn't"/"can't") collapse to their bare forms and match.
-  negations="${SGD_FOLLOWUP_NEGATIONS:-no|not|never|isnt|arent|wasnt|werent|doesnt|dont|didnt|hasnt|havent|wont|wouldnt|cannot|cant|without}"
+  negations="${SGE_FOLLOWUP_NEGATIONS:-no|not|never|isnt|arent|wasnt|werent|doesnt|dont|didnt|hasnt|havent|wont|wouldnt|cannot|cant|without}"
 
   local report
   report=$(printf '%s\n%s\n' "$body" "$extra" | awk \
@@ -843,14 +851,14 @@ if [ "$_PRL_HOST" = "forgejo" ]; then
 
   ensure_labels() {
     "$_PRL_ADAPTER" pr-ensure-label "$_PRL_ORIGIN" \
-      "pr-reviewing" "FBCA04" "PR review in progress (SGD)"
+      "pr-reviewing" "FBCA04" "PR review in progress (SGE)"
     "$_PRL_ADAPTER" pr-ensure-label "$_PRL_ORIGIN" \
-      "pr-reviewed"  "0E8A16" "Reviewed via SGD PR-review gate"
+      "pr-reviewed"  "0E8A16" "Reviewed via SGE PR-review gate"
   }
 
   ensure_fixing_label() {
     "$_PRL_ADAPTER" pr-ensure-label "$_PRL_ORIGIN" \
-      "pr-fixing" "FBCA04" "CI-fix in progress (SGD pr-fix)"
+      "pr-fixing" "FBCA04" "CI-fix in progress (SGE pr-fix)"
   }
 
   is_draft() {
@@ -874,7 +882,7 @@ case "$CMD" in
     # Two independent review passes on the same PR burn a duplicate ~100k+ token
     # specialist fan-out for zero marginal value.
     #
-    # Primary check (issue #1312): if a live sgd-claim-metadata comment exists
+    # Primary check (issue #1312): if a live sge-claim-metadata comment exists
     # (claimedAt + ttl not elapsed), another review agent owns this PR — refuse
     # with exit 3. The comment carries owner identity and an explicit TTL so the
     # check is independent of the label-event timeline API. A stale comment is
@@ -904,7 +912,7 @@ case "$CMD" in
           _CLAIM_OWNER=$(parse_claim_metadata "$_CLAIM_JSON" \
             | jq -r '.owner // "unknown"' 2>/dev/null) || _CLAIM_OWNER="unknown"
           echo "refusing: PR #$PR has a live claim comment (owner=${_CLAIM_OWNER}) — another review is in flight (issue #1312)" >&2
-          echo "The claim self-expires after ${CLAIM_COMMENT_TTL}s (SGD_REVIEW_CLAIM_TTL); re-run with --force-claim to take over deliberately." >&2
+          echo "The claim self-expires after ${CLAIM_COMMENT_TTL}s (SGE_REVIEW_CLAIM_TTL); re-run with --force-claim to take over deliberately." >&2
           exit 3
         fi
         # Stale claim comment — delete it before re-claiming.
@@ -915,7 +923,7 @@ case "$CMD" in
         # backward compat with old-style claims that predate #1312).
         CUR_STATUS=$(label_status 2>/dev/null) || CUR_STATUS=""
         if [[ "$CUR_STATUS" == *"reviewing=true"* ]]; then
-          CLAIM_TTL_MIN="${SGD_REVIEW_CLAIM_TTL_MIN:-30}"
+          CLAIM_TTL_MIN="${SGE_REVIEW_CLAIM_TTL_MIN:-30}"
           REPO_FULL="${GH_REPO:-$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || true)}"
           CLAIMED_AT=""
           if [[ -n "$REPO_FULL" ]]; then
@@ -934,7 +942,7 @@ case "$CMD" in
             CLAIM_AGE_MIN=$(( ($(date -u +%s) - CLAIMED_EPOCH) / 60 ))
             if [[ "$CLAIM_AGE_MIN" -lt "$CLAIM_TTL_MIN" ]]; then
               echo "refusing: PR #$PR already carries $REVIEWING — claimed ${CLAIM_AGE_MIN}m ago (< ${CLAIM_TTL_MIN}m TTL); another review pass is likely in flight (issue #699)" >&2
-              echo "Back off instead of running a duplicate review. The claim self-expires after ${CLAIM_TTL_MIN}m (SGD_REVIEW_CLAIM_TTL_MIN); re-run with --force-claim to take over deliberately." >&2
+              echo "Back off instead of running a duplicate review. The claim self-expires after ${CLAIM_TTL_MIN}m (SGE_REVIEW_CLAIM_TTL_MIN); re-run with --force-claim to take over deliberately." >&2
               exit 3
             fi
             echo "PR #$PR: existing $REVIEWING claim is stale (${CLAIM_AGE_MIN}m >= ${CLAIM_TTL_MIN}m) — taking over (issue #699)" >&2
@@ -947,9 +955,9 @@ case "$CMD" in
     ensure_labels
     # Reset the #883 attestation ledger — a fresh review pass starts with an
     # empty dispatched-reviewer roster (matches review-lib.sh rl_attest_reset).
-    _ATTEST_DIR="${SGD_REVIEW_STATE_DIR:-${TMPDIR:-${TEMP:-/tmp}}}"
+    _ATTEST_DIR="${SGE_REVIEW_STATE_DIR:-${TMPDIR:-${TEMP:-/tmp}}}"
     _ATTEST_REPO="${GH_REPO:-local}"; _ATTEST_REPO="${_ATTEST_REPO//[^A-Za-z0-9._-]/_}"
-    : > "${_ATTEST_DIR}/sgd-review-attest.${_ATTEST_REPO}.${PR}" 2>/dev/null || true
+    : > "${_ATTEST_DIR}/sge-review-attest.${_ATTEST_REPO}.${PR}" 2>/dev/null || true
     add_label "$REVIEWING"
     remove_label "$REVIEWED"        # any prior pass is void once a review restarts
     # Post the claim comment alongside the label (issue #1312 AC1). Best-effort —
@@ -961,7 +969,7 @@ case "$CMD" in
 
   pass)
     # Advisory-mode mechanical guard (issue #754): when a dispatcher exports
-    # SGD_REVIEW_ADVISORY=1, this run is a review-ONLY dispatch — it may post a
+    # SGE_REVIEW_ADVISORY=1, this run is a review-ONLY dispatch — it may post a
     # verdict comment but must never move the merge-gate labels or arm auto-merge.
     # This is the mechanical backstop for the two live incidents where a review
     # agent holding a conflicting operator prompt applied pr-reviewed and armed
@@ -970,9 +978,9 @@ case "$CMD" in
     # parent env, so one exported variable removes the capability — it cannot be
     # talked past. `pass` is also the sole place --auto-merge is armed, so
     # refusing the whole action covers auto-merge arming too. Distinct exit 4.
-    if [[ "${SGD_REVIEW_ADVISORY:-}" == "1" ]]; then
-      echo "refusing: SGD_REVIEW_ADVISORY=1 — advisory (review-only) dispatch: 'pass' cannot move the $REVIEWED gate or arm auto-merge (issue #754)" >&2
-      echo "Post the review verdict as a comment (mode: advisory) instead. To promote the gate, re-run without SGD_REVIEW_ADVISORY set in the environment." >&2
+    if [[ "${SGE_REVIEW_ADVISORY:-}" == "1" ]]; then
+      echo "refusing: SGE_REVIEW_ADVISORY=1 — advisory (review-only) dispatch: 'pass' cannot move the $REVIEWED gate or arm auto-merge (issue #754)" >&2
+      echo "Post the review verdict as a comment (mode: advisory) instead. To promote the gate, re-run without SGE_REVIEW_ADVISORY set in the environment." >&2
       exit 4
     fi
     # Mechanical subagent-execution gate (issue #883): rl_reviewer_ran is only
@@ -982,15 +990,15 @@ case "$CMD" in
     # per-PR ledger (rl_reviewer_dispatch) and clears it only after it passes
     # rl_reviewer_ran (rl_reviewer_attest). If ANY dispatched reviewer never
     # cleared the guard, refuse the gate here — the same env/state backstop shape
-    # as SGD_REVIEW_ADVISORY above (prose-only "call the guard" fails on subagents,
+    # as SGE_REVIEW_ADVISORY above (prose-only "call the guard" fails on subagents,
     # #754). No ledger / 0 pending = inline or no-fan-out review = proceeds. This
     # reads the SAME file+format written by review-lib.sh (which pr-labels.sh does
     # not source); keep the two in sync. Distinct exit 5.
-    if [[ "${SGD_REVIEW_ATTEST_SKIP:-}" != "1" ]]; then
-      _ATTEST_DIR="${SGD_REVIEW_STATE_DIR:-${TMPDIR:-${TEMP:-/tmp}}}"
+    if [[ "${SGE_REVIEW_ATTEST_SKIP:-}" != "1" ]]; then
+      _ATTEST_DIR="${SGE_REVIEW_STATE_DIR:-${TMPDIR:-${TEMP:-/tmp}}}"
       _ATTEST_REPO="${GH_REPO:-local}"
       _ATTEST_REPO="${_ATTEST_REPO//[^A-Za-z0-9._-]/_}"
-      _ATTEST_FILE="${_ATTEST_DIR}/sgd-review-attest.${_ATTEST_REPO}.${PR}"
+      _ATTEST_FILE="${_ATTEST_DIR}/sge-review-attest.${_ATTEST_REPO}.${PR}"
       _ATTEST_PENDING=0
       if [[ -f "$_ATTEST_FILE" ]]; then
         # A present ledger MUST parse to a count; if awk fails or returns a
@@ -1009,7 +1017,7 @@ case "$CMD" in
       if [[ "$_ATTEST_PENDING" =~ ^[0-9]+$ && "$_ATTEST_PENDING" -gt 0 ]]; then
         echo "refusing: $_ATTEST_PENDING dispatched reviewer(s) never cleared rl_reviewer_ran (issue #883) — their (non-)result must not be trusted as a clean pass" >&2
         echo "Re-run each unattested Layer 2/3 agent (or do its check inline) and clear it via rl_reviewer_attest before 'pass'. Ledger: $_ATTEST_FILE" >&2
-        echo "SGD_REVIEW_ATTEST_SKIP=1 bypasses this only for a genuinely inline review with no dispatched specialists." >&2
+        echo "SGE_REVIEW_ATTEST_SKIP=1 bypasses this only for a genuinely inline review with no dispatched specialists." >&2
         exit 5
       fi
     fi
@@ -1088,7 +1096,7 @@ case "$CMD" in
     fi
     # Human-hold gate (issue #1393): a `hold` label is a human sign-off
     # requirement applied either explicitly (prose "HOLD:" in the PR body parsed
-    # at review start) or automatically by /sgd:pr-review when a security
+    # at review start) or automatically by /sge:pr-review when a security
     # specialist returns a MAJOR finding. The gate CANNOT open while hold is
     # present — pr-reviewed must not be applied and auto-merge must not be armed.
     # This is the mechanical backstop that prose-in-the-body cannot provide
@@ -1177,7 +1185,7 @@ case "$CMD" in
                 jq -r '.[] | "  [\(.id | .[0:20])…] \(.comments.nodes[0].author.login): \(.comments.nodes[0].body | .[0:100] | gsub("\n";" "))"' \
                   <<<"$_CACHED_UNRESOLVED" >&2
                 echo "" >&2
-                echo "Run Phase 5.5 of /sgd:pr-review to address each thread (fix, reply, or resolve)." >&2
+                echo "Run Phase 5.5 of /sge:pr-review to address each thread (fix, reply, or resolve)." >&2
                 echo "Use --skip-thread-check if this repo has no required_review_thread_resolution ruleset." >&2
                 exit 1
               fi
@@ -1269,7 +1277,7 @@ case "$CMD" in
         jq -r '.[] | "  [\(.id | .[0:20])…] \(.comments.nodes[0].author.login): \(.comments.nodes[0].body | .[0:100] | gsub("\n";" "))"' \
           <<<"$UNRESOLVED_JSON" >&2
         echo "" >&2
-        echo "Run Phase 5.5 of /sgd:pr-review to address each thread (fix, reply, or resolve)." >&2
+        echo "Run Phase 5.5 of /sge:pr-review to address each thread (fix, reply, or resolve)." >&2
         echo "Use --skip-thread-check if this repo has no required_review_thread_resolution ruleset." >&2
         exit 1
       fi
@@ -1325,7 +1333,7 @@ case "$CMD" in
     # repo WITH CI it can also mean CI has not registered its first status yet —
     # proceeding then merges before any check runs. Because the adapter cannot
     # distinguish the two, default behaviour treats "none" as proceed (the
-    # no-CI-configured assumption) and SGD_FORGEJO_REQUIRE_CI=1 flips it to
+    # no-CI-configured assumption) and SGE_FORGEJO_REQUIRE_CI=1 flips it to
     # fail-closed for repos that DO run CI and must never merge on an empty
     # status set. "unknown" (an unrecognised/unresolvable status — see
     # forgejo-adapter.sh pr-commit-status) ALWAYS refuses: it is never a
@@ -1342,8 +1350,8 @@ case "$CMD" in
             echo "refusing: PR #$PR Forgejo commit CI status is 'pending' — will NOT merge while CI is still running (issue #885, Forgejo path, issue #1239)" >&2
             exit 1 ;;
           none)
-            if [[ "${SGD_FORGEJO_REQUIRE_CI:-0}" == "1" ]]; then
-              echo "refusing: PR #$PR Forgejo commit status is 'none' (no CI statuses on the head) and SGD_FORGEJO_REQUIRE_CI=1 — will NOT merge; a required check may not have registered yet (issue #885, issue #1239)" >&2
+            if [[ "${SGE_FORGEJO_REQUIRE_CI:-0}" == "1" ]]; then
+              echo "refusing: PR #$PR Forgejo commit status is 'none' (no CI statuses on the head) and SGE_FORGEJO_REQUIRE_CI=1 — will NOT merge; a required check may not have registered yet (issue #885, issue #1239)" >&2
               exit 1
             fi
             echo "PR #$PR: Forgejo commit status = 'none' (no CI configured) — proceeding with merge (issue #1239)" >&2 ;;
@@ -1445,12 +1453,12 @@ case "$CMD" in
         fi
       else
         # --auto queues the merge behind branch protection; it never force-merges.
-        # Tolerant: repos without auto-merge fall back to /sgd:pr-monitor.
+        # Tolerant: repos without auto-merge fall back to /sge:pr-monitor.
         if merge_out=$(gh pr merge "$PR" --squash --auto 2>&1); then
           echo "PR #$PR: auto-merge enabled (squash)"
         else
           echo "PR #$PR: auto-merge request failed — $merge_out" >&2
-          echo "PR #$PR: auto-merge not enabled — leaving merge to /sgd:pr-monitor"
+          echo "PR #$PR: auto-merge not enabled — leaving merge to /sge:pr-monitor"
         fi
       fi
     fi
@@ -1473,8 +1481,8 @@ case "$CMD" in
     # (so the concurrency guard does not block future cycles) without applying
     # pr-reviewed (so auto-merge never arms). The hold label itself is untouched
     # — only the human operator can remove it.
-    # When hold is removed, the next cycle's /sgd:pr-review dispatch finds a
-    # clean prior sgd-verdict at the current head and promotes via delta fast-path.
+    # When hold is removed, the next cycle's /sge:pr-review dispatch finds a
+    # clean prior sge-verdict at the current head and promotes via delta fast-path.
     remove_label "$REVIEWING"       # release the claim so future cycles can run
     # $REVIEWED is intentionally NOT applied while hold is present.
     HOLD_ST="$(hold_status 2>/dev/null)" || HOLD_ST="(hold_status unavailable)"
@@ -1483,7 +1491,7 @@ case "$CMD" in
     ;;
 
   apply-hold)
-    # Apply the hold label (issue #1393): used by /sgd:pr-review when it detects
+    # Apply the hold label (issue #1393): used by /sge:pr-review when it detects
     # a HOLD: marker in the PR body at review start, or when a security specialist
     # returns a MAJOR finding that requires human sign-off per standing policy.
     # Idempotent — safe to call even if hold is already present.
@@ -1505,14 +1513,132 @@ case "$CMD" in
     echo "PR #$PR: $REVIEWED dropped (stale — new commits since last verdict)"
     ;;
 
+  sync-check)
+    # Issue #1941: on pull_request:synchronize, strip pr-reviewed when the
+    # latest sge-verdict's commit SHA does not match the new head. A label
+    # that survived a push but whose verdict was pinned to the OLD head would
+    # lie about coverage until someone noticed. The require-pr-reviewed-label
+    # workflow already fires on synchronize and would pass (the label IS
+    # present) — but it cannot know that the verdict was for a different SHA
+    # because it only reads labels, not verdict blocks. This subcommand
+    # closes that gap.
+    #
+    # Reuses the same sge-verdict parsing approach as state_machine.py
+    # (reviews first, then issue comments, most-recent first) but in bash+jq
+    # rather than reimplementing the Python. The --expect-head normalisation
+    # rules from `pass` apply: prefix match >= 7 hex chars, case-insensitive.
+
+    NEW_HEAD="${3:-}"
+    [[ -n "$NEW_HEAD" ]] || { echo "error: sync-check requires <pr> <new-head-sha>" >&2; exit 2; }
+
+    # 1) Is pr-reviewed even present? If not, nothing to strip.
+    LS="$(label_status 2>/dev/null)" || LS=""
+    if [[ "$LS" != *"reviewed=true"* ]]; then
+      echo "PR #$PR: sync-check — no $REVIEWED label, nothing to strip"
+      exit 0
+    fi
+
+    # 2) Find the latest sge-verdict commit SHA from PR reviews + comments.
+    #    Search reviews first (where gh pr review posts), then issue comments.
+    #    Take the most recent verdict found (reversed order).
+    REPO_FULL="${GH_REPO:-$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || true)}"
+    VERDICT_SHA=""
+    if [[ -n "$REPO_FULL" ]]; then
+      # Reviews (PR review API — most reliable, where /sge:pr-review posts).
+      # Extract the commit/sha/head field from the last sge-verdict block.
+      # Uses jq to parse the verdict block directly — avoids the 3-argument
+      # match() which only gawk supports (not BSD/macOS awk).
+      # Trusted-author filter (defense-in-depth): the App/Actions bot logins
+      # (wtp-sge[bot], github-actions[bot]) OR author_association OWNER/MEMBER/
+      # COLLABORATOR — the same trust anchor as verdict_trust.py (#1373/#1444).
+      # The association leg is required: WTP is a documented solo-dev org (see
+      # SGE_GOVERNANCE_PROFILE=solo in require-pr-reviewed-label.yml) where the
+      # PAT/self-review fallback (#862) posts every real sge-verdict under the
+      # operator's own MEMBER account, never a bot login (verified empirically
+      # against PRs #1980-1994) — without this leg VERDICT_SHA is always empty
+      # here and sync-check silently never fires (the "never observed acting"
+      # class #1941's own AC warns against; see #1664). An outside, non-
+      # collaborator commenter still cannot forge a verdict this way.
+      TRUST_FILTER='.user.login == "wtp-sge[bot]" or .user.login == "github-actions[bot]"
+           or (((.author_association // "") | ascii_upcase) as $assoc
+               | $assoc == "OWNER" or $assoc == "MEMBER" or $assoc == "COLLABORATOR")'
+      VERDICT_SHA=$(gh api "repos/$REPO_FULL/pulls/$PR/reviews" --paginate \
+        --jq '
+          [.[] | select(.body != null)
+           | select('"$TRUST_FILTER"')
+           | select(.body | test("```sge-verdict"))
+           | .body | split("\n")[] | select(test("^\\s*(commit|sha|head)\\s*:"))
+           | capture(":\\s*(?<val>\\S+)") | .val
+          ] | last // empty' \
+        2>/dev/null) || VERDICT_SHA=""
+
+      # Fallback: issue comments (same trusted-author filter)
+      if [[ -z "$VERDICT_SHA" ]]; then
+        VERDICT_SHA=$(gh api "repos/$REPO_FULL/issues/$PR/comments" --paginate \
+          --jq '
+            [.[] | select(.body != null)
+             | select('"$TRUST_FILTER"')
+             | select(.body | test("```sge-verdict"))
+             | .body | split("\n")[] | select(test("^\\s*(commit|sha|head)\\s*:"))
+             | capture(":\\s*(?<val>\\S+)") | .val
+            ] | last // empty' \
+          2>/dev/null) || VERDICT_SHA=""
+      fi
+    fi
+
+    if [[ -z "$VERDICT_SHA" ]]; then
+      # No verdict found at all. Cannot prove staleness — do not strip.
+      # (Fail closed: the label stays, and the require-pr-reviewed-label
+      # workflow's own head-drift check handles the "label present but no
+      # verdict" case.)
+      echo "PR #$PR: sync-check — no sge-verdict found; cannot determine coverage; label retained"
+      exit 0
+    fi
+
+    # 3) Compare verdict SHA against new head (prefix match, case-insensitive,
+    #    reusing the same normalisation as --expect-head).
+    VERDICT_NORM=$(printf '%s' "$VERDICT_SHA" | tr '[:upper:]' '[:lower:]')
+    HEAD_NORM=$(printf '%s' "$NEW_HEAD" | tr '[:upper:]' '[:lower:]')
+    # Use the shorter of the two as the prefix length (both must be >= 7).
+    V_LEN=${#VERDICT_NORM}
+    H_LEN=${#HEAD_NORM}
+    if [[ "$V_LEN" -lt 7 || "$H_LEN" -lt 7 ]]; then
+      echo "PR #$PR: sync-check — SHA too short to compare (verdict=$VERDICT_SHA, head=$NEW_HEAD); label retained" >&2
+      exit 0
+    fi
+    # Hex validation (matches pass's --expect-head guard): a non-hex verdict
+    # SHA means the verdict block is malformed — do not act on it.
+    if [[ ! "$VERDICT_NORM" =~ ^[0-9a-f]+$ ]]; then
+      echo "PR #$PR: sync-check — non-hex verdict SHA '$VERDICT_SHA'; label retained" >&2
+      exit 0
+    fi
+    PREFIX_LEN=$(( V_LEN < H_LEN ? V_LEN : H_LEN ))
+    if [[ "${VERDICT_NORM:0:$PREFIX_LEN}" == "${HEAD_NORM:0:$PREFIX_LEN}" ]]; then
+      echo "PR #$PR: sync-check — verdict covers head (${VERDICT_SHA:0:12}); $REVIEWED retained"
+      exit 0
+    fi
+
+    # 4) Stale: strip the label and post a comment.
+    remove_label "$REVIEWED"
+    echo "PR #$PR: $REVIEWED stripped — verdict was pinned to ${VERDICT_SHA:0:12}, new head is ${NEW_HEAD:0:12} (issue #1941)"
+
+    # Best-effort comment so the author sees WHY the gate reopened.
+    COMMENT_BODY="$(printf '**pr-reviewed stripped** (issue #1941)\n\nThe latest `sge-verdict` was pinned to `%s`; the new head after push is `%s`. The label cannot assert a review of a superseded SHA.\n\nA re-review that passes at the new head will restore the label automatically.' \
+      "$VERDICT_SHA" "$NEW_HEAD")"
+    if [[ -n "$REPO_FULL" ]]; then
+      gh api "repos/$REPO_FULL/issues/$PR/comments" -f body="$COMMENT_BODY" >/dev/null 2>&1 \
+        || echo "warning: could not post staleness comment on PR #$PR (best-effort)" >&2
+    fi
+    ;;
+
   claim-fix)
     # Fix-in-flight mutex (issue #1174): pr-fixing is the claim label owned by
-    # /sgd:pr-fix, mirroring pr-reviewing's #699 concurrency guard exactly. Two
+    # /sge:pr-fix, mirroring pr-reviewing's #699 concurrency guard exactly. Two
     # pr-monitor sessions over the same repo classify a red PR as CODE FAIL and
-    # each dispatch a /sgd:pr-fix agent onto the same branch — racing force-pushes
+    # each dispatch a /sge:pr-fix agent onto the same branch — racing force-pushes
     # exactly as the racing-reviewers incident pr-reviewing exists to prevent
     # (observed on PRs #1167/#1168, 2026-07-15). If the label is already present
-    # and the claim is FRESH (younger than SGD_FIX_CLAIM_TTL_MIN, default 30 min,
+    # and the claim is FRESH (younger than SGE_FIX_CLAIM_TTL_MIN, default 30 min,
     # by the labelled-event timestamp), another live fix agent very likely owns
     # this PR — refuse with exit 3 so the caller backs off. Self-expiring: a stale
     # claim (crashed/abandoned fix session) is taken over, and any failure to
@@ -1529,7 +1655,7 @@ case "$CMD" in
     if [[ "$FORCE_CLAIM" != "true" ]]; then
       CUR_STATUS=$(fix_claim_status 2>/dev/null) || CUR_STATUS=""
       if [[ "$CUR_STATUS" == *"fixing=true"* ]]; then
-        CLAIM_TTL_MIN="${SGD_FIX_CLAIM_TTL_MIN:-30}"
+        CLAIM_TTL_MIN="${SGE_FIX_CLAIM_TTL_MIN:-30}"
         REPO_FULL="${GH_REPO:-$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || true)}"
         CLAIMED_AT=""
         if [[ -n "$REPO_FULL" ]]; then
@@ -1548,7 +1674,7 @@ case "$CMD" in
           CLAIM_AGE_MIN=$(( ($(date -u +%s) - CLAIMED_EPOCH) / 60 ))
           if [[ "$CLAIM_AGE_MIN" -lt "$CLAIM_TTL_MIN" ]]; then
             echo "refusing: PR #$PR already carries $FIXING — claimed ${CLAIM_AGE_MIN}m ago (< ${CLAIM_TTL_MIN}m TTL); another fix pass is likely in flight (issue #1174)" >&2
-            echo "Back off instead of racing a duplicate fix. The claim self-expires after ${CLAIM_TTL_MIN}m (SGD_FIX_CLAIM_TTL_MIN); re-run with --force-claim to take over deliberately." >&2
+            echo "Back off instead of racing a duplicate fix. The claim self-expires after ${CLAIM_TTL_MIN}m (SGE_FIX_CLAIM_TTL_MIN); re-run with --force-claim to take over deliberately." >&2
             exit 3
           fi
           echo "PR #$PR: existing $FIXING claim is stale (${CLAIM_AGE_MIN}m >= ${CLAIM_TTL_MIN}m) — taking over (issue #1174)" >&2
@@ -1564,7 +1690,7 @@ case "$CMD" in
     ;;
 
   release-fix)
-    # Binding termination contract (issue #1174): /sgd:pr-fix MUST call this on
+    # Binding termination contract (issue #1174): /sge:pr-fix MUST call this on
     # exit — success, hand-back, or crash-trap — so the lane frees immediately
     # rather than waiting out the whole lease. Idempotent: remove_label tolerates
     # the label already being absent (released twice, or never claimed).

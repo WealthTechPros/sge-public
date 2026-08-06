@@ -1,42 +1,42 @@
 ---
-description: Reference template and convention guide for custom orchestrators that dispatch SGD implementation lanes. Use when building a bespoke fan-out orchestrator (not /sgd:team-pipeline or /sgd:issue-swarm) and you need to know the correct way to batch-classify issues, inject SGD_GOVTRACE_VERDICT, and wire the governance gate into dispatched lanes.
+description: Reference template and convention guide for custom orchestrators that dispatch SGE implementation lanes. Use when building a bespoke fan-out orchestrator (not /sge:team-pipeline or /sge:issue-swarm) and you need to know the correct way to batch-classify issues, inject SGE_GOVTRACE_VERDICT, and wire the governance gate into dispatched lanes.
 argument-hint: ""
 ---
 
-# SGD Agent Template — Custom Orchestrator Conventions
+# SGE Agent Template — Custom Orchestrator Conventions
 
 ## Role
 
 Documents the canonical conventions a **custom orchestrator** must follow when
-it dispatches SGD implementation lanes — specifically the `SGD_GOVTRACE_VERDICT`
+it dispatches SGE implementation lanes — specifically the `SGE_GOVTRACE_VERDICT`
 injection convention introduced by #1344 (batch front-loading the governance-trace
 gate). Use this as a checklist when you are building a bespoke fan-out that is not
-`/sgd:team-pipeline` or `/sgd:issue-swarm`.
+`/sge:team-pipeline` or `/sge:issue-swarm`.
 
-> **Note:** `/sgd:team-pipeline` and its Duration Mode (`/sgd:issue-swarm`) already
+> **Note:** `/sge:team-pipeline` and its Duration Mode (`/sge:issue-swarm`) already
 > implement every convention in this document (Phase 1.5 + Phase 3c). Read this
 > template when you are writing a *new* orchestrator and want a reference
 > implementation to adapt.
 
 ---
 
-## SGD_GOVTRACE_VERDICT injection convention (#1344)
+## SGE_GOVTRACE_VERDICT injection convention (#1344)
 
 ### Why
 
-Each implementation lane runs `/sgd:sgd-implement` (or the Lean Agent Contract
-equivalent), which **must** classify the issue against SGD governance artefacts
+Each implementation lane runs `/sge:sge-implement` (or the Lean Agent Contract
+equivalent), which **must** classify the issue against SGE governance artefacts
 before writing code — the mandatory Phase 0.5 governance-trace gate. Without
-front-loading, every lane forks its own `/sgd:governance-trace` subagent — a
+front-loading, every lane forks its own `/sge:governance-trace` subagent — a
 ~73k-token, 10–15 min cost repeated N times for an N-issue wave.
 
 The **batch pre-classification** pattern collapses that to a single
-`/sgd:build-ready-audit` call over the whole wave **before** lanes start,
+`/sge:build-ready-audit` call over the whole wave **before** lanes start,
 producing a verdict map the orchestrator injects at dispatch time. Each lane
-detects `SGD_GOVTRACE_VERDICT` and skips its own fork, adopting the pre-computed
+detects `SGE_GOVTRACE_VERDICT` and skips its own fork, adopting the pre-computed
 verdict instead — same gate, ~1/N of the cost.
 
-### Shape of SGD_GOVTRACE_VERDICT
+### Shape of SGE_GOVTRACE_VERDICT
 
 The env var (or prompt-injected field) carries compact JSON:
 
@@ -59,7 +59,7 @@ The env var (or prompt-injected field) carries compact JSON:
 | Field | Type | Required values |
 |-------|------|-----------------|
 | `issue` | integer | must equal the lane's issue number exactly |
-| `verdict` | string | one of: `MATCHES_EXISTING` · `MATCHES_EXISTING_MODIFIED` · `NEEDS_NEW_SPEC` · `NO_SPEC_WARRANTED` · `NOT_SGD_SCOPE` · `NOT_ONBOARDED` |
+| `verdict` | string | one of: `MATCHES_EXISTING` · `MATCHES_EXISTING_MODIFIED` · `NEEDS_NEW_SPEC` · `NO_SPEC_WARRANTED` · `NOT_SGE_SCOPE` · `NOT_ONBOARDED` |
 | `matchConfidence` | string | one of: `high` · `medium` · `low` |
 
 If any required field is missing, wrong type, or out of range → the lane falls
@@ -81,7 +81,7 @@ GOVTRACE_MAP="{}"   # default: empty map — every lane falls through to per-lan
 
 QUEUE_COUNT=$(echo "$QUEUE" | wc -w)
 if [ "$QUEUE_COUNT" -ge 2 ]; then
-  BATCH_RESULT=$(/sgd:build-ready-audit "$ISSUE_LIST")
+  BATCH_RESULT=$(/sge:build-ready-audit "$ISSUE_LIST")
 
   # Extract governance verdicts keyed by issue number (string key)
   GOVTRACE_MAP=$(printf '%s' "$BATCH_RESULT" \
@@ -119,7 +119,7 @@ GOVTRACE_VERDICT=$(node -e "
 Include the following field in the Task prompt for `impl-<N>`:
 
 ```
-SGD_GOVTRACE_VERDICT: ${GOVTRACE_VERDICT}
+SGE_GOVTRACE_VERDICT: ${GOVTRACE_VERDICT}
 ```
 
 When `GOVTRACE_VERDICT` is empty, **omit the field or leave it blank** — the lane
@@ -129,11 +129,11 @@ must still fall through to a per-lane fork (never inject a placeholder or `null`
 
 ## Lane-side guard (what the impl lane does with the injected verdict)
 
-The impl lane (running `/sgd:sgd-implement` Phase 0.5 or the Lean Agent Contract)
+The impl lane (running `/sge:sge-implement` Phase 0.5 or the Lean Agent Contract)
 applies this guard before forking:
 
 ```
-if SGD_GOVTRACE_VERDICT is set AND non-empty:
+if SGE_GOVTRACE_VERDICT is set AND non-empty:
   parse as JSON
   VALID if: verdict.issue == <lane's issue number>
         AND verdict.verdict is one of the six known strings
@@ -144,7 +144,7 @@ if SGD_GOVTRACE_VERDICT is set AND non-empty:
 
 **Reuse is never a bypass.** An adopted verdict enters the exact same
 branch-on-`verdict` logic — a blocking verdict (`MATCHES_EXISTING_MODIFIED`,
-`NOT_SGD_SCOPE`, low `matchConfidence`) pauses and surfaces to the user before
+`NOT_SGE_SCOPE`, low `matchConfidence`) pauses and surfaces to the user before
 writing any code; in headless dispatch it writes `outcome:"blocked"` and
 terminates without building. The orchestrator's Phase 4 branch 4a parks it for
 a human decision.
@@ -166,8 +166,8 @@ gate's decision strands a worktree.
 ```
 [ ] Reconcile worklist before building queue (${CLAUDE_PLUGIN_ROOT}/scripts/reconcile-worklist.mjs)
 [ ] Dependency gate: drop issues with unresolved blockers
-[ ] Phase 1.5: batch /sgd:build-ready-audit when queue >= 2; store govtraceMap
-[ ] Phase 3c: look up govtraceMap[N]; inject SGD_GOVTRACE_VERDICT in lane prompt
+[ ] Phase 1.5: batch /sge:build-ready-audit when queue >= 2; store govtraceMap
+[ ] Phase 3c: look up govtraceMap[N]; inject SGE_GOVTRACE_VERDICT in lane prompt
 [ ] Stoppable-only: every spawned agent is a named Task (not remote/detached)
 [ ] Per-Task budget ceiling stated in every Task prompt
 [ ] Draft PR after first commit (lane Rule 2); stale-lane kill on no-PR timeout
@@ -177,10 +177,10 @@ gate's decision strands a worktree.
 
 ## Related skills
 
-- `/sgd:team-pipeline` — the reference orchestrator that implements every convention here
-- `/sgd:issue-swarm` — router to team-pipeline's Duration Mode
-- `/sgd:build-ready-audit` — the batch audit skill whose #872 governance fold
+- `/sge:team-pipeline` — the reference orchestrator that implements every convention here
+- `/sge:issue-swarm` — router to team-pipeline's Duration Mode
+- `/sge:build-ready-audit` — the batch audit skill whose #872 governance fold
   produces the verdict map consumed here
-- `/sgd:governance-trace` — the per-issue classifier; folded into build-ready-audit
+- `/sge:governance-trace` — the per-issue classifier; folded into build-ready-audit
   for batch use, or dispatched directly by lanes that have no pre-loaded verdict
-- `/sgd:sgd-implement` — implementation lane; Phase 0.5 applies the fast-path guard
+- `/sge:sge-implement` — implementation lane; Phase 0.5 applies the fast-path guard

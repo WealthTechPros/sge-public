@@ -1,0 +1,23 @@
+# Prompt / skill asset entry — minimal template for /sge:sge-ai-inventory add
+# Copy this block into ai-inventory.yaml under prompt_assets[] and fill in the fields.
+- id: PROMPT-XXX                    # replace with sequential id
+  name: ""
+  description: ""
+  type: unknown                     # system-prompt | few-shot-example | skill | tool-description | unknown
+  status: proposed
+  scope: ""                         # which use_cases or mcp_assets this governs (list ids)
+  attestation_ref: ""               # provenance record per #449; do not hash-stamp here
+  data_class_reachable:
+    - unknown
+  risk:
+    tier: unknown
+    risk_score:
+      computed: unknown
+      inputs:
+        exposure: unknown
+        auth_model: unknown
+        data_class_reachable:
+          - unknown
+  control_bindings: []              # control ids from #450 catalogue
+  evidence:
+    approvals: []

@@ -1,6 +1,6 @@
 # Regulatory map — which obligation a spec mapping helps evidence
 
-Companion to `sgd-ai-inventory/references/regulatory-map.md`. **That** map explains
+Companion to `sge-ai-inventory/references/regulatory-map.md`. **That** map explains
 which register field satisfies which regime for an **AI use case**; **this** map
 explains which obligation a **feature-spec mapping** helps a regulated WTP *client*
 evidence. The two share the obligation vocabulary
@@ -81,7 +81,7 @@ that is a feature of the build-one-management-system approach, not double-counti
 - **Not a compliance statement.** A mapping says "this spec contributes evidence
   toward obligation X"; it never says "WTP/the client is compliant with X".
 - **Not the AI register.** AI use-case tiering, Annex III, DORA third-party entries
-  live in `ai-inventory.yaml` via `/sgd:sgd-ai-inventory`. This map links to it
+  live in `ai-inventory.yaml` via `/sge:sge-ai-inventory`. This map links to it
   (`ai_inventory_ref`) and never duplicates it.
 - **Not legal advice.** Where sufficiency of evidence is in question, the firm takes
   legal/compliance advice; this skill makes the evidence *traceable*, not *sufficient*.

@@ -5,17 +5,17 @@ description: Use when writing the next increment of implementation code — the 
 # TDD Workflow
 
 ## Role
-Execute the inner Red/Green/Refactor loop — write one failing test, write minimum code to pass, refactor on green — as the canonical implementation heartbeat for all SGD skills.
+Execute the inner Red/Green/Refactor loop — write one failing test, write minimum code to pass, refactor on green — as the canonical implementation heartbeat for all SGE skills.
 
 ## Out of scope
 - Designing feature scope or acceptance criteria (the calling skill owns that)
-- Running the quality suite for PR gating (that is `/sgd:pr-review`)
+- Running the quality suite for PR gating (that is `/sge:pr-review`)
 - Refactoring before a test is green
 
 ## Tool sequencing
 | Situation | Tool |
 |---|---|
-| Check Cortex for existing test patterns on this module | `search_nodes` (sgd-memory, if available) |
+| Check Cortex for existing test patterns on this module | `search_nodes` (sge-memory, if available) |
 | Read test files, CLAUDE.md for test runner | Read / Grep |
 | Run tests, detect runner, check CI | Bash |
 | Write or edit test and production files | Edit |
@@ -23,11 +23,11 @@ Execute the inner Red/Green/Refactor loop — write one failing test, write mini
 
 The canonical Red/Green/Refactor reference for this plugin — this skill **is**
 [loop pattern A, the inner loop](../loops/SKILL.md#a-inner-loop-redgreenrefactor).
-Implementation workflows (`/sgd:sgd-implement`, `/sgd:implement-issue`,
-`/sgd:refactor`, `/sgd:pr-fix`) link here instead of restating the cycle — when
+Implementation workflows (`/sge:sge-implement`, `/sge:implement-issue`,
+`/sge:refactor`, `/sge:pr-fix`) link here instead of restating the cycle — when
 one of them says "implement via TDD", this file is the full protocol.
 
-> **Disambiguation:** this is the SGD-integrated TDD loop; the superpowers
+> **Disambiguation:** this is the SGE-integrated TDD loop; the superpowers
 > plugin ships a generic TDD skill — in WTP repos this one governs.
 
 This is an **agent-executed** loop: the agent writes the test, runs it,
@@ -50,7 +50,7 @@ run tests or report results — run them yourself and show the evidence.
    checkpoint: commit it before starting the next slice. A lane that stalls
    or is killed then loses at most the current in-flight cycle, not hours of
    work (issue #1170). The calling implementation workflow owns *where* the
-   push happens (`/sgd:sgd-implement` Phase 3 pushes early and keeps pushing);
+   push happens (`/sge:sge-implement` Phase 3 pushes early and keeps pushing);
    this rule owns the *commit cadence* — one green, one commit.
 6. Respect existing project structure, conventions, and tooling.
 
@@ -112,7 +112,7 @@ A *slice* is one narrow behaviour. For each slice:
 
 - No speculative rewrites or large-scale refactors mid-feature; defer
   non-essential restructuring until the requested behaviour is fully
-  verified (then consider `/sgd:refactor`).
+  verified (then consider `/sge:refactor`).
 - If a change would touch many files, plan it as a sequence of tiny slices
   and execute them one cycle at a time.
 - Prefer augmenting existing patterns over inventing new ones; keep diffs
@@ -122,25 +122,25 @@ A *slice* is one narrow behaviour. For each slice:
   Never for "shall I run the tests?" or "did it pass?" — run and read them
   yourself.
 
-## SGD linkage
+## SGE linkage
 
-When implementing an SGD spec (SPEC-NNN):
+When implementing an SGE spec (SPEC-NNN):
 
 - Derive **one test per Gherkin acceptance scenario** in the spec. Scenario
   names map to test names; the spec's scenario list is the slice backlog.
   Extra slices (edge cases, plumbing) are fine, but every scenario must end
   the feature with a passing test.
-- Commit each green slice via `/sgd:commit --no-push`; make the final
-  commit of the feature via `/sgd:commit` (which runs the quality gates and
+- Commit each green slice via `/sge:commit --no-push`; make the final
+  commit of the feature via `/sge:commit` (which runs the quality gates and
   pushes).
 - **Warning:** a parenthetical `(SPEC-NNN)` in the commit subject does
   **not** satisfy the commit hook — a trailer line is required.
-  `/sgd:commit` owns the trailer convention and writes it correctly; do not
+  `/sge:commit` owns the trailer convention and writes it correctly; do not
   hand-craft commit messages for spec work.
 
 ## Test fidelity vs test existence
 
-A test that *exists* is not the same as a test that *tells the truth*. SGD's
+A test that *exists* is not the same as a test that *tells the truth*. SGE's
 gates historically checked only **existence** — that a test-path file changed
 alongside the code (`require-test-evidence.yml`, #784). This section names the
 distinction that gate is blind to, and the narrow case where existence is not
@@ -212,15 +212,15 @@ unchanged. A mock/stub is the correct and sufficient tool for:
 
 When a change genuinely touches a boundary but a mock truly suffices (a
 contract-tested SaaS, or no behaviour change at the boundary), record it
-explicitly rather than silently: commit with an `SGD-Override: FIDELITY;
-<reason ≥10 chars>` trailer. `/sgd:commit` owns the trailer mechanics — the gate
+explicitly rather than silently: commit with an `SGE-Override: FIDELITY;
+<reason ≥10 chars>` trailer. `/sge:commit` owns the trailer mechanics — the gate
 logs the override for audit rather than failing. An override is a documented
 decision, never a silent default.
 
 > **The gate is a floor, not a ceiling.** A diff-shape gate can prove a
 > real-integration test *is present* at a boundary; it **cannot** prove the test
 > asserts the *specific* property that changed — that stays a human-review +
-> `/sgd:pr-review` responsibility. Fidelity discipline is yours to keep even
+> `/sge:pr-review` responsibility. Fidelity discipline is yours to keep even
 > where the mechanical gate is inert.
 
 ## Legacy and untestable code

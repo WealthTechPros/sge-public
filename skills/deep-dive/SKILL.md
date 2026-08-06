@@ -1,5 +1,5 @@
 ---
-description: Use when a GitHub issue needs in-depth investigation and a recorded decision rather than immediate implementation — an unclear bug root cause, a feature whose blast radius and alternatives need weighing, a suspected duplicate or stale issue, or a drift issue raised by /sgd:sgd-align that needs triage. Not for building; for SGD spec issues use /sgd:sgd-preflight then /sgd:sgd-implement.
+description: Use when a GitHub issue needs in-depth investigation and a recorded decision rather than immediate implementation — an unclear bug root cause, a feature whose blast radius and alternatives need weighing, a suspected duplicate or stale issue, or a drift issue raised by /sge:sge-align that needs triage. Not for building; for SGE spec issues use /sge:sge-preflight then /sge:sge-implement.
 argument-hint: "<issue-number> [--quick|--code-only|--no-code] [--no-comment]"
 ---
 
@@ -9,7 +9,7 @@ argument-hint: "<issue-number> [--quick|--code-only|--no-code] [--no-comment]"
 Thoroughly investigate a GitHub issue, surface root cause and options, and record a structured decision — without building anything.
 
 ## Out of scope
-- Implementing the chosen option (hands off to `/sgd:implement-issue` or `/sgd:sgd-implement`)
+- Implementing the chosen option (hands off to `/sge:implement-issue` or `/sge:sge-implement`)
 - Running in a forked/headless context when interactive phases (6–7) are required
 
 **Thoroughly investigate a GitHub issue, review the related code, and have a structured discussion about what (if anything) should be done.**
@@ -21,16 +21,16 @@ It runs **inline** in the main conversation — do not fork it into a subagent. 
 ## Usage
 
 ```
-/sgd:deep-dive <issue-number>
+/sge:deep-dive <issue-number>
 ```
 
-`$ARGUMENTS` is the issue number (optionally followed by flags). Example: `/sgd:deep-dive 11515`
+`$ARGUMENTS` is the issue number (optionally followed by flags). Example: `/sge:deep-dive 11515`
 
 > **Target repo.** This investigation is only correct when the `gh issue
 > view`/`gh issue list`/`gh pr list` calls below **and** the code reads
 > (`Read`/`Grep`/`Glob`, `git log`) resolve against the *same* repo — the
 > issue's repo. When dispatched from a hub/control checkout (e.g. `wtp-org`)
-> or by `/sgd:sgd-align` triaging a drift issue, apply the shared
+> or by `/sge:sge-align` triaging a drift issue, apply the shared
 > repo-targeting convention — [`gh-repo`](../gh-repo/SKILL.md) — first:
 > resolve + `cd` via the shared helper — `cd
 > "$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh resolve owner/repo)" ||
@@ -51,7 +51,7 @@ It runs **inline** in the main conversation — do not fork it into a subagent. 
 1. **Fetch the issue** — read title, body, labels, assignees, linked PRs, comments
 2. **Gather cross-cutting context** — open PRs and issues that overlap in module, labels, or mentioned code
 3. **Find the code** — trace affected files, functions, and modules
-4. **Trace governance** — map the issue to the repo's SGD artefacts (capability, spec coverage, vision non-goals), when they exist
+4. **Trace governance** — map the issue to the repo's SGE artefacts (capability, spec coverage, vision non-goals), when they exist
 5. **Synthesise findings** — assess severity, root cause, blast radius, and options
 6. **Decide** — present the options as a structured choice and capture the pick
 7. **Record the decision on the issue** — post the findings + the chosen option as a comment on the GitHub issue so the trail is preserved
@@ -168,9 +168,9 @@ Give each agent the issue number, title, body excerpt, and the label/keywords fr
 
 ---
 
-## Phase 4: Governance Trace (SGD repos)
+## Phase 4: Governance Trace (SGE repos)
 
-Dispatch `/sgd:governance-trace <issue-number>` as a **forked, headless** subagent (classify mode — no `--spec`, since at this point in the investigation you haven't yet decided which spec, if any, governs the issue). **State the target repo explicitly in the dispatch prompt** (SPEC-057) — a forked subagent starts in this session's cwd but does not inherit shell state across its own tool calls, so it must re-resolve and `cd` itself (`cd "$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh resolve owner/repo)" || exit 1`) before its own `gh`/artefact reads; never let it fall through to the ambient hub cwd. It owns the actual classification logic — capability mapping, spec coverage, requirement-change detection, non-goals check, `NOT_ONBOARDED` degradation — so this phase does not re-derive it inline. It returns:
+Dispatch `/sge:governance-trace <issue-number>` as a **forked, headless** subagent (classify mode — no `--spec`, since at this point in the investigation you haven't yet decided which spec, if any, governs the issue). **State the target repo explicitly in the dispatch prompt** (SPEC-057) — a forked subagent starts in this session's cwd but does not inherit shell state across its own tool calls, so it must re-resolve and `cd` itself (`cd "$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh resolve owner/repo)" || exit 1`) before its own `gh`/artefact reads; never let it fall through to the ambient hub cwd. It owns the actual classification logic — capability mapping, spec coverage, requirement-change detection, non-goals check, `NOT_ONBOARDED` degradation — so this phase does not re-derive it inline. It returns:
 
 ```json
 {
@@ -187,15 +187,15 @@ Dispatch `/sgd:governance-trace <issue-number>` as a **forked, headless** subage
 }
 ```
 
-`governance-trace` may already have posted a comment on the issue (it always does for `MATCHES_EXISTING_MODIFIED` and `NOT_SGD_SCOPE`) — note that in your own findings rather than duplicating it.
+`governance-trace` may already have posted a comment on the issue (it always does for `MATCHES_EXISTING_MODIFIED` and `NOT_SGE_SCOPE`) — note that in your own findings rather than duplicating it.
 
 Map its verdict to the Phase 5 shorthand:
-- `MATCHES_EXISTING` → `covered (SPEC-NNN)` — a spec exists; any fix should stay consistent with it (and an SGD spec issue should route via `/sgd:sgd-preflight` / `/sgd:sgd-implement` instead)
+- `MATCHES_EXISTING` → `covered (SPEC-NNN)` — a spec exists; any fix should stay consistent with it (and an SGE spec issue should route via `/sge:sge-preflight` / `/sge:sge-implement` instead)
 - `MATCHES_EXISTING_MODIFIED` → `covered (SPEC-NNN) — requirement change` — surface the specific `requirementChanges[]` clause(s) prominently; this is not a routine fix, the spec's stated behaviour would change
 - `NEEDS_NEW_SPEC` → `gap — spec needed` — feature-shaped work with no governing spec; the returned `suggestedSpecStub` gives Phase 5's options a head start on what that spec would say
 - `NO_SPEC_WARRANTED` → `n/a` — non-feature work (chore, infra, docs) that doesn't warrant a spec
-- `NOT_SGD_SCOPE` → `out of scope (non-goal conflict)` — surface the `nonGoalConflict` prominently; "close as out of scope" becomes a leading option in Phase 5
-- `NOT_ONBOARDED` → `n/a — repo has no SGD governance artefacts yet`
+- `NOT_SGE_SCOPE` → `out of scope (non-goal conflict)` — surface the `nonGoalConflict` prominently; "close as out of scope" becomes a leading option in Phase 5
+- `NOT_ONBOARDED` → `n/a — repo has no SGE governance artefacts yet`
 
 **Low confidence.** If `matchConfidence` is `"low"`, append a flag to the `Governance:` note regardless of verdict (e.g. `Governance: CAP-04; covered (SPEC-027) — ⚠️ low-confidence match, verify before treating as routine`) — a low-confidence match deserves the same scrutiny in Phase 5's options as a genuine gap, not silent pass-through.
 
@@ -234,8 +234,8 @@ Present 2–4 options. For each:
 - Effort: S / M / L (rough)
 - Risk: low / medium / high
 - Whether a spec/feature file is needed first
-- **Complexity inputs** — the raw counts behind the sizing: files touched, new interfaces/endpoints, data-model changes or migrations, and whether it crosses capability boundaries. These are the inputs the canonical SGD complexity rubric consumes (owned by `/sgd:sgd-implement` Phase 2, applied at preflight), so the hand-off to `/sgd:sgd-implement` starts preflight with a head start. They **supplement** S/M/L — S/M/L stays the discussion shorthand.
-- **Governance:** one line from Phase 4 — owning capability, spec status, non-goal conflict (or "no SGD artefacts")
+- **Complexity inputs** — the raw counts behind the sizing: files touched, new interfaces/endpoints, data-model changes or migrations, and whether it crosses capability boundaries. These are the inputs the canonical SGE complexity rubric consumes (owned by `/sge:sge-implement` Phase 2, applied at preflight), so the hand-off to `/sge:sge-implement` starts preflight with a head start. They **supplement** S/M/L — S/M/L stays the discussion shorthand.
+- **Governance:** one line from Phase 4 — owning capability, spec status, non-goal conflict (or "no SGE artefacts")
 
 Example:
 
@@ -272,7 +272,7 @@ After presenting the findings report in chat, capture the decision via **AskUser
 
 If the user picks "dig deeper", loop back to whichever phase they direct. Once an option is picked, proceed straight to Phase 7.
 
-**Do not start implementation without explicit instruction.** After recording, the build hand-off is `/sgd:implement-issue <n>` for general issues (it routes to the right pipeline) or `/sgd:sgd-implement <n>` when a SPEC-NNN governs the work.
+**Do not start implementation without explicit instruction.** After recording, the build hand-off is `/sge:implement-issue <n>` for general issues (it routes to the right pipeline) or `/sge:sge-implement <n>` when a SPEC-NNN governs the work.
 
 ---
 
@@ -296,10 +296,10 @@ or when `--no-comment` is passed.
 - **Options considered** — the same 2–4 options shown in Phase 5, condensed
   to one line each
 - **Governance** — the Phase 4 result in one line (capability, spec status,
-  non-goal check), when the repo has SGD artefacts
+  non-goal check), when the repo has SGE artefacts
 - **Decision** — which option was chosen, and the one-line rationale the user
   gave (or, if they didn't give one, your read of why they chose it)
-- **Next step** — what happens next: `/sgd:implement-issue <N>`, close as won't
+- **Next step** — what happens next: `/sge:implement-issue <N>`, close as won't
   fix, needs spec first, etc.
 
 Keep it tight. The goal is a scannable audit trail, not a wall of text —
@@ -317,7 +317,7 @@ gh issue comment $ISSUE --body "$(cat <<'EOF'
 
 **Why:** <user's rationale, or your best read of it>
 
-**Next step:** <e.g. `/sgd:implement-issue 4600`, close as won't fix, draft spec>
+**Next step:** <e.g. `/sge:implement-issue 4600`, close as won't fix, draft spec>
 
 ---
 
@@ -335,13 +335,13 @@ gh issue comment $ISSUE --body "$(cat <<'EOF'
 
 ### Governance
 
-- <CAP-xx · spec status · non-goal check — omit section if no SGD artefacts>
+- <CAP-xx · spec status · non-goal check — omit section if no SGE artefacts>
 
 ### Related context
 
 - <overlapping PR/issue, only if relevant>
 
-_Recorded via `/sgd:deep-dive`._
+_Recorded via `/sge:deep-dive`._
 EOF
 )"
 ```
@@ -365,7 +365,7 @@ already fixed.
 
 ## Headless mode (structured findings)
 
-When invoked **without an interactive user** — e.g. by `/sgd:sgd-align` triaging a drift issue, or by any orchestrating agent — there is no one to answer AskUserQuestion. In that case:
+When invoked **without an interactive user** — e.g. by `/sge:sge-align` triaging a drift issue, or by any orchestrating agent — there is no one to answer AskUserQuestion. In that case:
 
 - Run Phases 1–5 as normal; **skip Phases 6–7** (no question, no issue comment — the caller decides what to record)
 - End the output with a machine-readable summary the caller can consume:
@@ -393,7 +393,7 @@ When invoked **without an interactive user** — e.g. by `/sgd:sgd-align` triagi
 }
 ```
 
-`governance` mirrors `/sgd:governance-trace`'s own contract, not a re-derived shape — `capability`/`specStatus` come straight from its `capability`/mapped-`verdict`, `nonGoalConflict` is the quoted non-goal string (or `null`), and `requirementChanges` passes its array through unchanged (non-empty only when `specStatus` is `"covered (SPEC-NNN) — requirement change"`). All fields are `null`/empty (with a note) when the repo has no SGD artefacts (`NOT_ONBOARDED`).
+`governance` mirrors `/sge:governance-trace`'s own contract, not a re-derived shape — `capability`/`specStatus` come straight from its `capability`/mapped-`verdict`, `nonGoalConflict` is the quoted non-goal string (or `null`), and `requirementChanges` passes its array through unchanged (non-empty only when `specStatus` is `"covered (SPEC-NNN) — requirement change"`). All fields are `null`/empty (with a note) when the repo has no SGE artefacts (`NOT_ONBOARDED`).
 
 ---
 
@@ -410,10 +410,10 @@ When invoked **without an interactive user** — e.g. by `/sgd:sgd-align` triagi
 
 ## Related Skills
 
-- `/sgd:governance-trace <n>` — The shared classifier this skill's Phase 4 dispatches to; run it directly for a quick "does this need a spec, and would it change one?" check without a full deep dive
-- `/sgd:sgd-preflight <SPEC-NNN>` — Pre-implementation checklist for an SGD spec issue
-- `/sgd:implement-issue <n>` — Build a general (non-SGD) issue once you've decided to proceed (a thin router into the implementation pipeline — pointing at it is correct)
-- `/sgd:sgd-implement <n>` — Build an SGD spec issue end-to-end
-- `/sgd:sgd-align` — The drift sweep that may invoke this skill headlessly to triage a gap issue
-- `/sgd:pr-review` — Review an in-flight PR
-- `/sgd:qa-audit` — Verify a PR against its linked issue
+- `/sge:governance-trace <n>` — The shared classifier this skill's Phase 4 dispatches to; run it directly for a quick "does this need a spec, and would it change one?" check without a full deep dive
+- `/sge:sge-preflight <SPEC-NNN>` — Pre-implementation checklist for an SGE spec issue
+- `/sge:implement-issue <n>` — Build a general (non-SGE) issue once you've decided to proceed (a thin router into the implementation pipeline — pointing at it is correct)
+- `/sge:sge-implement <n>` — Build an SGE spec issue end-to-end
+- `/sge:sge-align` — The drift sweep that may invoke this skill headlessly to triage a gap issue
+- `/sge:pr-review` — Review an in-flight PR
+- `/sge:qa-audit` — Verify a PR against its linked issue

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # reconcile-flush.sh — the Phase 0.5 flush reconciliation gate for
-# /sgd:team-pipeline (issue #856; script-extraction per epic #729 / #819–#823).
+# /sge:team-pipeline (issue #856; script-extraction per epic #729 / #819–#823).
 #
 # team-pipeline Phase 0.5 pushes unpushed worktree branches and opens draft
 # PRs so in-flight work becomes visible to CI and reviewers. Verbatim, it
@@ -22,7 +22,7 @@
 #   2. Open-issue gate — the branch's linked issue is still OPEN. A branch for
 #      a CLOSED issue is presumed landed, not lost, regardless of novelty.
 #
-# Anything failing either gate is classified `tidy` (a /sgd:tidy-worktrees
+# Anything failing either gate is classified `tidy` (a /sge:tidy-worktrees
 # hand-off candidate), never pushed.
 #
 # Contract (same JSON-to-stdout family as check-regulatory-trace.sh /
@@ -33,7 +33,7 @@
 #   * Exit 0 = ran successfully (regardless of how candidates classified).
 #     Exit 2 = harness error (not in a git repo, no base ref).
 #   * The caller pushes / draft-PRs ONLY the decision:"flush" candidates and
-#     hands the decision:"tidy" ones to /sgd:tidy-worktrees.
+#     hands the decision:"tidy" ones to /sge:tidy-worktrees.
 #
 # Sourceable: when sourced (BASH_SOURCE[0] != $0) it defines the helpers and
 # returns without running, so the regression suite can unit-test

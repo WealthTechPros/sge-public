@@ -134,7 +134,7 @@ you make several attempts.
   forever — the aggregator pattern fixes this).
 - **Automated review that can self-approve** under a bot identity and
   **auto-merge** when green, so a correct fix isn't gated on a human being
-  awake. (See `/sgd:pr-review`, `/sgd:pr-monitor`.)
+  awake. (See `/sge:pr-review`, `/sge:pr-monitor`.)
 - Make sure your review tooling's argument binding actually works — a broken
   `<pr-number>` binding that silently forces a manual fallback *every* PR is a
   permanent tax. Fix the tool, don't pay the tax repeatedly.
@@ -183,14 +183,14 @@ disappearing. Fix the *loop* before you fix the *bug*.
 
 ---
 
-## How this composes with the rest of SGD
+## How this composes with the rest of SGE
 
-- The **left-shifted test** you add in a retro is exactly a `/sgd:tdd-workflow`
+- The **left-shifted test** you add in a retro is exactly a `/sge:tdd-workflow`
   red test — write it failing first, then keep the fix.
-- The **fast green path** is `/sgd:pr-review` + `/sgd:pr-monitor` (bot review,
+- The **fast green path** is `/sge:pr-review` + `/sge:pr-monitor` (bot review,
   auto-merge) over a path-filtered, aggregator-gated CI.
 - The **fail-loud / honest-empty-state** rule is a candidate UI/coherence
-  principle for `/sgd:sgd-align` to enforce: a surface backed by live data may
+  principle for `/sge:sge-align` to enforce: a surface backed by live data may
   not silently render sample data.
 - A worked example of these modes appearing together in one day:
   `docs/case-studies/2026-06-15-simple-fix-all-day.md`.

@@ -3,7 +3,7 @@ description: Pre-flight filter for dispatch skills — drop issues/files already
 argument-hint: "--issues <n,n,...> [--files <path,...>] [--base-branch <branch>] [--repo <owner/repo>] [--json]"
 ---
 
-# /sgd:reconcile-worklist — pre-flight worklist filter
+# /sge:reconcile-worklist — pre-flight worklist filter
 
 ## Role
 Filter a dispatch candidate list — drop issues already closed/merged and files already on main — so no agent is spawned on completed work.
@@ -33,22 +33,22 @@ Anything not matching a drop rule is kept — the reconciler is conservative
 
 ```bash
 # Issues only
-/sgd:reconcile-worklist --issues 101,102,103
+/sge:reconcile-worklist --issues 101,102,103
 
 # Files only (check against main)
-/sgd:reconcile-worklist --files src/foo.ts,src/bar.ts
+/sge:reconcile-worklist --files src/foo.ts,src/bar.ts
 
 # Both
-/sgd:reconcile-worklist --issues 101,102 --files src/foo.ts
+/sge:reconcile-worklist --issues 101,102 --files src/foo.ts
 
 # Custom base branch
-/sgd:reconcile-worklist --issues 101,102 --base-branch develop
+/sge:reconcile-worklist --issues 101,102 --base-branch develop
 
 # Explicit repo (recommended — avoids ambient-repo ambiguity)
-/sgd:reconcile-worklist --issues 101,102 --repo owner/repo
+/sge:reconcile-worklist --issues 101,102 --repo owner/repo
 
 # Machine-readable JSON (for dispatch skills)
-/sgd:reconcile-worklist --issues 101,102,103 --json
+/sge:reconcile-worklist --issues 101,102,103 --json
 ```
 
 ## Output
@@ -86,7 +86,7 @@ NOT skip it even when the queue looks clean.
 > `--repo` explicitly, as the Usage section above recommends — is enough; no `cd` needed. The
 > `REPO=` derivation below reads `$GH_REPO` first for exactly this reason: `gh repo view`
 > with no positional argument prefers the local checkout and silently ignores `GH_REPO`
-> (the sgd#656/sgd#23 hazard), so deriving from a bare `gh repo view` in a hub session would
+> (the sge#656/sge#23 hazard), so deriving from a bare `gh repo view` in a hub session would
 > reconcile against the wrong repo. See [`gh-repo`](../gh-repo/SKILL.md).
 
 ```bash
@@ -130,8 +130,8 @@ Exit codes:
 
 This skill is invoked as a **mandatory pre-flight step** by:
 
-- `/sgd:team-pipeline` — Phase 1 (after issue discovery, before claiming)
-- `/sgd:issue-swarm` — inherits the pre-flight by routing to `/sgd:team-pipeline --duration` (Duration Mode step 2, after `available-issues`, before gate)
+- `/sge:team-pipeline` — Phase 1 (after issue discovery, before claiming)
+- `/sge:issue-swarm` — inherits the pre-flight by routing to `/sge:team-pipeline --duration` (Duration Mode step 2, after `available-issues`, before gate)
 
 Neither skill may skip the reconciler. The gate is non-negotiable — it is what
 prevents agents from rebuilding closed issues or regenerating existing artifacts

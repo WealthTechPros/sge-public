@@ -1,6 +1,6 @@
 # Regulatory traceability index + export shapes
 # ------------------------------------------------------------------------------
-# Maintained via /sgd:regulatory-trace. The AGGREGATE index of spec→obligation
+# Maintained via /sge:regulatory-trace. The AGGREGATE index of spec→obligation
 # mappings for this repo. Inline spec frontmatter (`regulatory:` block) is the
 # AUTHORITATIVE source; this index is derived from it (plus capability-level
 # controls that no single spec owns). When the two disagree, the spec wins and
@@ -11,7 +11,7 @@
 version: 1
 updated: ""                       # YYYY-MM-DD of last human-confirmed review
 owner: ""                         # accountable individual for the evidence pack
-# The canonical catalogue ships INSIDE the sgd plugin, not in this repo. This key
+# The canonical catalogue ships INSIDE the sge plugin, not in this repo. This key
 # is documentation for humans — no tool parses it (YAML does not expand env vars).
 # check-regulatory-trace.sh resolves the catalogue itself: an explicit $1 override
 # first, else a repo-local skills/regulatory-trace/assets/obligations-catalogue.yaml

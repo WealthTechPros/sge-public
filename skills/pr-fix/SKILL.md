@@ -1,5 +1,5 @@
 ---
-description: Use when a single pull request's CI is red and needs driving to green — failing required checks blocking a merge, a PR stuck on lint/test/build failures, or when /sgd:pr-monitor classifies a lane PR as CI-failing and dispatches a fix. Also handles a dirty (conflicting) PR and, with --all-prs, a whole backlog of red PRs in one pass.
+description: Use when a single pull request's CI is red and needs driving to green — failing required checks blocking a merge, a PR stuck on lint/test/build failures, or when /sge:pr-monitor classifies a lane PR as CI-failing and dispatches a fix. Also handles a dirty (conflicting) PR and, with --all-prs, a whole backlog of red PRs in one pass.
 argument-hint: "<pr-number> [--all-prs] [--exclusive]"
 ---
 
@@ -11,7 +11,7 @@ argument-hint: "<pr-number> [--all-prs] [--exclusive]"
 Drive a stalled or red pull request to a clean, mergeable state — diagnose CI failures, fix root causes, and resolve merge conflicts, then hand a green PR back.
 
 ## Out of scope
-- Merge-gate review or label management (that is `/sgd:pr-review`)
+- Merge-gate review or label management (that is `/sge:pr-review`)
 - Implementing new features beyond what the PR already targets
 - Force-pushing or amending history without explicit user instruction
 
@@ -29,9 +29,9 @@ Drive a pull request's CI to green by reading the actual failures, reproducing t
 ## Usage
 
 ```
-/sgd:pr-fix <pr-number>            # default — fix one PR
-/sgd:pr-fix <pr-number> --exclusive  # lock the issue so a parallel driver won't race it
-/sgd:pr-fix --all-prs              # batch — triage and fix every open red/dirty PR
+/sge:pr-fix <pr-number>            # default — fix one PR
+/sge:pr-fix <pr-number> --exclusive  # lock the issue so a parallel driver won't race it
+/sge:pr-fix --all-prs              # batch — triage and fix every open red/dirty PR
 ```
 
 `$ARGUMENTS` is the PR number (or branch). If omitted, uses the current branch to find the PR.
@@ -96,7 +96,7 @@ A Forgejo PR is green when:
 
 Set `FORGEJO_API_TOKEN` (preferred) or `GITEA_TOKEN` in the environment, via
 whichever secret manager the repo already uses. Declare the
-host in `SGD_FORGEJO_HOSTS`. The adapter refuses loud on first authenticated
+host in `SGE_FORGEJO_HOSTS`. The adapter refuses loud on first authenticated
 call when either is missing — the fix never proceeds silently.
 
 ---
@@ -141,7 +141,7 @@ and apply these rules throughout the fix loop:
    A carve-out PR with one check green and others not yet run is **not green**.
 3. **Exit report** — set the `carve_out: true` extension field on the fixed
    PR's outcome in the [exit report](../exit-report/SKILL.md) so
-   `/sgd:pr-monitor` and `/sgd:team-pipeline` know the full suite was run
+   `/sge:pr-monitor` and `/sge:team-pipeline` know the full suite was run
    (the shared schema allows extra per-outcome fields):
 
    ```json
@@ -169,7 +169,7 @@ gh pr view $1 --json statusCheckRollup,mergeable,mergeStateStatus,isDraft,state
 
 ## Step 0.5: Exclusive lock (opt-in, `--exclusive`)
 
-When a parallel driver (another `/sgd:pr-fix`, `/sgd:pr-monitor`, or `/sgd:team-pipeline`) might pick up the same issue, take an exclusive lock so only one agent works it at a time. This is **opt-in** — the default single-PR flow needs no lock, and concurrent fixes on *different* PRs never conflict.
+When a parallel driver (another `/sge:pr-fix`, `/sge:pr-monitor`, or `/sge:team-pipeline`) might pick up the same issue, take an exclusive lock so only one agent works it at a time. This is **opt-in** — the default single-PR flow needs no lock, and concurrent fixes on *different* PRs never conflict.
 
 The lock is a small JSON file under `.claude/locks/issue-<n>.lock` keyed on the issue number parsed from the PR branch (e.g. `feat/issue-729-…`). On entry:
 
@@ -183,16 +183,16 @@ Keep the lock advisory and self-expiring — never let a forgotten lock wedge an
 
 ## Step 0.6: Claim the fix (`pr-fixing` mutex)
 
-Before touching the branch, claim the fix so a **second** driver (another `/sgd:pr-fix`, or a `/sgd:pr-monitor` lane that classified this PR CODE FAIL) does not dispatch a duplicate fix agent onto a branch you are about to force-push — the racing-fixers hazard of issue #1174.
+Before touching the branch, claim the fix so a **second** driver (another `/sge:pr-fix`, or a `/sge:pr-monitor` lane that classified this PR CODE FAIL) does not dispatch a duplicate fix agent onto a branch you are about to force-push — the racing-fixers hazard of issue #1174.
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/pr-review/pr-labels.sh claim-fix $1 || exit 3
 ```
 
-- **Exit 3** — another run holds a *fresh* `pr-fixing` claim (< `SGD_FIX_CLAIM_TTL_MIN`, default 30 min). **Back off; do not race.** Someone else owns this PR's fix.
+- **Exit 3** — another run holds a *fresh* `pr-fixing` claim (< `SGE_FIX_CLAIM_TTL_MIN`, default 30 min). **Back off; do not race.** Someone else owns this PR's fix.
 - **Proceeds** — no claim, or a *stale* one (crashed session) you take over. `--force-claim` overrides deliberately.
 
-`pr-fixing` is a self-expiring **lease**, honoured by `/sgd:pr-monitor`'s `CLAIM_LABELS_RE` so its lanes skip a PR you are fixing. You **must** release it on exit (see [When to exit](#when-to-exit)) — a crashed session's claim frees itself within the lease window, but an explicit release frees the lane immediately.
+`pr-fixing` is a self-expiring **lease**, honoured by `/sge:pr-monitor`'s `CLAIM_LABELS_RE` so its lanes skip a PR you are fixing. You **must** release it on exit (see [When to exit](#when-to-exit)) — a crashed session's claim frees itself within the lease window, but an explicit release frees the lane immediately.
 
 ---
 
@@ -212,7 +212,7 @@ Use the **existing** PR branch — never create a new branch for a fix (that orp
 
 ### Commit conventions (read before the first commit)
 
-Read the repo's `CLAUDE.md` for its commit-message convention **before committing anything**. In SGD repos a `commit-msg` hook enforces an audit-chain trailer and **will reject a bare message** — this is the moment the temptation to reach for `--no-verify` appears. **Refuse it.** The hook is a control, not an obstacle: write the conventional message *with* the required trailer (spec reference or the repo's documented override trailer) and let the hook pass it. A fix commit that bypasses the hook breaks the audit chain the gate exists to protect.
+Read the repo's `CLAUDE.md` for its commit-message convention **before committing anything**. In SGE repos a `commit-msg` hook enforces an audit-chain trailer and **will reject a bare message** — this is the moment the temptation to reach for `--no-verify` appears. **Refuse it.** The hook is a control, not an obstacle: write the conventional message *with* the required trailer (spec reference or the repo's documented override trailer) and let the hook pass it. A fix commit that bypasses the hook breaks the audit chain the gate exists to protect.
 
 ---
 
@@ -238,7 +238,7 @@ This is the [bounded refinement loop](../loops/SKILL.md#c-bounded-refinement-loo
      ${CLAUDE_PLUGIN_ROOT}/skills/pr-review/pr-labels.sh stale $1
      ```
 
-     > **Label ownership.** `pr-fix` marks `pr-reviewed` **stale** when fix commits land, but never re-applies it. `pr-reviewed` and auto-merge are owned exclusively by `/sgd:pr-review` — only it runs `pr-labels.sh pass` after a clean review with all findings fixed. Never `gh pr edit --add-label pr-reviewed` or `gh pr merge --auto` from this skill.
+     > **Label ownership.** `pr-fix` marks `pr-reviewed` **stale** when fix commits land, but never re-applies it. `pr-reviewed` and auto-merge are owned exclusively by `/sge:pr-review` — only it runs `pr-labels.sh pass` after a clean review with all findings fixed. Never `gh pr edit --add-label pr-reviewed` or `gh pr merge --auto` from this skill.
 
    - **Wait for CI concretely** ([wait-for-condition loop](../loops/SKILL.md#b-wait-for-condition-loop)): run the **bounded synchronous poll** as ONE tool call — `until ! gh pr checks "$1" | grep -qE 'pending|in_progress'` with a sleep interval and an iteration cap (~60 × 20s), per loops §B. Never background a `--watch`: it does not hold a dispatched subagent's turn open, so the agent gets silently re-woken over and over reporting "still waiting" (#1681). When the poll returns, go back to step 1.
 
@@ -312,7 +312,7 @@ Apply this label **only** when the changed behaviour is already fully captured b
 
 1. **Post a PR comment** explaining why no AC update is needed — quote the existing AC that already covers the changed behaviour and explain why it subsumes the change.
 2. **Apply the label** `spec-unchanged` — this signals to the governance audit that the drift was reviewed and judged non-material.
-3. **Human sign-off required** — the `spec-unchanged` label is logged as an exception in the governance-posture audit trail (`/sgd:sgd-align` surfaces it as an override requiring human confirmation). Do not rely on it to auto-clear a review gate; a human reviewer must confirm the label is warranted before the PR can merge.
+3. **Human sign-off required** — the `spec-unchanged` label is logged as an exception in the governance-posture audit trail (`/sge:sge-align` surfaces it as an override requiring human confirmation). Do not rely on it to auto-clear a review gate; a human reviewer must confirm the label is warranted before the PR can merge.
 
 ### Anti-pattern — never use bypass as the default
 
@@ -350,7 +350,7 @@ Triage and fix **every** open PR in one pass, classifying upfront so no time is 
    | CLEAN | mergeable, all checks pass | skip — already good |
    | FAILING | mergeable, has failed checks | fix queue (priority) |
    | DIRTY | `mergeable: CONFLICTING` | conflict queue |
-   | DRAFT (orphaned) | `isDraft: true` AND no `pr-reviewing`/`pr-reviewed` label AND `updatedAt` quiet ≥ `DRAFT_ORPHAN_MINUTES` (default 30) | route to `/sgd:pr-review` (first pass; undrafts on a clean pass — issue #755) |
+   | DRAFT (orphaned) | `isDraft: true` AND no `pr-reviewing`/`pr-reviewed` label AND `updatedAt` quiet ≥ `DRAFT_ORPHAN_MINUTES` (default 30) | route to `/sge:pr-review` (first pass; undrafts on a clean pass — issue #755) |
    | DRAFT | `isDraft: true` (not orphaned — labelled, or active within the window) | skip |
    | PENDING | checks still running | wait queue |
    | MERGED/CLOSED | done | skip |
@@ -359,7 +359,7 @@ Triage and fix **every** open PR in one pass, classifying upfront so no time is 
 4. **Fix systemic failures once.** If the same check is broken across several PRs, fix it in the **oldest** PR and let rebase propagate — never fix N copies of one bug.
 5. While one PR's CI is being watched, you can triage or start the next — the watches are the clock ([wait-for-condition loop](../loops/SKILL.md#b-wait-for-condition-loop)).
 
-For ongoing, unattended shepherding of a backlog (review gates, auto-merge, lane discipline), prefer `/sgd:pr-monitor` — it owns the rolling-window merge-queue duty. `--all-prs` is a one-pass batch fix, not a standing monitor.
+For ongoing, unattended shepherding of a backlog (review gates, auto-merge, lane discipline), prefer `/sge:pr-monitor` — it owns the rolling-window merge-queue duty. `--all-prs` is a one-pass batch fix, not a standing monitor.
 
 ---
 
@@ -404,7 +404,7 @@ The general rule: **never suppress a signal to make it green** — fix what the 
 
 ## When to exit
 
-**Release the `pr-fixing` claim on EVERY exit** — green, structurally blocked, thrashing-paused, or hand-back. This is the binding termination contract of the #1174 mutex (mirroring `/sgd:pr-review`'s claim): a lane you claimed but never released stays skipped by every other monitor until the lease expires.
+**Release the `pr-fixing` claim on EVERY exit** — green, structurally blocked, thrashing-paused, or hand-back. This is the binding termination contract of the #1174 mutex (mirroring `/sge:pr-review`'s claim): a lane you claimed but never released stays skipped by every other monitor until the lease expires.
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/skills/pr-review/pr-labels.sh release-fix $1
@@ -425,8 +425,8 @@ Release it whether or not the PR went green — the claim signals *"a fix agent 
 
 **Always end with the machine-readable exit report** — the shared
 [exit report](../exit-report/SKILL.md) shape (one JSON object per run,
-`skill`/`runId`/`outcomes[]`/`stopReason`) that `/sgd:pr-monitor` and
-`/sgd:team-pipeline` consume to decide the lane's next move. This replaces the
+`skill`/`runId`/`outcomes[]`/`stopReason`) that `/sge:pr-monitor` and
+`/sge:team-pipeline` consume to decide the lane's next move. This replaces the
 old bespoke `pr-fix-report` YAML block; do not invent a per-skill shape. For a
 single-PR run there is one outcome; `--all-prs` emits one outcome per PR acted on.
 

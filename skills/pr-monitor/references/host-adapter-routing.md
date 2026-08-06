@@ -41,5 +41,5 @@ with the corresponding `fpr_*` wrapper:
 
 **Auth:** ensure `FORGEJO_API_TOKEN` (or `GITEA_TOKEN`) is set before sourcing the
 shim for a Forgejo repo; the adapter fails loud (never silently unauthenticated).
-Add the host to `SGD_FORGEJO_HOSTS` (`;`-separated) or `SGD_FORGEJO_DEFAULT_HOST`
+Add the host to `SGE_FORGEJO_HOSTS` (`;`-separated) or `SGE_FORGEJO_DEFAULT_HOST`
 so the adapter's allow-list validation passes (ADR-0010).

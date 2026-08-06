@@ -2,7 +2,7 @@
 /**
  * spec-validate.mjs — runs a spec doc's `## Validation` invariants against a
  * demo fixture and reports per-invariant pass/fail (issue #761 — the enabler
- * for sgd#762's coherence-gate ratchet).
+ * for sge#762's coherence-gate ratchet).
  *
  * Format convention: docs/specs/README.md. A spec's `## Validation` section
  * holds a markdown table of invariants (id | name | rule | assert). `assert`

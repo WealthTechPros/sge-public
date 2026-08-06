@@ -88,9 +88,9 @@ lane on that same PR found a real content leak; it is "review them for the *righ
 
 **Classification (`rl_diff_generated`, mechanical, no code execution).** Returns `1` only when
 **every** changed file is a generated artefact **declared in the base-ref manifest**
-`.sgd/generated-artefacts.tsv` — one TAB-separated record per line,
+`.sge/generated-artefacts.tsv` — one TAB-separated record per line,
 `<artefact-path>\t<generator-command>\t<published 0|1>`, `#`-comments and blank lines ignored.
-The manifest is read from the PR's **base sha** (`git show <base>:.sgd/generated-artefacts.tsv`,
+The manifest is read from the PR's **base sha** (`git show <base>:.sge/generated-artefacts.tsv`,
 `MSYS_NO_PATHCONV=1` on git-bash), **never the PR head** — so a PR cannot add a manifest entry
 for its own changed file to earn the cheaper path; the declaration must already exist on the
 target branch. That "cannot self-declare" guarantee only holds when the base ref is itself

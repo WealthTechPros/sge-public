@@ -1,6 +1,6 @@
 # WealthTech Pros SGE Commercial Licence
 
-SPDX-License-Identifier: LicenseRef-WTP-SGD-Commercial
+SPDX-License-Identifier: LicenseRef-WTP-SGE-Commercial
 
 Copyright (c) 2026 WealthTech Pros Ltd. All rights reserved.
 

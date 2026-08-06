@@ -8,7 +8,7 @@ new control.
 
 ## Check for an in-flight owner first
 
-If the PR body carries an `sgd-phase5-verdict` marker and the `/sgd:sgd-implement` agent that
+If the PR body carries an `sge-phase5-verdict` marker and the `/sge:sge-implement` agent that
 opened it hasn't reported back, its Phase 7 already drives this loop — never run concurrently
 (racing reviewers lose fix commits and post conflicting verdicts). Dispatch independently only
 when no owner is in flight or it reported completion/blocked.
@@ -32,7 +32,7 @@ by" path, no completion deferred to a later re-invocation. See the termination c
 
 ## Rescued/resumed-worktree environment distrust (issue #951)
 
-A PR whose branch came from a **rescued or resumed worktree** — `/sgd:tidy-worktrees`'s "push +
+A PR whose branch came from a **rescued or resumed worktree** — `/sge:tidy-worktrees`'s "push +
 draft PR" rescue, a resurrected abandoned session, or any PR whose body/notes mention worktree
 rescue, environment repair, or "rebuilt/reinstalled deps" — carries a specific hazard: its
 author's local `tsc`/test claims may have run against a **stale or junctioned** tree (behind
@@ -65,9 +65,9 @@ checklist was independently re-run, not inherited.
 
 ## App-token review mode (builder≠reviewer, issue #862)
 
-`rl_post_verdict` routes the verdict through the **wtp-sgd GitHub App** when the App's
-credentials are present in the environment (`SGD_REVIEW_APP_TOKEN`, or `SGD_REVIEW_APP_ID` +
-`SGD_REVIEW_APP_PRIVATE_KEY`/`_FILE` + `SGD_REVIEW_APP_INSTALLATION_ID` — all read from
+`rl_post_verdict` routes the verdict through the **wtp-sge GitHub App** when the App's
+credentials are present in the environment (`SGE_REVIEW_APP_TOKEN`, or `SGE_REVIEW_APP_ID` +
+`SGE_REVIEW_APP_PRIVATE_KEY`/`_FILE` + `SGE_REVIEW_APP_INSTALLATION_ID` — all read from
 env/Doppler, never hardcoded). The verdict then lands as a **real PR review authored by the App**
 — a distinct identity from the human builder — so an APPROVE satisfies a required-review
 branch-protection rule and the builder≠reviewer separation is enforceable in GitHub's own review
@@ -86,18 +86,18 @@ gh pr review $PR --repo "$REPO" --request-changes --body "..."   # REQUEST_CHANG
 gh pr review $PR --repo "$REPO" --comment         --body "..."   # COMMENT
 ```
 
-**Admin prerequisites for a live App identity (NOT doable from a skill diff):** the wtp-sgd App
+**Admin prerequisites for a live App identity (NOT doable from a skill diff):** the wtp-sge App
 must be registered/installed on the repo with **`pull_requests: write`** permission, and branch
 protection must allow the App as a review author. Until those admin steps land the code path is a
 safe no-op that falls back to PAT.
 
 ## PR-scoped scratch files + wrong-PR-verdict guard (issue #1667)
 
-**The incident.** Two concurrent `/sgd:pr-review` lanes in one session both drafted their review
+**The incident.** Two concurrent `/sge:pr-review` lanes in one session both drafted their review
 body to a file named `review.md` in a shared scratchpad. One lane's draft overwrote the other's
 between drafting and posting, and the lane reviewing PR #11069 **posted PR #10997's verdict body
 onto #11069 — twice.** The blast radius is a **wrong merge-gate verdict on a PR**: a reviewer
-could promote or block the wrong change. `/sgd:pr-monitor` runs `LANES=3` by default, so the
+could promote or block the wrong change. `/sge:pr-monitor` runs `LANES=3` by default, so the
 concurrent case is the *documented* case, not an edge case.
 
 **Filename hygiene — never share a scratch filename across lanes.** Any file you write for a
@@ -105,18 +105,18 @@ review (draft body, thread list, working notes) MUST come from `rl_scratch_file`
 `review.md`/`body.md` the model picks by default:
 
 ```bash
-DRAFT=$(rl_scratch_file "$PR")            # $TMPDIR/sgd-review-<repo-slug>-pr<N>-<pid>
+DRAFT=$(rl_scratch_file "$PR")            # $TMPDIR/sge-review-<repo-slug>-pr<N>-<pid>
 THREADS=$(rl_scratch_file "$PR" threads)  # add a label suffix for a second artefact
 ```
 
 The path is keyed to repo + PR + this shell's PID, so two lanes reviewing **different PRs — or
 even the same PR in different shells — get different files** and cannot overwrite each other. The
-existing thread cache (`${TMPDIR:-/tmp}/sgd-threads.$PR.json`) is already PR-scoped and is not
+existing thread cache (`${TMPDIR:-/tmp}/sge-threads.$PR.json`) is already PR-scoped and is not
 affected.
 
 **The load-bearing fix — the pre-post guard.** Filename hygiene alone is convention-dependent;
 the guarantee is at posting time. Every verdict body carries a `pr: <number>` line in its
-`sgd-verdict` block (SKILL.md Phase 5). **Always** post the verdict through
+`sge-verdict` block (SKILL.md Phase 5). **Always** post the verdict through
 `rl_post_verdict "$PR" <EVENT> "$BODY"` — it re-reads that marker via `rl_verdict_body_pr` and
 **refuses to post (exit 5) when the body names a PR different from `$PR`**, so a stale or foreign
 draft can **never** be posted onto the wrong PR. The guard **fails closed only on a positive
@@ -125,12 +125,52 @@ posts, so the guard cannot wedge a legitimate marker-less post. **Do not hand-as
 `gh pr review` / `gh api …/reviews` call to bypass `rl_post_verdict`** — that is the only path
 that carries the guard.
 
+## Findings-delivery gate — verdict never lands without its findings (issue #1858)
+
+**The gap (residual #1849 AC1; repro PRs #1831/#1833).** The findings comment and the verdict
+review are two separate GitHub writes. A dispatch that *succeeds* posts its verdict — carrying
+the `sge-verdict` fence the daemon's `verify_review_artefact` requires — but the separate
+findings-comment POST fails silently. The daemon reads the run as complete; the actionable
+findings exist nowhere. #1853 made the daemon's own FAIL paths self-contained; this gate closes
+the skill-side success path the daemon cannot see.
+
+**Posting order and the two terminal states.** When findings remain (blockers+majors+minors
+> 0), the findings comment posts **before** the verdict, via
+`FINDINGS_URL=$(rl_post_findings_comment "$PR" "$FINDINGS_FILE")`. That helper POSTs and then
+**reads the comment back by id** before printing its URL — a POST that ran is not a comment
+that exists (verification norm). It fails closed (non-zero, no output) on POST failure, a
+response with no id, or a failed/empty read-back. Exactly two terminal states are legal:
+
+1. **Verified-posted:** `rl_post_findings_comment` succeeded → set
+   `findings_comment: <FINDINGS_URL>` in the verdict block.
+2. **Inline fallback:** it failed → **do not retry-loop, do not post the verdict as-is** —
+   fold the full findings detail into the verdict body itself and set
+   `findings_comment: inline` (a self-contained verdict, the same posture #1853 gave the
+   daemon's FAIL bodies). A clean review (0 findings) sets `findings_comment: none`.
+
+**The mechanical guard.** `rl_post_verdict` enforces this before any network write: a body
+whose `sge-verdict` block declares findings but whose `findings_comment` is absent, `none`, or
+a URL that does not verify is **refused (exit 6)**. URL verification is bound, not
+existence-only: the URL must be anchored to `https://github.com/<repo>/pull/<pr>#issuecomment-<id>`
+for **this** repo and PR, and the comment must read back non-empty with an `issue_url` naming
+this PR — a readable comment elsewhere is not delivery of these findings. `inline` and a
+verified URL pass (value comparison is case/whitespace-normalised). A body carrying **more
+than one** `sge-verdict` fence — across the whole CommonMark fence family (```` ``` ````+ or
+`~~~`+ openers), including mixed-delimiter decoys — is refused outright, since a decoy clean
+fence before the real one would otherwise control the parse. A body the downstream artefact
+check would accept (it contains the `sge-verdict` substring) but that carries **no parseable
+fence** — a blockquoted fence, a delimiter variant the parser misses — also fails closed:
+guard parseability must never be narrower than consumer acceptance. Like the #1667 guard it
+otherwise blocks only on a positive signal — truly marker-less/advisory bodies and fenced
+verdicts with no count triple post untouched, so the guard cannot wedge a legitimate
+non-verdict comment.
+
 ## `pr-labels.sh pass` head-convergence & promote guarantees
 
 The script enforces label mutual exclusion, verifies the swap took, refuses `pass` on drafts,
 **refuses (exit 7) to promote a PR that never claimed the gate** (issue #981 — you must have run
 Phase 2 `start-review`; `--skip-claim-check` bypasses loudly), and tolerates repos with
-auto-merge disabled (reports; `/sgd:pr-monitor` merges). Auto-merge honours every
+auto-merge disabled (reports; `/sge:pr-monitor` merges). Auto-merge honours every
 branch-protection rule. Before arming, the script runs a **3-way head-convergence check** (issue
 #288): branch ref tip, PR-object `headRefOid`, and a resolved (non-`UNKNOWN`) `mergeable` must
 agree — after a push the PR object can lag for minutes, and promoting in that window lets squash
@@ -159,7 +199,7 @@ but never given its own issue number has only one home: the linked issue that `F
 auto-closes on merge — so the follow-up silently evaporates (PR #844's sourcePaths backfill
 nearly did; a reviewer salvaged it as #847). Before promoting, file a tracking issue for each
 declared follow-up and reference its `#number` beside it. `pr-labels.sh pass` enforces this
-mechanically: it greps the PR body — and, when you export it via `SGD_REVIEW_FOLLOWUP_TEXT`, the
+mechanically: it greps the PR body — and, when you export it via `SGE_REVIEW_FOLLOWUP_TEXT`, the
 review text — and **refuses with exit 6** (no `pr-reviewed`, no auto-merge arm) if any follow-up
 marker has no nearby issue reference. `--skip-followup-check` bypasses it only for a PR that
 genuinely declares none.
@@ -180,7 +220,7 @@ one of:
 A review that posts its analysis and then "arms a watchdog and stands by", or defers completion to
 a later re-invocation, or simply ends mid-flight, leaves `pr-reviewing` dangling — and every
 `pr-reviewed`-gated check then waits forever on an agent that no longer exists (2026-07-06
-pipeline: client-onboarding#2162 and sgd#845 both parked exactly this way and needed manual
+pipeline: client-onboarding#2162 and sge#845 both parked exactly this way and needed manual
 orchestrator nudges to finish). There is **no standby/watchdog exit path** and **no
 deferred-completion exit path**. If the review cannot be *completed* now, it must be *released*
 now (fail or blocked swap) — never left claimed for someone else to un-park.
@@ -228,10 +268,10 @@ exits at Phase 6 by design — the contract binds only runs that actually applie
 
 ## Phase 7 CI-red handoff must be visible, never a silent hold (issue #1148)
 
-When Phase 7 finds `rl_failing_checks "$PR"` > 0, the handoff to `/sgd:pr-fix` must be
+When Phase 7 finds `rl_failing_checks "$PR"` > 0, the handoff to `/sge:pr-fix` must be
 **mechanical and legible**, not an implicit wait. Two obligations:
 
-- **Dispatch, don't poll.** Hand off to `/sgd:pr-fix "$PR"` — it owns the failing-check
+- **Dispatch, don't poll.** Hand off to `/sge:pr-fix "$PR"` — it owns the failing-check
   taxonomy, including the **spec-drift control-preserving resolution** (prefer adding the AC to
   the spec; only fall back to the `spec-unchanged` bypass with human sign-off). Do not sit on a
   red check waiting for it to turn green on its own; a red required check does not self-resolve.
@@ -242,7 +282,7 @@ When Phase 7 finds `rl_failing_checks "$PR"` > 0, the handoff to `/sgd:pr-fix` m
   comment is the exact silent stall of issue #1148: the PR looks "in progress" indefinitely while
   a human has to dig through the Actions log to learn why. If this lane cannot itself fix and
   cannot dispatch `pr-fix`, the named-check comment is the **minimum** it owes before releasing
-  (`fail` / blocked swap) per the termination contract above — the orchestrator (`/sgd:pr-monitor`,
+  (`fail` / blocked swap) per the termination contract above — the orchestrator (`/sge:pr-monitor`,
   which has its own held-review-stall detector for exactly this) then routes it onward.
 
 ## Exit report — the final label state is mechanically checkable (issues #806, #855)
@@ -292,7 +332,7 @@ for bot threads clearly subsumed by the posted review).
 
 ```bash
 gh api "repos/$REPO/pulls/$PR/comments/<comment-databaseId>/replies" \
-  -f body="Reviewed in the SGD automated pass — <one-line disposition>."
+  -f body="Reviewed in the SGE automated pass — <one-line disposition>."
 gh api graphql -f query='
   mutation($id:ID!){ resolveReviewThread(input:{threadId:$id}){ thread{ isResolved } } }' \
   -f id="<thread-id>"
@@ -311,7 +351,7 @@ to the verdict.
 **Cached-count fast path (issue #1157) — de-dup, never a weakening.** This verify walk and the
 independent walk inside `pr-labels.sh pass` query identical GitHub state seconds apart; on a
 threaded PR that is up to 40 pages × 50 threads paged **twice**. Phase 5.5 therefore writes the
-already-fetched unresolved array to `${TMPDIR:-/tmp}/sgd-threads.$PR.json` and records the head it
+already-fetched unresolved array to `${TMPDIR:-/tmp}/sge-threads.$PR.json` and records the head it
 was taken at (`rl_head_sha`); Phase 6 hands both to `pass` via `--thread-cache <file>
 --thread-cache-head <sha>`. `pass` **re-validates freshness with a single cheap `headRefOid`
 query** and reuses the cache **only** when the head is byte-for-byte unchanged. The gate stays
@@ -332,7 +372,7 @@ snippet above, in the same shell (it consumes `$THREADS` / `$REMAINING`):
 # threads seconds later. Record the array AND the head it was taken at; `pass`
 # reuses it ONLY if the head is still unchanged (else it re-walks — fail-closed).
 if [ "$REMAINING" -eq 0 ]; then
-  THREAD_CACHE_FILE="${TMPDIR:-/tmp}/sgd-threads.$PR.json"; printf '%s\n' "$THREADS" > "$THREAD_CACHE_FILE"
+  THREAD_CACHE_FILE="${TMPDIR:-/tmp}/sge-threads.$PR.json"; printf '%s\n' "$THREADS" > "$THREAD_CACHE_FILE"
   THREAD_CACHE_HEAD=$(rl_head_sha "$PR")
 fi
 ```
@@ -371,7 +411,7 @@ edge-cases live here so the SKILL body stays within its size budget.
 author's/orchestrator's signal; **the reviewer NEVER runs `gh pr ready`** — draft state is
 intent, not an obstacle to clear. A dispatch that races a draft conversion is also caught by
 the daemon's hold-label selection guard; the Stage 0 draft check is defence-in-depth for any
-gap (e.g. a direct `/sgd:pr-review` invocation on a draft).
+gap (e.g. a direct `/sge:pr-review` invocation on a draft).
 
 **Hold labels + sign-off-pending comments.** A `hold`, `do-not-merge`, `needs-human`, or
 `blocked` label anywhere in the label set — OR an explicit sign-off-pending marker
@@ -381,7 +421,7 @@ active**. Record `HOLD_ACTIVE=1`. Do NOT claim the gate (`start-review` is skipp
 Phases 2–5 — the findings are valuable — then in Phase 6 **post the verdict as a plain comment**
 (`gh pr comment` / `gh pr review --comment`, never `--approve` / `--request-changes`) and apply
 **no** `pr-reviewed` label or label transition (`pr-labels.sh pass`/`fail` is not run). Record
-`hold_active: true` in the `sgd-verdict` block.
+`hold_active: true` in the `sge-verdict` block.
 
 **Precedence.** The hold takes precedence over any recommendation — even a clean zero-blocker
 APPROVE verdict must not graduate to `pr-reviewed` while any hold signal is present. Release is a
@@ -426,7 +466,7 @@ REST→GraphQL fallback read, #1147 pattern) and **refuses with exit 8** if the 
 assumed), consistent with the #1347 fail-closed doctrine above. Because `pass` would leave
 `pr-reviewing` dangling on that refusal, Phase 6 instead calls **`pr-labels.sh held $PR`**, which
 releases `pr-reviewing` **without** applying `pr-reviewed` and reports "pass, held for human
-sign-off". The `held` verdict records `held_for_human: true`; `/sgd:pr-monitor` reads that field
+sign-off". The `held` verdict records `held_for_human: true`; `/sge:pr-monitor` reads that field
 and skips the PR in lane eligibility. Only a human removes the `hold` label; the next review cycle
 then finds the clean prior verdict at the same head and promotes via the delta fast-path.
 

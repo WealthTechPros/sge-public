@@ -11,7 +11,7 @@ depth to the change's complexity tier.
 ## Usage
 
 ```
-/sgd:verify [--tier trivial|standard|critical]
+/sge:verify [--tier trivial|standard|critical]
 ```
 
 When called without arguments, the tier is inferred from the Phase 2.5
@@ -24,8 +24,8 @@ wants to avoid re-running the classifier.
 | Tier | Verification mode | Subagent spawned? |
 |---|---|---|
 | `trivial` | Inline — diff review + targeted grep + side-effect check | No (default) |
-| `standard` | Forked `/sgd:sgd-review` | Yes |
-| `critical` | Forked `/sgd:sgd-review` | Yes (never thinned) |
+| `standard` | Forked `/sge:sge-review` | Yes |
+| `critical` | Forked `/sge:sge-review` | Yes (never thinned) |
 
 ### `--tier trivial` — inline mode
 
@@ -43,9 +43,9 @@ verification**. The subagent spawn is suppressed; instead:
    plan). An unexpected file outside that set triggers automatic escalation:
 
    > **Escalation rule:** if any changed file falls outside the expected path
-   > set, re-run verification as `--tier standard` (forked `/sgd:sgd-review`).
+   > set, re-run verification as `--tier standard` (forked `/sge:sge-review`).
    > Record `verification_mode = "subagent (escalated from trivial)"` and embed
-   > it in the PR body's `sgd-phase5-verdict` comment.
+   > it in the PR body's `sge-phase5-verdict` comment.
 
 5. **Record the outcome** — set `verification_mode`:
    - `"inline"` — trivial inline gates passed, no side-effect found.
@@ -53,25 +53,25 @@ verification**. The subagent spawn is suppressed; instead:
      escalation.
 
    This value is written into the Phase 6 PR body as the `"verification"` field
-   inside the `sgd-phase5-verdict` HTML comment, making the verification path
+   inside the `sge-phase5-verdict` HTML comment, making the verification path
    auditable in CI logs.
 
 ### `--tier standard` / `--tier critical` — subagent mode
 
 On `standard` or `critical` (or when escalated from trivial), dispatch a
-**forked, fresh-context subagent** running `/sgd:sgd-review`. Pass it the
+**forked, fresh-context subagent** running `/sge:sge-review`. Pass it the
 starting map (touched files + audited-no-change notes from Phase 3) and tell it
 to skip the quality-suite step (Phase 4 already ran it).
 
 Record `verification_mode = "subagent"` (or `"subagent (escalated from
 trivial)"`) for the PR body.
 
-## Relationship to sgd-implement
+## Relationship to sge-implement
 
-`/sgd:sgd-implement` Phase 5 owns the verification decision — it calls this
-skill implicitly by following the Phase 5 procedure. `/sgd:verify` is the
+`/sge:sge-implement` Phase 5 owns the verification decision — it calls this
+skill implicitly by following the Phase 5 procedure. `/sge:verify` is the
 canonical reference for that procedure and can also be invoked standalone (e.g.
 after a manual patch, or when the Phase 5 step was interrupted).
 
 Full rationale and worked examples:
-[`../sgd-implement/references/context-depth.md`](../sgd-implement/references/context-depth.md#trivial-tier-verification-cap-1267)
+[`../sge-implement/references/context-depth.md`](../sge-implement/references/context-depth.md#trivial-tier-verification-cap-1267)

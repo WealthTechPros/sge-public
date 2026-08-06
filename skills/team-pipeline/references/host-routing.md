@@ -17,7 +17,7 @@ echo "[Pre-flight] host-kind: $HOST_KIND"
 |---|---|
 | `github` | proceed with the existing `gh`-based path — no change |
 | `forgejo` | replace every `gh issue`/`gh pr`/`gh label` call with the adapter equivalents (table below) |
-| `unknown` | **fail loud** — `echo "BLOCKED: unknown host — no adapter registered; declare the host in SGD_FORGEJO_HOSTS or SGD_GITHUB_HOSTS"; exit 1` — never silently target the wrong repo |
+| `unknown` | **fail loud** — `echo "BLOCKED: unknown host — no adapter registered; declare the host in SGE_FORGEJO_HOSTS or SGE_GITHUB_HOSTS"; exit 1` — never silently target the wrong repo |
 
 ### Forgejo call-site substitution table
 
@@ -29,7 +29,7 @@ scatter raw curl calls into skill bodies). `$ORIGIN` is the target repo's
 | Phase / step | `gh` command (github path) | Adapter equivalent (forgejo path) |
 |---|---|---|
 | **Phase 0** — create agent-lock label | `gh label create "agent-lock" --color "D93F0B" --description "..."` | `FORGEJO_ADAPTER_ALLOW_WRITE=1 forgejo-adapter.sh create-label "$ORIGIN" agent-lock D93F0B "Issue claimed by a pipeline agent"` |
-| **Phase 1** — list open issues | `/sgd:available-issues` (uses `gh issue list`) | `forgejo-adapter.sh list-issues "$ORIGIN"` → parse JSON array; apply dependency gate on the result |
+| **Phase 1** — list open issues | `/sge:available-issues` (uses `gh issue list`) | `forgejo-adapter.sh list-issues "$ORIGIN"` → parse JSON array; apply dependency gate on the result |
 | **Phase 3b** — count open PRs (CI gate) | `gh pr list --state open \| wc -l` | `forgejo-adapter.sh list-prs "$ORIGIN" \| jq 'length'` (or `grep -c '"id"'` without jq) |
 | **Phase 3c** — claim issue (add agent-lock) | `gh issue edit $N --add-label "agent-lock"` | `LABEL_ID=$(forgejo-adapter.sh get-label "$ORIGIN" agent-lock \| jq -r .id)` then `FORGEJO_ADAPTER_ALLOW_WRITE=1 forgejo-adapter.sh add-label "$ORIGIN" $N "$LABEL_ID"` |
 | **Phase 3c** — release claim (remove label) | `gh issue edit $N --remove-label "agent-lock"` | `FORGEJO_ADAPTER_ALLOW_WRITE=1 forgejo-adapter.sh remove-label "$ORIGIN" $N "$LABEL_ID"` |
@@ -57,8 +57,8 @@ extend the standard Lean Agent Contract prompt with:
 
 The adapter is a no-op (fails loud) when:
 - `FORGEJO_API_TOKEN` (preferred) or `GITEA_TOKEN` is not set — set via Doppler.
-- The target host is not in `SGD_FORGEJO_HOSTS` (`;`-separated bare hosts) or
-  `SGD_FORGEJO_DEFAULT_HOST` — add it to the fleet's env config before running.
+- The target host is not in `SGE_FORGEJO_HOSTS` (`;`-separated bare hosts) or
+  `SGE_FORGEJO_DEFAULT_HOST` — add it to the fleet's env config before running.
 
 These checks surface at the first authenticated call and block further dispatch;
 they are never silently swallowed.

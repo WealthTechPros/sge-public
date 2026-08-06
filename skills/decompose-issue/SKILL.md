@@ -1,5 +1,5 @@
 ---
-description: Use when a single GitHub issue is too large to implement in one session and should be split into ordered, parallel-safe child sub-tasks — an enabler plus independent vertical slices that can be worked concurrently without touching the same files. Use whenever the user asks to decompose, break down, split, or fan out a large issue, or when /sgd:sgd-implement Phase 2 sizes an issue as Large (> 30). Not for building — it creates the child issues and the orchestration plan, then hands off to the implementation pipeline.
+description: Use when a single GitHub issue is too large to implement in one session and should be split into ordered, parallel-safe child sub-tasks — an enabler plus independent vertical slices that can be worked concurrently without touching the same files. Use whenever the user asks to decompose, break down, split, or fan out a large issue, or when /sge:sge-implement Phase 2 sizes an issue as Large (> 30). Not for building — it creates the child issues and the orchestration plan, then hands off to the implementation pipeline.
 argument-hint: "<issue-number> [--dry-run] [--no-comment]"
 ---
 
@@ -9,25 +9,25 @@ argument-hint: "<issue-number> [--dry-run] [--no-comment]"
 Split one oversized GitHub issue into an enabler plus parallel-safe story children, with dependency and conflict metadata, so they can be pipelined concurrently.
 
 ## Out of scope
-- Implementing any child issue (hands off to `/sgd:sgd-implement` / `/sgd:implement-issue`)
+- Implementing any child issue (hands off to `/sge:sge-implement` / `/sge:implement-issue`)
 - Decomposing issues that score Small or Medium unless the user insists
-- Deep per-spec entry checks (that is `/sgd:sgd-preflight`)
+- Deep per-spec entry checks (that is `/sge:sge-preflight`)
 
-**Take one large issue and split it into ordered child sub-tasks — a technical enabler plus independent vertical slices — annotated with dependency and conflict metadata so they can be worked concurrently and flowed through `/sgd:team-pipeline`.**
+**Take one large issue and split it into ordered child sub-tasks — a technical enabler plus independent vertical slices — annotated with dependency and conflict metadata so they can be worked concurrently and flowed through `/sge:team-pipeline`.**
 
-This is the standalone version of the complexity-sizing and child-issue logic that lives inside `/sgd:sgd-implement` (Phase 2). It does **not** implement anything: it sizes the issue, decides whether a split is warranted, and — if so — creates the child issues and records the build order. The hand-off to build is `/sgd:sgd-implement <child>` (SGD spec issues) or `/sgd:implement-issue <child>` (general issues).
+This is the standalone version of the complexity-sizing and child-issue logic that lives inside `/sge:sge-implement` (Phase 2). It does **not** implement anything: it sizes the issue, decides whether a split is warranted, and — if so — creates the child issues and records the build order. The hand-off to build is `/sge:sge-implement <child>` (SGE spec issues) or `/sge:implement-issue <child>` (general issues).
 
 It runs **inline** in the main conversation — do not fork it into a subagent. The sizing and conflict analysis (Phase 2–3) may be delegated to subagents for a large blast radius; the split decision (Phase 4) and the child-issue creation (Phase 5) are interactive.
 
-> **Target repo.** Phases 1–6 read the parent (`gh issue view`) and write the children through the ALM write seam `$IW` (`scripts/issue-write.sh` — `create`/`comment`; `gh issue edit` for labels on the GitHub path) against the current working directory. When decomposing from a hub/control checkout (e.g. `wtp-org`) or when `/sgd:sgd-implement` Phase 2 dispatches this against another repo, apply the shared repo-targeting convention — [`gh-repo`](../gh-repo/SKILL.md) — first: `cd` into the target checkout (or `export GH_REPO=owner/repo`) and run its startup echo, so the child issues are created in the right repo rather than silently in the hub. Same-repo: leave `GH_REPO` unset.
+> **Target repo.** Phases 1–6 read the parent (`gh issue view`) and write the children through the ALM write seam `$IW` (`scripts/issue-write.sh` — `create`/`comment`; `gh issue edit` for labels on the GitHub path) against the current working directory. When decomposing from a hub/control checkout (e.g. `wtp-org`) or when `/sge:sge-implement` Phase 2 dispatches this against another repo, apply the shared repo-targeting convention — [`gh-repo`](../gh-repo/SKILL.md) — first: `cd` into the target checkout (or `export GH_REPO=owner/repo`) and run its startup echo, so the child issues are created in the right repo rather than silently in the hub. Same-repo: leave `GH_REPO` unset.
 
 ## Usage
 
 ```
-/sgd:decompose-issue <issue-number>
+/sge:decompose-issue <issue-number>
 ```
 
-`$ARGUMENTS` is the parent issue number (optionally followed by flags). Example: `/sgd:decompose-issue 312`
+`$ARGUMENTS` is the parent issue number (optionally followed by flags). Example: `/sge:decompose-issue 312`
 
 **Issue context (preloaded):**
 
@@ -53,7 +53,7 @@ The preloaded context covers the headline fields. Parse the parent issue into th
 
 ## Phase 2: Complexity Sizing
 
-Score the parent against the **canonical SGD complexity rubric** — the same one `/sgd:sgd-implement` Phase 2 uses. Do not invent a variant.
+Score the parent against the **canonical SGE complexity rubric** — the same one `/sge:sge-implement` Phase 2 uses. Do not invent a variant.
 
 | Signal | Count | Weight |
 |--------|-------|--------|
@@ -66,7 +66,7 @@ Score the parent against the **canonical SGD complexity rubric** — the same on
 
 For non-backend work, map the signals analogously (e.g. stores/schemas ≈ models, components ≈ methods, screens/routes ≈ routes).
 
-- **≤ 15**: Small — does **not** warrant a split. Report the score and recommend implementing directly via `/sgd:sgd-implement` / `/sgd:implement-issue`. Stop here unless the user insists.
+- **≤ 15**: Small — does **not** warrant a split. Report the score and recommend implementing directly via `/sge:sge-implement` / `/sge:implement-issue`. Stop here unless the user insists.
 - **16–30**: Medium — a split is optional. Implementable directly with incremental commits per vertical slice. Offer the split as a choice but recommend against it unless the slices are genuinely parallelisable across agents.
 - **> 30**: Large — **split into child issues before implementing.** Proceed to Phase 3.
 
@@ -182,14 +182,14 @@ Then capture the decision via **AskUserQuestion** — one question, never a free
 - **Options:**
   - **"Create all child issues"** — proceed to Phase 5
   - **"Adjust the split first"** — loop back to Phase 3 with the user's steer (merge two slices, split one further, move a file into the enabler)
-  - **"Don't split — implement directly"** — abandon the decomposition; recommend `/sgd:sgd-implement <N>` / `/sgd:implement-issue <N>`
+  - **"Don't split — implement directly"** — abandon the decomposition; recommend `/sge:sge-implement <N>` / `/sge:implement-issue <N>`
   - **"Cancel"**
 
 ---
 
 ## Phase 5: Create the Child Issues
 
-One enabler issue, then one issue per vertical slice. Each child carries its dependency and conflict metadata **in the body** so a flow consumer (`/sgd:team-pipeline`, or a repo-shipped `/sgd:available-issues` / `/sgd:issue-swarm` if present) can read it, and so a human landing on the issue understands its place in the DAG.
+One enabler issue, then one issue per vertical slice. Each child carries its dependency and conflict metadata **in the body** so a flow consumer (`/sge:team-pipeline`, or a repo-shipped `/sge:available-issues` / `/sge:issue-swarm` if present) can read it, and so a human landing on the issue understands its place in the DAG.
 
 > **Children are created through `$IW`, not `gh issue create` directly** (SPEC-105 S3, #1701). `scripts/issue-write.sh` is the backend-aware write seam: on GitHub it delegates to `gh` unchanged; on a Jira-tracked repo it routes to P6 `create-item` so the children reach the tracker the work actually lives in. Shelling `gh issue create` here means a Jira repo's decomposition silently produces nothing. `create` is scope-gated per DP3, so it needs the explicit `JIRA_ADAPTER_ALLOW_CREATE=1` opt-in — `$IW` supplies the write flag but never the create scope. Full routing table: [`../team-pipeline/references/alm-routing.md`](../team-pipeline/references/alm-routing.md).
 >
@@ -213,7 +213,7 @@ Technical foundation only — no user-facing output, no TDD required.
 Verified by: migration runs and rolls back cleanly, types compile, module resolves, lint passes.
 EOF
 )")
-gh issue edit "$E1" --add-label "sgd,enabler"   # GitHub path; Jira labels are S4 (P9)
+gh issue edit "$E1" --add-label "sge,enabler"   # GitHub path; Jira labels are S4 (P9)
 
 JIRA_ADAPTER_ALLOW_CREATE=1 "$IW" create \
   "${SPEC}-S1: CSV ingest + validation (TDD)" \
@@ -259,22 +259,22 @@ gh issue edit "$E1" --add-label "enabler" --milestone "<parent milestone>"
 ### Execution-repo stamping — children inherit the parent's execution repo (SPEC-057, #863/#1024)
 
 A parent decomposed from a hub can have children whose deliverable lives in a
-**different** repo than the parent's tracking repo — the `sgd#798` shape: the
-tracking issue sat in `sgd`, but the deliverable belonged in `client-onboarding`
-(and a real decomposition's children `sgd#839/#840` executed in `wtp-org`).
+**different** repo than the parent's tracking repo — the `sge#798` shape: the
+tracking issue sat in `sge`, but the deliverable belonged in `client-onboarding`
+(and a real decomposition's children `sge#839/#840` executed in `wtp-org`).
 Without a signal, the pipeline assumes each child executes in the parent's repo
 and sets up the worktree/branch/PR there — the wrong place.
 
 So **stamp `Repo: owner/name` on every child whose execution repo differs from
 the parent's tracking repo.** Use the canonical grammar (short `Repo:` form,
 value MUST be `owner/name` or a GitHub URL) — do NOT hand-roll a variant. It is
-the same field `/sgd:team-pipeline` and `/sgd:fleet-dispatch` HONOR when they
+the same field `/sge:team-pipeline` and `/sge:fleet-dispatch` HONOR when they
 target the worktree/branch/PR (via `scripts/with-repo-cwd.sh issue-repo`), and
 the grammar/parser is defined once in
 [`docs/skill-authoring-repo-context.md`](../../docs/skill-authoring-repo-context.md).
 Children that execute in the parent's repo carry `Repo: —` (or omit the field).
 
-Worked example — a child whose deliverable lives in another repo (the `sgd#798`
+Worked example — a child whose deliverable lives in another repo (the `sge#798`
 shape), stamped so team-pipeline routes its worktree/PR to `owner/other-repo`:
 
 ```bash
@@ -292,7 +292,7 @@ One vertical slice whose deliverable lives in owner/other-repo. Strict TDD.
 Acceptance criterion: <the specific criterion this slice satisfies>
 EOF
 )")
-gh issue edit "$S4" --add-label "sgd,story"
+gh issue edit "$S4" --add-label "sge,story"
 ```
 
 Status/labels (including `agent-lock`) stay on the tracking child issue created
@@ -302,7 +302,7 @@ honoring contract team-pipeline/fleet-dispatch implement.
 ### Dependency metadata grammar
 
 This is the **canonical grammar** for machine-readable dependency edges in an
-issue body. Consumers (`/sgd:available-issues` Phase 2, `/sgd:team-pipeline`
+issue body. Consumers (`/sge:available-issues` Phase 2, `/sge:team-pipeline`
 Phase 1) parse it case-insensitively with:
 
 ```
@@ -348,9 +348,9 @@ Skip only if `--no-comment` is passed. Comment on the parent with the full child
 
 **Build order:** E1 first (foundation). Once #401 merges, S1/S2/S3 fan out — 3 concurrent lanes, no file overlap. No serialised pairs.
 
-**Hand-off:** `/sgd:team-pipeline` to fan the slices out, or `/sgd:sgd-implement <child>` one at a time.
+**Hand-off:** `/sge:team-pipeline` to fan the slices out, or `/sge:sge-implement <child>` one at a time.
 
-_Decomposed via `/sgd:decompose-issue`._
+_Decomposed via `/sge:decompose-issue`._
 EOF
 )"
 ```
@@ -363,11 +363,11 @@ Then report the created issue numbers and the comment URL back in chat.
 
 The decomposition is done — building is a separate step. Offer the next move via AskUserQuestion:
 
-- **"Fan out via the pipeline"** — `/sgd:team-pipeline` discovers the enabler and slices, respects the `DependsOn` edges (the enabler unblocks the slices once it merges), and works the parallel lanes concurrently.
-- **"Start with the enabler"** — `/sgd:sgd-implement <E1>` (spec lane) or `/sgd:implement-issue <E1>` (no-spec lane), then the slices once it merges.
+- **"Fan out via the pipeline"** — `/sge:team-pipeline` discovers the enabler and slices, respects the `DependsOn` edges (the enabler unblocks the slices once it merges), and works the parallel lanes concurrently.
+- **"Start with the enabler"** — `/sge:sge-implement <E1>` (spec lane) or `/sge:implement-issue <E1>` (no-spec lane), then the slices once it merges.
 - **"Leave them for later"** — the children exist with full metadata; anyone can pick them up.
 
-> **Orchestration note:** always the enabler first — every slice `DependsOn` it. The slices are mutually parallel-safe **by construction** (Phase 3 guaranteed disjoint footprints), so they can run in separate worktrees concurrently (canonical placement: [`worktrees`](../worktrees/SKILL.md)), each running `/sgd:tdd-workflow` for its acceptance criterion. Any pair the conflict map had to serialise is **not** parallel-safe — honour its `ConflictsWith` edge.
+> **Orchestration note:** always the enabler first — every slice `DependsOn` it. The slices are mutually parallel-safe **by construction** (Phase 3 guaranteed disjoint footprints), so they can run in separate worktrees concurrently (canonical placement: [`worktrees`](../worktrees/SKILL.md)), each running `/sge:tdd-workflow` for its acceptance criterion. Any pair the conflict map had to serialise is **not** parallel-safe — honour its `ConflictsWith` edge.
 
 ---
 
@@ -382,11 +382,11 @@ The decomposition is done — building is a separate step. Offer the next move v
 
 ## Related Skills
 
-- `/sgd:sgd-implement <n>` — Build an SGD spec issue (or a child) end-to-end; owns the canonical complexity rubric this skill reuses
-- `/sgd:implement-issue <n>` — Build a general (non-SGD) child issue once it is unblocked
-- `/sgd:team-pipeline` — Fan the parallel-safe children out across multiple concurrent implementation agents
-- `/sgd:deep-dive <n>` — Investigate an unclear issue before deciding whether it even needs a split
-- `/sgd:tdd-workflow` — The Red/Green/Refactor inner loop each story child runs
+- `/sge:sge-implement <n>` — Build an SGE spec issue (or a child) end-to-end; owns the canonical complexity rubric this skill reuses
+- `/sge:implement-issue <n>` — Build a general (non-SGE) child issue once it is unblocked
+- `/sge:team-pipeline` — Fan the parallel-safe children out across multiple concurrent implementation agents
+- `/sge:deep-dive <n>` — Investigate an unclear issue before deciding whether it even needs a split
+- `/sge:tdd-workflow` — The Red/Green/Refactor inner loop each story child runs
 - [`gh-repo`](../gh-repo/SKILL.md) — the shared cross-repo / hub-dispatch repo-targeting convention the child-issue `gh` writes follow
 - [`worktrees`](../worktrees/SKILL.md) — the canonical worktree placement the parallel-safe children run in
 - [`scripts/validate-file-map.sh`](../../scripts/validate-file-map.sh) — the mechanical Phase 3d validator that classifies each `owns` path against `git ls-files` (existing / new / phantom) so no phantom path reaches a lane (#1271)

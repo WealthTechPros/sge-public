@@ -1,5 +1,5 @@
 ---
-description: Use when assessing how far a repo — or a whole portfolio of repos — has adopted atomic design; when design-token, primitive-layer, catalog, or enforcement maturity needs an evidence-backed score; when /sgd:sgd-align needs its L2 Design System signal (check C10); or before planning a design-system investment, extraction, or migration roadmap. Advisory and read-only — not for making changes.
+description: Use when assessing how far a repo — or a whole portfolio of repos — has adopted atomic design; when design-token, primitive-layer, catalog, or enforcement maturity needs an evidence-backed score; when /sge:sge-align needs its L2 Design System signal (check C10); or before planning a design-system investment, extraction, or migration roadmap. Advisory and read-only — not for making changes.
 argument-hint: "[repo path] [--json] [--stack <key>] [--out <file>] [--fleet <repos…>]"
 context: fork
 allowed-tools: Read, Glob, Grep, Agent, Bash(bash:*), Bash(sh:*), Bash(ls:*), Bash(find:*), Bash(grep:*), Bash(cat:*), Bash(head:*), Bash(wc:*), Bash(git ls-files:*), Bash(git rev-parse:*), Bash(gh repo list:*), Bash(gh repo clone:*)
@@ -37,13 +37,13 @@ caller; mutations are impossible by construction. Two consequences:
 - **`--out <file>`** — the fork itself writes nothing. If `--out` was passed,
   the **caller** (main conversation) writes the returned markdown to `<file>`
   after the fork returns.
-- **Headless consumption** — orchestrators (notably `/sgd:sgd-align`) invoke it
+- **Headless consumption** — orchestrators (notably `/sge:sge-align`) invoke it
   with `--json` and consume the structured result without any interaction.
 
 ## Usage
 
 ```
-/sgd:atomic-audit [path] [--stack <key>] [--out <file>] [--json] [--fleet <repos…>]
+/sge:atomic-audit [path] [--stack <key>] [--out <file>] [--json] [--fleet <repos…>]
 ```
 
 `$ARGUMENTS` carries everything: the first non-flag token is the path
@@ -54,7 +54,7 @@ caller; mutations are impossible by construction. Two consequences:
 | `path` | Directory to audit (default: repo root / cwd). |
 | `--stack` | Force a stack instead of auto-detecting. Values: `auto` (default), `react`, `vue`, `svelte`, `angular`, `swiftui`, `compose`, `flutter`, `generic`. |
 | `--out <file>` | Caller writes the markdown report to `<file>` after the fork returns (the only file ever written, and not by the fork). |
-| `--json` | Emit the structured scores as JSON (schema in Step 4) in addition to the report. This is the mode `/sgd:sgd-align` check C10 consumes. |
+| `--json` | Emit the structured scores as JSON (schema in Step 4) in addition to the report. This is the mode `/sge:sge-align` check C10 consumes. |
 | `--fleet <repos…>` | Portfolio mode — audit several repos and aggregate (see Portfolio mode). |
 
 **Stack signals (collected at invocation):**
@@ -213,7 +213,7 @@ never a bare number. (Evidence and gap feed the Step 4 report columns and the
 ## Step 3 — Roll up to an atomic maturity tier (L0–L3)
 
 > **Disambiguation — two different L-scales.** The tiers below are **atomic
-> maturity tiers L0–L3** (Ad-hoc → Enforced). They are **not** the SGD
+> maturity tiers L0–L3** (Ad-hoc → Enforced). They are **not** the SGE
 > governance layers **L0–L8** (Vision → Cortex). Always write the tier as
 > e.g. "atomic maturity L1 (Emerging)" — never a bare "L1" — so the two
 > numbering schemes can't be confused downstream.
@@ -250,7 +250,7 @@ structured result:
 
 `repo`, `stack`, `dimensions[].name`, `dimensions[].score` (bare integer 0–3),
 `dimensions[].evidence`, and `tier` are **required** — this is the schema
-`/sgd:sgd-align` check C10 validates and consumes. `n`, `level`, and `gap` are
+`/sge:sge-align` check C10 validates and consumes. `n`, `level`, and `gap` are
 included for human readers. Multi-surface repos emit one object per surface.
 
 ```markdown
@@ -305,7 +305,7 @@ auditing serially:
 > **Target repo — cross-repo / control-session invocation.** Prefer an existing local
 > checkout over a fresh clone for each `--fleet` slug: resolve it via
 > `${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh resolve owner/repo`, which finds a
-> checkout under `SGD_CHECKOUT_ROOTS`/the hub sibling layout by matching `origin` — a repo
+> checkout under `SGE_CHECKOUT_ROOTS`/the hub sibling layout by matching `origin` — a repo
 > already checked out is audited from there, not re-cloned. Fall back to `gh repo clone`
 > into a temp dir only when the helper reports no match. See [`gh-repo`](../gh-repo/SKILL.md).
 
@@ -330,11 +330,11 @@ auditing serially:
    observation: shared weakest dimension, candidate shared design-system
    investment, which repo to remediate first.
 
-## SGD cascade linkage
+## SGE cascade linkage
 
-This skill is the **L2 Design System probe** in the SGD governance cascade
+This skill is the **L2 Design System probe** in the SGE governance cascade
 (layers L0 Vision → L1 Capability Model → **L2 Design System** → L3 Feature
-Specs → … → L8). `/sgd:sgd-align` check **C10** invokes it in `--json` mode as
+Specs → … → L8). `/sge:sge-align` check **C10** invokes it in `--json` mode as
 a forked read-only subagent and consumes the `tier` field as the repo's L2
 signal: atomic maturity **L2 (Established)** or better passes; **L0/L1** raises
 a drift gap; no detectable UI stack makes C10 N/A.
@@ -359,6 +359,6 @@ layers**. Always qualify ("atomic maturity L1"), per the Step 3 callout.
 
 ## Related skills
 
-- `/sgd:sgd-align` — governance-cascade drift (Vision→Code); its check C10 consumes this skill's `--json` tier as the L2 signal
-- `/sgd:refactor` — execute the extraction/migration slices this audit recommends
-- `/sgd:implement-issue <N>` — build a remediation slice once it's an issue
+- `/sge:sge-align` — governance-cascade drift (Vision→Code); its check C10 consumes this skill's `--json` tier as the L2 signal
+- `/sge:refactor` — execute the extraction/migration slices this audit recommends
+- `/sge:implement-issue <N>` — build a remediation slice once it's an issue

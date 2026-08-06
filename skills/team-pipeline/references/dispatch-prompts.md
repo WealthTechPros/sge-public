@@ -36,9 +36,9 @@ the faster it hits 0/5000 and *every* lane stalls in lockstep. GraphQL has a
    `"note":"rate-limited: switched to GraphQL"`) so a stall caused by quota is
    immediately distinguishable from any other stall.
 
-Skills that shell `gh` internally (`/sgd:pr-review`, `/sgd:pr-monitor`) already
+Skills that shell `gh` internally (`/sge:pr-review`, `/sge:pr-monitor`) already
 carry rate-limit detection + GraphQL fallback in `review-lib.sh` / `pr-labels.sh`
-(#1147); when the wtp-sgd App credentials (`SGD_REVIEW_APP_*`) are present those
+(#1147); when the wtp-sge App credentials (`SGE_REVIEW_APP_*`) are present those
 libs route through the 15000/hr App tier via `rl_gh` (#1149). These four rules
 are the agent-prompt-level default that the orchestrator must not have to
 discover and instruct by hand mid-session.
@@ -48,27 +48,27 @@ discover and instruct by hand mid-session.
 ## Shared: front-loaded governance verdict (issue #1266)
 
 **The wave is batch-classified ONCE, up front — per-lane governance-trace forks
-are the exception, not the rule.** `/sgd:build-ready-audit`'s #872 fold already
-runs `/sgd:governance-trace` over N issues in a single hop and returns a
+are the exception, not the rule.** `/sge:build-ready-audit`'s #872 fold already
+runs `/sge:governance-trace` over N issues in a single hop and returns a
 `results[]` array with a `governance` verdict per issue. The orchestrator runs
 that fold as the default Phase 1.5 step (see core SKILL.md) and, when it spawns a
-lane, **injects that issue's verdict into the lane prompt** as `SGD_GOVTRACE_VERDICT`.
+lane, **injects that issue's verdict into the lane prompt** as `SGE_GOVTRACE_VERDICT`.
 
 The impl-lane's Step 3 gate then **adopts the front-loaded verdict** instead of
-forking its own `/sgd:governance-trace` — the adopt-on-exact-issue-match rule
-`/sgd:sgd-implement` Phase 0.5 already applies. The env var carries the verdict as
+forking its own `/sge:governance-trace` — the adopt-on-exact-issue-match rule
+`/sge:sge-implement` Phase 0.5 already applies. The env var carries the verdict as
 compact JSON, e.g.:
 
 ```
-SGD_GOVTRACE_VERDICT={"issue":<N>,"verdict":"MATCHES_EXISTING","matchConfidence":"high"}
+SGE_GOVTRACE_VERDICT={"issue":<N>,"verdict":"MATCHES_EXISTING","matchConfidence":"high"}
 ```
 
 **Opt-out / fallback (documented default).** A lane forks its own per-lane
-`/sgd:governance-trace` **only** when `SGD_GOVTRACE_VERDICT` is unset, empty, its
+`/sge:governance-trace` **only** when `SGE_GOVTRACE_VERDICT` is unset, empty, its
 `issue` field does not equal `<N>` (stale/mismatched — never trust a verdict for a
 different issue), or its `verdict` is missing/malformed. Any issue the batch could
 not classify (dropped, errored, or `--skip-governance` was passed) simply arrives
-with no `SGD_GOVTRACE_VERDICT`, and the lane falls through to the per-lane fork
+with no `SGE_GOVTRACE_VERDICT`, and the lane falls through to the per-lane fork
 exactly as before — the gate is never skipped, only its fork is front-loaded away.
 
 This removes the 10–15 min/lane fork (#10729, ppp) for the common case while
@@ -96,12 +96,12 @@ Prompt:
   to GraphQL for the rest of the run and log the stall distinctly. You share
   ONE REST bucket with every sibling lane.
 
-  Run /sgd:pr-monitor continuously until the orchestrator signals you to stop.
+  Run /sge:pr-monitor continuously until the orchestrator signals you to stop.
 
   After each action, append one JSON line to /tmp/team-pipeline-prmonitor.log:
     {"ts":"<ISO>","pr":<N>,"action":"pr-fix|pr-review|rerun|merged","outcome":"success|failed"}
 
-  /sgd:pr-monitor is itself event-driven (it waits on `gh pr checks --watch`,
+  /sge:pr-monitor is itself event-driven (it waits on `gh pr checks --watch`,
   not the clock). At the end of each cycle, read /tmp/team-pipeline-state.json.
   If prMonitorStatus == "stop", finish your current cycle then exit.
 
@@ -124,8 +124,8 @@ Prompt:
     repo unless the issue carried an execution-repo field — SPEC-057 #1024)
   Worktree: <EXEC_WT_BASE>/issue-<N>  (already created in the EXECUTION repo's
     checkout — do NOT re-create it)
-  Branch: ${SGD_BRANCH_PREFIX:-fix/issue-}<N>  (env-parameterized; see Branch prefix below)
-  SGD_GOVTRACE_VERDICT: <the wave's front-loaded governance verdict for this
+  Branch: ${SGE_BRANCH_PREFIX:-fix/issue-}<N>  (env-parameterized; see Branch prefix below)
+  SGE_GOVTRACE_VERDICT: <the wave's front-loaded governance verdict for this
     issue, injected by the orchestrator's Phase 1.5 batch pre-classification;
     absent when the batch could not classify this issue — see Step 3 / "Shared:
     front-loaded governance verdict", #1266>
@@ -142,7 +142,7 @@ Prompt:
   ## Lean agent contract (MANDATORY — read before doing anything)
 
   You are a gate-then-build-then-draft agent. Your job is:
-    1. Run the /sgd:governance-trace gate for the issue headlessly (Step 3
+    1. Run the /sge:governance-trace gate for the issue headlessly (Step 3
        below); on a blocking verdict, report outcome "blocked" and terminate
        WITHOUT building
     2. Build the change (implement the issue in the worktree provided)
@@ -167,7 +167,7 @@ Prompt:
   same-repo -> `Fixes #<N>`; cross-repo (execution repo != tracking repo) ->
   the fully-qualified `Fixes <TRACKING_REPO>#<N>` so the PR still closes the
   tracking issue when it merges in another repo:
-    git push origin "${SGD_BRANCH_PREFIX:-fix/issue-}<N>"
+    git push origin "${SGE_BRANCH_PREFIX:-fix/issue-}<N>"
     # same-repo:
     gh pr create --draft --title "<conventional title>" --body "Fixes #<N>"
     # cross-repo (execution repo != tracking repo), e.g. Fixes owner/repo#<N>:
@@ -192,7 +192,7 @@ Prompt:
     - The specific test(s) you wrote or touched for this change
     - The repo formatter in WRITE mode over ONLY the files you created/changed
       (e.g. feed `git diff --name-only` to it), then stage the result. DISCOVER
-      the format command the way /sgd:pr-fix does (skills/pr-fix/SKILL.md
+      the format command the way /sge:pr-fix does (skills/pr-fix/SKILL.md
       "Stack-agnostic by design"): read the repo's CLAUDE.md, its package.json
       scripts, and its pre-commit config for the command CI's Format Check runs
       (a `format` / `format:write` npm script, or a formatter pre-commit hook) —
@@ -202,7 +202,7 @@ Prompt:
       format of only your touched files fixes that at negligible cost.
   Do NOT run the full test suite, linter, whole-repo format-check, or
   build-storybook here — those (the repo-wide `format:check` included) belong to
-  the separate /sgd:pr-review step after you terminate.
+  the separate /sge:pr-review step after you terminate.
   Running the full battery is what burned 20–50 min per agent before; don't.
 
   ## Steps
@@ -211,7 +211,7 @@ Prompt:
      attributes your MEASURED per-turn usage to this lane (used by the
      orchestrator's real token accounting — #857; do NOT self-report a token
      count anywhere):
-       export SGD_AGENT_ID="impl-<N>"
+       export SGE_AGENT_ID="impl-<N>"
      Keep this exported for the whole lane so every metered turn carries it.
   1. cd to the worktree (<EXEC_WT_BASE>/issue-<N>, in the EXECUTION repo's
      checkout) and verify pwd — every `gh`/`git` call then targets the
@@ -219,20 +219,20 @@ Prompt:
   2. Read the issue: gh issue view <N> --json title,body,comments
      Extract the file-map and acceptance criteria. This is your entire recon.
   3. Governance-trace gate (MANDATORY — before writing any code). First, if the
-     orchestrator injected SGD_GOVTRACE_VERDICT and its "issue" == <N>, ADOPT it
+     orchestrator injected SGE_GOVTRACE_VERDICT and its "issue" == <N>, ADOPT it
      as the verdict and skip the fork (per "Shared: front-loaded governance
-     verdict", #1266; the same adopt-on-exact-issue-match rule sgd-implement
+     verdict", #1266; the same adopt-on-exact-issue-match rule sge-implement
      Phase 0.5 uses). Otherwise (unset/empty/mismatched-issue/malformed) FORK:
-     run /sgd:governance-trace <N> headlessly — verify mode (--spec SPEC-NNN) when
+     run /sge:governance-trace <N> headlessly — verify mode (--spec SPEC-NNN) when
      the issue title/body cites a spec id, classify mode otherwise. Either way,
-     branch on the resulting verdict exactly as /sgd:sgd-implement Phase 0.5 does
+     branch on the resulting verdict exactly as /sge:sge-implement Phase 0.5 does
      when dispatched headlessly:
        - MATCHES_EXISTING / NO_SPEC_WARRANTED / NOT_ONBOARDED, with
          matchConfidence not "low" -> proceed to step 4.
-       - MATCHES_EXISTING_MODIFIED, NEEDS_NEW_SPEC, NOT_SGD_SCOPE, or
+       - MATCHES_EXISTING_MODIFIED, NEEDS_NEW_SPEC, NOT_SGE_SCOPE, or
          matchConfidence == "low" (whatever the verdict) -> do NOT build.
          Write /tmp/team-pipeline-agent-<N>.json using the exact schema of
-         /sgd:sgd-implement Phase 0.5's *Headless completion contract*:
+         /sge:sge-implement Phase 0.5's *Headless completion contract*:
            {"issue":<N>,"outcome":"blocked","prNumber":null,"completedAt":"<ISO>","tokensUsed":<N>,"note":"governance-trace: <one line — what's blocked and why>"}
          then terminate without building. Never guess, never auto-override —
          the orchestrator's Phase 4 branch 4a parks the issue for a human.
@@ -266,16 +266,16 @@ Prompt:
   See: platform/docs/sgd-build/bdd-quality-rules.md (examples + audit evidence)
 
   4. Implement the change (TDD for each acceptance criterion — failing test,
-     then minimum code to green). Commit each slice via /sgd:commit --no-push.
-     Every commit MUST carry a `Spec: SPEC-NNN` or `SGD-Override: <STEP>; <reason>`
-     trailer — /sgd:commit derives it mechanically (its step 5) from the issue/
+     then minimum code to green). Commit each slice via /sge:commit --no-push.
+     Every commit MUST carry a `Spec: SPEC-NNN` or `SGE-Override: <STEP>; <reason>`
+     trailer — /sge:commit derives it mechanically (its step 5) from the issue/
      branch; a trailer-less commit fails the require-commit-trailer CI gate.
   5. After the FIRST commit: push + open DRAFT PR (Rule 2 above).
   6. Continue implementing remaining slices and committing (--no-push each).
   7. Run cheap inline gates (Rule 3): typecheck + touched tests + the repo
      formatter (write mode) over your created/changed files — discovered per
      Rule 3, never hard-coded `prettier`; stage the result. Fix failures.
-  8. Final push: git push origin "${SGD_BRANCH_PREFIX:-fix/issue-}<N>"  (updates the already-open PR)
+  8. Final push: git push origin "${SGE_BRANCH_PREFIX:-fix/issue-}<N>"  (updates the already-open PR)
   9. Write result to /tmp/team-pipeline-agent-<N>.json:
        {
          "issue":<N>,
@@ -296,10 +296,10 @@ Prompt:
      is DEPRECATED (#857) and the orchestrator no longer reads it for any budget
      or accounting decision — real spend comes from the harness-measured
      token-meter records (see *Durable token-usage persistence*). If a
-     `tokensUsed` field is still present (legacy sgd-implement Phase 0.5 shape),
+     `tokensUsed` field is still present (legacy sge-implement Phase 0.5 shape),
      it is treated as non-authoritative and used only for the visible
      measured-vs-reported divergence check, never as the spend figure.
-  10. Terminate. Do NOT run /sgd:pr-review. The review agent handles that.
+  10. Terminate. Do NOT run /sge:pr-review. The review agent handles that.
 ```
 
 The `Task` name `"impl-<N>"` is what allows `TaskStop "impl-<N>"` to work during
@@ -310,7 +310,7 @@ killed.**
 > **Completion-file shape.** The per-lane completion file is the
 > *completion-file channel* of the shared [`exit-report`](../../exit-report/SKILL.md)
 > contract. The lane shape above is the documented legacy shape — it stays
-> as-is because it is shared verbatim with `/sgd:sgd-implement` Phase 0.5's
+> as-is because it is shared verbatim with `/sge:sge-implement` Phase 0.5's
 > *Headless completion contract* (whose retrofit that skill's own #730 slice
 > owns); consumers bridge it via exit-report's *Mapping from the legacy
 > shapes* table (`issue`→`item`, `outcome`→`status`, `prNumber`→`pr`,
@@ -344,12 +344,12 @@ Prompt:
   for PR/issue state reads and for posting the review verdict/labels where a
   GraphQL mutation exists; floor-check `gh api rate_limit` before REST bursts;
   on a REST 403/429 rate-limit, switch to GraphQL for the rest of the run and
-  log the stall distinctly. (/sgd:pr-review's own libs already do this
+  log the stall distinctly. (/sge:pr-review's own libs already do this
   internally per #1147/#1149.)
 
   Steps:
   1. gh pr diff <PR_NUMBER>
-  2. Run /sgd:pr-review #<PR_NUMBER>
+  2. Run /sge:pr-review #<PR_NUMBER>
   3. If no blocking issues:
        gh pr review <PR_NUMBER> --approve --body "LGTM -- auto-review passed."
        gh pr ready <PR_NUMBER>
@@ -369,15 +369,15 @@ during the review-stall threshold (Phase 4). **Do NOT use
 
 ## Branch prefix
 
-Every lane's branch is named `${SGD_BRANCH_PREFIX:-fix/issue-}<N>` where `SGD_BRANCH_PREFIX`
+Every lane's branch is named `${SGE_BRANCH_PREFIX:-fix/issue-}<N>` where `SGE_BRANCH_PREFIX`
 defaults to `fix/issue-`, so unset it (or leave it unset) to keep the existing
 `fix/issue-<N>` convention — no change for existing callers. The worktree/branch
 is created once by the orchestrator (Phase 3c / `mechanisms.md`); lane agents
 push and open PRs against whatever name that produced, so the prefix flows
-through automatically. `/sgd:available-issues --setup` reads the same variable,
+through automatically. `/sge:available-issues --setup` reads the same variable,
 so team-pipeline and available-issues stay interchangeable.
 
-Set `SGD_BRANCH_PREFIX=claude/issue-` when the pipeline runs under a
+Set `SGE_BRANCH_PREFIX=claude/issue-` when the pipeline runs under a
 [Claude Code Routine](https://docs.claude.com/en/docs/claude-code/routines)
 (Anthropic-hosted, scheduled/API/GitHub-event triggered). Routines default to
 pushing only `claude/`-prefixed branches as a cloud-sandbox safety net; matching

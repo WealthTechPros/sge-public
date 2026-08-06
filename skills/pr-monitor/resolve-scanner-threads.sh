@@ -47,7 +47,7 @@ set -euo pipefail
 # The ONLY author login whose threads are eligible — the code-scanning bot.
 # Overridable for a differently-named first-party scanner bot, but it ALWAYS
 # matches exactly one login and NEVER a human. Default is strict.
-SCANNER_BOT="${SGD_SCANNER_BOT_LOGIN:-github-advanced-security}"
+SCANNER_BOT="${SGE_SCANNER_BOT_LOGIN:-github-advanced-security}"
 
 PR=""
 DRY_RUN=false

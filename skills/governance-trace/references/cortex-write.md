@@ -29,7 +29,7 @@ through Step W.
 
 `create_entities` on an existing entity name is already an upsert: it bumps
 `reinforcement_count` and `current_confidence` rather than inserting a
-duplicate (`mcp/sgd-cortex/src/db/store.ts`). Keep the entity name stable and
+duplicate (`mcp/sge-cortex/src/db/store.ts`). Keep the entity name stable and
 rely on that — never guard the write with an existence check, and never skip
 the write because "it's already there". Skipping is the bug; reinforcing is
 the feature.
@@ -72,7 +72,7 @@ Two distinct exemption classes write nothing:
 
 1. **No verdict produced** — `NO_TARGET_ISSUE`, the hard refusal; there is no
    classification to record.
-2. **Verdict produced but the write is impossible** — sgd-memory unavailable;
+2. **Verdict produced but the write is impossible** — sge-memory unavailable;
    skip silently (a memory outage must never block the gate). Note this exit
    *does* produce a verdict — it is exempt because the write cannot happen,
    not because nothing was classified.
@@ -82,8 +82,8 @@ Every other terminal path writes.
 ## Front-loaded verdicts — the caller owns the write
 
 A **front-loaded verdict** is one injected by an orchestrator rather than
-derived here: `SGD_GOVTRACE_VERDICT` (the agent-template convention) or
-`/sgd:sgd-implement`'s Phase 0.5 fast-path, which adopts a structurally valid
+derived here: `SGE_GOVTRACE_VERDICT` (the agent-template convention) or
+`/sge:sge-implement`'s Phase 0.5 fast-path, which adopts a structurally valid
 verdict and *skips the fork entirely*.
 
 On that path **this skill never executes**, so it cannot write. The obligation

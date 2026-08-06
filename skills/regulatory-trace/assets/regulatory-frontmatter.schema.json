@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://wealthtechpros.dev/sgd/regulatory-frontmatter.schema.json",
-  "title": "SGD spec frontmatter — regulatory traceability extension",
-  "description": "OPTIONAL `regulatory:` block added to an SGD feature-spec frontmatter by /sgd:regulatory-trace. Absent => unregulated spec (no obligation). Required (per C12) for any spec whose governing capability is `regulated: true`. Complements, never replaces, the AI use-case register (`ai-inventory.yaml`).",
+  "$id": "https://wealthtechpros.dev/sge/regulatory-frontmatter.schema.json",
+  "title": "SGE spec frontmatter — regulatory traceability extension",
+  "description": "OPTIONAL `regulatory:` block added to an SGE feature-spec frontmatter by /sge:regulatory-trace. Absent => unregulated spec (no obligation). Required (per C12) for any spec whose governing capability is `regulated: true`. Complements, never replaces, the AI use-case register (`ai-inventory.yaml`).",
   "type": "object",
   "properties": {
     "regulatory": {

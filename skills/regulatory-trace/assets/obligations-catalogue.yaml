@@ -1,7 +1,7 @@
 # Regulatory obligation & framework controlled vocabulary
 # ------------------------------------------------------------------------------
 # The SINGLE source of truth for the obligation / framework ids a spec mapping may
-# reference (/sgd:regulatory-trace). A mapping that cites an id NOT in this file —
+# reference (/sge:regulatory-trace). A mapping that cites an id NOT in this file —
 # or one flagged `retired: true` — is a drift finding (C12), never silently accepted.
 #
 # WTP is the SUBJECT, not the addressee, of these regimes: it builds AI software for
@@ -10,7 +10,7 @@
 # claim that WTP is itself authorised or compliant. Verify wording before citing to a
 # regulator; regimes move (researched 2026-06).
 version: 1
-maintained_via: /sgd:regulatory-trace
+maintained_via: /sge:regulatory-trace
 
 # `must_be_covered: true` => `review` raises a low-severity "orphan obligation" if no
 #   spec in the repo maps to it (a hole in the client DD story).

@@ -100,7 +100,7 @@ non-execution.
 `pr-labels.sh pass` **refuses with exit 5** while any PENDING reviewer remains — an orchestrator
 cannot skip the guard and still move the gate, exactly the hole the original incident exploited.
 `start-review` resets the ledger; a genuinely inline review with no dispatched specialists
-records nothing, so `pass` proceeds untouched (and `SGD_REVIEW_ATTEST_SKIP=1` is the explicit
+records nothing, so `pass` proceeds untouched (and `SGE_REVIEW_ATTEST_SKIP=1` is the explicit
 escape hatch for that case). The tool-call count is caller-supplied — the guard is only as honest
 as the `$TOOL_USES` passed at each `rl_reviewer_attest` call site.
 
@@ -118,7 +118,7 @@ applies to the redispatch too — an empty redispatch reply still counts as "nev
 
 ## Hand off dispatched checks — do not shadow-verify (issue #951)
 
-Once a specific check is delegated to a dispatched lane (`/sgd:pr-review` itself, a
+Once a specific check is delegated to a dispatched lane (`/sge:pr-review` itself, a
 `@code-reviewer`/`@security-auditor` fork, a Layer 3 specialist), the dispatching agent **waits
 for that lane's verdict** rather than re-deriving the same thing in parallel (e.g. manually
 grepping BDD step-def coverage while a reviewer was dispatched to check exactly that). Duplicated

@@ -84,7 +84,7 @@ Phase 6 cleanly. Log:
 > Anthropic Messages-API `usage` block per assistant turn — the same number
 > the harness bills — so `SPENT` reflects real consumption. Coverage caveat:
 > the measured signal exists only for lanes whose dispatch set
-> `SGD_AGENT_ID=impl-<N>` **and** whose token-meter hook wrote into this repo's
+> `SGE_AGENT_ID=impl-<N>` **and** whose token-meter hook wrote into this repo's
 > `memory/token-usage.jsonl` (see *Correlation & coverage* below). Where the
 > meter has not yet recorded a turn, `SPENT` is conservative (under-counts)
 > rather than fictional — it is still honor-system-free accounting of what was
@@ -99,7 +99,7 @@ Defaults are intentionally conservative. To raise them for a specific run:
 # state the raised number in the Task prompt's contract (document the reason).
 
 # Raise the session budget:
-/sgd:team-pipeline --session-budget 4000000
+/sge:team-pipeline --session-budget 4000000
 ```
 
 Never raise a budget to "fix" a stall. A stall is a scope problem; decompose
@@ -202,21 +202,21 @@ persisted; a genuinely fresh session gets a fresh `/tmp` — and a fresh `RUN_ID
   (e.g. a lane hard-killed before its first metered turn, or an install without
   the token-meter hook), this is `0`, never the guess.
 - `specId` is deliberately `"unattributed"` — a lane's pipeline-level overhead
-  is not tied to one spec (the `sgd-implement` run *inside* the lane also emits
+  is not tied to one spec (the `sge-implement` run *inside* the lane also emits
   its own per-turn records via `hooks/token-meter.sh`, tagged with the real
-  `SGD_SPEC_ID`); this aggregate row makes the lane's measured spend durable in
+  `SGE_SPEC_ID`); this aggregate row makes the lane's measured spend durable in
   the main repo and attributable to `skill: "team-pipeline"`.
 - `sessionId` tags both the run and the issue (`<run-id>-issue-<N>`) — additive
   tagging within the existing string field, not a schema change.
 - `agent` carries the agent-role (`impl-<N>`, `review-<PR>`, `pr-monitor`) so
-  `/sgd:roi-report` / `/sgd:cost-guard` can filter pipeline overhead out of
+  `/sge:roi-report` / `/sge:cost-guard` can filter pipeline overhead out of
   per-spec attribution, and `measured_session_tokens` can sum lane rows.
 - `model` is `"unknown"` — the aggregate collapses possibly several models'
   turns into one output-token total; honest about that gap rather than guessing.
 
 > **Correlation & coverage (honest limits).** The measured signal is only as
 > good as two wiring facts holding at runtime: (1) each lane exported
-> `SGD_AGENT_ID=impl-<N>` (Phase 3c dispatch Step 0) so the meter tags its rows
+> `SGE_AGENT_ID=impl-<N>` (Phase 3c dispatch Step 0) so the meter tags its rows
 > with the lane, and (2) `persist_lane_usage` ran **before** the worktree was
 > removed so the worktree-local meter file was still readable. Where either
 > fails, the lane's measured total is `0` and the budget under-counts (never

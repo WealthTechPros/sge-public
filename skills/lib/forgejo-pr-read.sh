@@ -36,13 +36,13 @@
 #   fpr_checks <pr-index>
 #
 # Environment:
-#   CLAUDE_PLUGIN_ROOT    — must be set (standard SGD harness var).
+#   CLAUDE_PLUGIN_ROOT    — must be set (standard SGE harness var).
 #   FORGEJO_API_TOKEN /
 #   GITEA_TOKEN           — required for Forgejo paths (see forgejo-adapter.sh).
-#   SGD_FORGEJO_HOSTS /
-#   SGD_FORGEJO_DEFAULT_HOST — host allow-list (see forgejo-adapter.sh / ADR-0010).
+#   SGE_FORGEJO_HOSTS /
+#   SGE_FORGEJO_DEFAULT_HOST — host allow-list (see forgejo-adapter.sh / ADR-0010).
 #   GH_REPO               — optional; overrides the origin-derived repo slug for
-#                           GitHub paths (standard SGD convention, #662).
+#                           GitHub paths (standard SGE convention, #662).
 #
 # NOTE: shell state does NOT persist across agent tool calls; source this file
 # at the top of each tool call where it is needed. See docs/skill-authoring-repo-context.md.
@@ -62,7 +62,7 @@ _FPR_HOST_KIND=""
 # fpr_host_kind — print the host kind for the current repo's origin:
 #   "github" | "forgejo" | "unknown"
 # Uses with-repo-cwd.sh's canonical classifier (the single source of truth for
-# the SGD_FORGEJO_HOSTS / SGD_GITHUB_HOSTS allow-list).
+# the SGE_FORGEJO_HOSTS / SGE_GITHUB_HOSTS allow-list).
 fpr_host_kind() {
   if [ -z "$_FPR_HOST_KIND" ]; then
     [ -f "$_FPR_WRC" ] || { _fpr_err "with-repo-cwd.sh not found at $_FPR_WRC"; return 1; }
@@ -96,7 +96,7 @@ fpr_list() {
       bash "$_FPR_ADAPTER" list-prs "$origin"
       ;;
     *)
-      _fpr_err "unknown host kind '$host' — cannot list PRs (add host to SGD_FORGEJO_HOSTS or SGD_GITHUB_HOSTS)"
+      _fpr_err "unknown host kind '$host' — cannot list PRs (add host to SGE_FORGEJO_HOSTS or SGE_GITHUB_HOSTS)"
       return 1
       ;;
   esac
@@ -153,7 +153,7 @@ fpr_diff() {
 }
 
 # jq filter mapping ONE Gitea CommitStatus object to the gh `pr checks --json`
-# shape that every SGD consumer already understands. The critical field is
+# shape that every SGE consumer already understands. The critical field is
 # `state`, normalised to gh's UPPERCASE check enum so comparisons in
 # monitor-lib.sh (FAILING_CHECK_JQ) and review-lib.sh (rl_pass_gate's
 # `.state == "SUCCESS"` etc.) work identically on both hosts.
@@ -199,7 +199,7 @@ _FPR_STATUS_NORMALISE='{
 #
 # Page cap: the Forgejo path lists at most the first 50 commit statuses for the
 # head SHA (the adapter's pr-statuses is `?page=1&limit=50`). A head with more
-# than 50 distinct check contexts would be truncated; SGD PRs are far below this.
+# than 50 distinct check contexts would be truncated; SGE PRs are far below this.
 fpr_checks() {
   local pr="${1:-}"
   [ -n "$pr" ] || { _fpr_err "fpr_checks: <pr-index> required"; return 1; }

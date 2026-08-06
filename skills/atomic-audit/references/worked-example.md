@@ -1,6 +1,6 @@
-# Worked example — the SGD platform's own React adoption (SPEC SGD-047 / epic #60)
+# Worked example — the SGE platform's own React adoption (SPEC SGD-047 / epic #60)
 
-The SGD platform repo ran this audit on itself and executed the resulting
+The SGE platform repo ran this audit on itself and executed the resulting
 roadmap as **SGD-047** (tracked in epic **#60**). It is the reference instance
 of the skill's output shape — read it for flavour, not as required structure.
 

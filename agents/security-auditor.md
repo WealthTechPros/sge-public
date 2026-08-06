@@ -61,9 +61,9 @@ framework.
 Return the structured report as your final message — it is the payload, not a
 chat reply.
 
-## Structured output (when dispatched by /sgd:pr-review)
+## Structured output (when dispatched by /sge:pr-review)
 
-When `/sgd:pr-review` dispatches you, append a fenced JSON array of findings
+When `/sge:pr-review` dispatches you, append a fenced JSON array of findings
 after the report above — its aggregator parses only this block:
 
 ```json
@@ -76,4 +76,4 @@ after the report above — its aggregator parses only this block:
 
 Map severities: Critical/High → `blocker`, Medium → `major`, Low → `minor`.
 An empty array `[]` means no findings. When used standalone, the prose report
-remains the payload — the JSON block is only required under `/sgd:pr-review`.
+remains the payload — the JSON block is only required under `/sge:pr-review`.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scan.sh — deterministic, read-only heuristic scanner for /sgd:atomic-audit.
+# scan.sh — deterministic, read-only heuristic scanner for /sge:atomic-audit.
 #
 # Usage: bash scan.sh [path]
 #

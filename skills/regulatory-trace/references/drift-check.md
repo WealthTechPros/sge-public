@@ -2,11 +2,11 @@
 
 The automated check that fails/flags when a **regulated** spec has no obligation
 mapping or cites a **retired** obligation. It is the regulatory analogue of the
-Zero-Trust **C11** agent-security scorecard in `/sgd:sgd-align`, built to slot
+Zero-Trust **C11** agent-security scorecard in `/sge:sge-align`, built to slot
 into the same cascade, the same `gaps[]` contract, and the same scoring formula.
 
 Implementation lives in `assets/check-regulatory-trace.sh` (one source of truth
-shared by `/sgd:regulatory-trace review` and `/sgd:sgd-align`).
+shared by `/sge:regulatory-trace review` and `/sge:sge-align`).
 
 ## How it mirrors C11
 
@@ -40,7 +40,7 @@ can't measure.
 
 ## gaps[] record (Step 1 contract, identical shape to C1–C11)
 
-Each high/medium finding becomes one cascade gap so `/sgd:sgd-align` can turn it
+Each high/medium finding becomes one cascade gap so `/sge:sge-align` can turn it
 into a tracked GitHub issue with a stable de-dup key:
 
 ```json
@@ -53,8 +53,8 @@ into a tracked GitHub issue with a stable de-dup key:
   "found": "no `regulatory:` block at audited SHA",
   "severity": "high",
   "proposedIssue": {
-    "title": "[SGD drift] C12 Regulatory traceability: SPEC-061 has no obligation mapping",
-    "body": "...<!-- sgd-drift-key: C12:SPEC-061 -->"
+    "title": "[SGE drift] C12 Regulatory traceability: SPEC-061 has no obligation mapping",
+    "body": "...<!-- sge-drift-key: C12:SPEC-061 -->"
   }
 }
 ```
@@ -62,17 +62,17 @@ into a tracked GitHub issue with a stable de-dup key:
 The `key` is `C12:<SPEC-NNN>` for coverage/retired/vocabulary gaps and
 `C12:orphan:<OBLIGATION-ID>` for RT-5 — stable across runs for idempotent dedupe.
 
-## Slotting into sgd-align's scoring
+## Slotting into sge-align's scoring
 
 C12 is added to the cascade table **after C11**, numbered C12 so C1–C11
-`sgd-drift-key`s stay stable (the same "never renumber" rule the file states for
+`sge-drift-key`s stay stable (the same "never renumber" rule the file states for
 C10/C11). Concretely:
 
 1. **Cascade table (Step 1):** add the row
    `| C12 | Regulatory traceability (regulated) | a spec under a `regulated` capability lacks an `fca_obligations` mapping, or a mapping cites a retired obligation | C12 / regulatory-trace |`.
 2. **Mechanism (Step 1 "Mapping & scoring"):** add a C12 paragraph —
    *"Run `bash ${CLAUDE_PLUGIN_ROOT}/skills/regulatory-trace/assets/check-regulatory-trace.sh`
-   (or `/sgd:regulatory-trace review`) as a forked read-only subagent and consume its
+   (or `/sge:regulatory-trace review`) as a forked read-only subagent and consume its
    JSON. `status: na` → C12 excluded (no regulated capability). `pass`/`fail` from the
    `high` count. A missing or unparsable obligations catalogue is a high
    `convention-unknown` finding and `status: fail` — never a silent pass."*
@@ -103,14 +103,14 @@ C10/C11). Concretely:
    ```
 
 **Standalone mode parity:** just as `--dimension agent-security` runs only C11,
-`/sgd:sgd-align --dimension regulatory` (proposed in ADR-0002) would run only C12
+`/sge:sge-align --dimension regulatory` (proposed in ADR-0002) would run only C12
 and emit the `regulatoryTraceability` block — the fast path for an FCA / client-DD
-re-assessment. Until that flag lands, `/sgd:regulatory-trace review` is the
+re-assessment. Until that flag lands, `/sge:regulatory-trace review` is the
 standalone entry point and emits the same JSON.
 
 ## Why a drift check and not a hard gate
 
-Like all of `/sgd:sgd-align`, C12 is **advisory-first**: it raises tracked issues,
+Like all of `/sge:sge-align`, C12 is **advisory-first**: it raises tracked issues,
 it never blocks a PR. A regulated spec shipping without a mapping is *drift to fix*,
 surfaced as work — not a merge block that would tempt a `--no-verify` bypass. The
 hard merge gate stays the existing `pr-reviewed` label; C12 feeds the Audit Score coherence

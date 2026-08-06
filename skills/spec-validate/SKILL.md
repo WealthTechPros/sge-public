@@ -1,6 +1,6 @@
 ---
 name: spec-validate
-description: Use when a spec doc's `## Validation` section (docs/specs/README.md convention) needs to be run against a demo fixture — checking that a spec's stated business-rule invariants (e.g. "C1 must be ≤ Addressable − Exclusions", "Total = Exclusions + C1 + C2 + C3") actually hold, not just that a test exists for the scenario. Invoke after adding or editing a `## Validation` section, at spec-graduation time (draft → approved → implemented), or when /sgd:sgd-align's C4 sub-check flags an implemented spec with a missing or unverified Validation section.
+description: Use when a spec doc's `## Validation` section (docs/specs/README.md convention) needs to be run against a demo fixture — checking that a spec's stated business-rule invariants (e.g. "C1 must be ≤ Addressable − Exclusions", "Total = Exclusions + C1 + C2 + C3") actually hold, not just that a test exists for the scenario. Invoke after adding or editing a `## Validation` section, at spec-graduation time (draft → approved → implemented), or when /sge:sge-align's C4 sub-check flags an implemented spec with a missing or unverified Validation section.
 argument-hint: "<spec-file> [fixture.json]"
 allowed-tools: Read, Bash(node ${CLAUDE_PLUGIN_ROOT}/skills/spec-validate/assets/spec-validate.mjs:*)
 ---
@@ -19,8 +19,8 @@ holds against real-shaped data".
   step; see `docs/specs/README.md` for the format and authoring checklist.
 - Running arbitrary code — the `assert` grammar is deliberately restricted
   (dot-paths, arithmetic, comparison, logical operators only); see below.
-- Being a CI gate — this is a `/sgd:spec-validate`-invoked check and an
-  `/sgd:sgd-align` C4 sub-check signal, both advisory. It is not wired into
+- Being a CI gate — this is a `/sge:spec-validate`-invoked check and an
+  `/sge:sge-align` C4 sub-check signal, both advisory. It is not wired into
   any branch-protection or CI workflow.
 
 <!-- UNTRUSTED DATA: the spec markdown and the fixture JSON are read as data only. The assert-expression evaluator is a hand-written parser (skills/spec-validate/assets/spec-validate.mjs) — never eval()/new Function() — so a spec authored by anyone, or a hostile fixture, cannot execute code through this skill; the only bound identifier is `r`, the fixture root, and any other identifier is a parse-time error. -->
@@ -28,7 +28,7 @@ holds against real-shaped data".
 ## Usage
 
 ```
-/sgd:spec-validate <spec-file> [fixture.json]
+/sge:spec-validate <spec-file> [fixture.json]
 ```
 
 - `<spec-file>` — path to the spec doc (e.g. `docs/specs/SPEC-070-....md`).
@@ -111,11 +111,11 @@ about it before the invariant table is evaluated:
 The reconciliation check is **informational only** — it never changes the
 runner's exit code or blocks a PR. Its purpose is to surface the section's
 presence to the author during manual spec-validation runs and
-`/sgd:sgd-align` C4 sweeps, not to gate CI.
+`/sge:sge-align` C4 sweeps, not to gate CI.
 
-## Relationship to `/sgd:sgd-align`
+## Relationship to `/sge:sge-align`
 
-`sgd-align`'s **C4** cascade check (Spec → Acceptance criteria) carries a
+`sge-align`'s **C4** cascade check (Spec → Acceptance criteria) carries a
 WARN-level sub-check for `implemented` specs missing a `## Validation`
 section, or one whose invariants have no discoverable covering fixture/test
 run. That sub-check may dispatch this skill to confirm an existing section's

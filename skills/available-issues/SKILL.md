@@ -1,5 +1,5 @@
 ---
-description: Use when you need a conflict-safe set of open GitHub issues that multiple agents or pipelines can work in parallel without colliding — when /sgd:team-pipeline asks for a work pool, when the user wants to "find issues safe to parallelise", "what can we work on at once", or "pick the next non-conflicting issue", or to surface what is blocked vs ready. With --fleet, aggregates the same conflict-safe, dependency-annotated worklist across every repo in a fleet (a GitHub org or an explicit repo list) for org-wide dispatch. Read-only discovery and analysis; it does not implement issues.
+description: Use when you need a conflict-safe set of open GitHub issues that multiple agents or pipelines can work in parallel without colliding — when /sge:team-pipeline asks for a work pool, when the user wants to "find issues safe to parallelise", "what can we work on at once", or "pick the next non-conflicting issue", or to surface what is blocked vs ready. With --fleet, aggregates the same conflict-safe, dependency-annotated worklist across every repo in a fleet (a GitHub org or an explicit repo list) for org-wide dispatch. Read-only discovery and analysis; it does not implement issues.
 argument-hint: "[--parallel] [--count N] [--setup] [--mode autonomous-next] [--blocking] [--analyze N] [--module <name>] [--milestone <name>] [--repo <owner/name>] [--fleet <org|r1,r2,...>]"
 ---
 
@@ -9,28 +9,28 @@ argument-hint: "[--parallel] [--count N] [--setup] [--mode autonomous-next] [--b
 Discover open GitHub issues that are safe to implement in parallel — claim-free, unblocked, and non-conflicting.
 
 ## Out of scope
-- Implementing issues (delegates to `/sgd:sgd-implement`)
+- Implementing issues (delegates to `/sge:sge-implement`)
 - Creating or editing issue bodies
 - Making any writes unless `--setup` is explicitly passed
 
 Pick open issues that are **safe to work in parallel**. An issue is parallel-safe only if it is not already claimed, not in-flight on a branch or PR, not blocked by an open dependency, and does **not** overlap the files / routes / schema another candidate touches. Issues that *would* collide aren't dropped — they're grouped into **`serialGroups`** so a caller can still pick one per group and run the rest after.
 
-This is the discovery half of `/sgd:team-pipeline`. The pipeline's Phase 1 prefers this skill over a raw `gh issue list` when it ships; the contract below is what it calls (`/sgd:available-issues --parallel --count <pool_size>`). With `--fleet` it is also the discovery half of `/sgd:fleet-dispatch`: one invocation returns a conflict-safe, dependency-annotated worklist spanning N repos (see *Fleet mode*).
+This is the discovery half of `/sge:team-pipeline`. The pipeline's Phase 1 prefers this skill over a raw `gh issue list` when it ships; the contract below is what it calls (`/sge:available-issues --parallel --count <pool_size>`). With `--fleet` it is also the discovery half of `/sge:fleet-dispatch`: one invocation returns a conflict-safe, dependency-annotated worklist spanning N repos (see *Fleet mode*).
 
 ## Usage
 
 ```bash
-/sgd:available-issues                              # rank all ready issues, print conflict report
-/sgd:available-issues --parallel --count 9         # the largest conflict-free set, up to 9 (pipeline contract)
-/sgd:available-issues --mode autonomous-next       # single highest-priority ready issue, machine-readable
-/sgd:available-issues --setup --parallel --count 6 # also create worktrees + claim the chosen set
-/sgd:available-issues --blocking                   # only the blocked issues + what blocks them
-/sgd:available-issues --analyze 218                # deep conflict/dependency analysis of one issue
-/sgd:available-issues --module auth                # scope to module:auth label
-/sgd:available-issues --milestone "v2.0"           # scope to a milestone
-/sgd:available-issues --repo owner/name            # explicit single-repo target (hub/control sessions)
-/sgd:available-issues --fleet my-org --parallel --count 12   # org-wide fleet worklist
-/sgd:available-issues --fleet owner/a,owner/b,owner/c        # explicit fleet list
+/sge:available-issues                              # rank all ready issues, print conflict report
+/sge:available-issues --parallel --count 9         # the largest conflict-free set, up to 9 (pipeline contract)
+/sge:available-issues --mode autonomous-next       # single highest-priority ready issue, machine-readable
+/sge:available-issues --setup --parallel --count 6 # also create worktrees + claim the chosen set
+/sge:available-issues --blocking                   # only the blocked issues + what blocks them
+/sge:available-issues --analyze 218                # deep conflict/dependency analysis of one issue
+/sge:available-issues --module auth                # scope to module:auth label
+/sge:available-issues --milestone "v2.0"           # scope to a milestone
+/sge:available-issues --repo owner/name            # explicit single-repo target (hub/control sessions)
+/sge:available-issues --fleet my-org --parallel --count 12   # org-wide fleet worklist
+/sge:available-issues --fleet owner/a,owner/b,owner/c        # explicit fleet list
 ```
 
 `$ARGUMENTS` parsing:
@@ -58,7 +58,7 @@ Two issues are **parallel-safe together** when working one cannot break or confl
 2. **Dependency gate** — does it depend on an issue that is still open?
 3. **Conflict gate** — does its predicted file / route / schema surface overlap another candidate's?
 
-Never widen a gate to grow the set. A bigger pool that merge-conflicts is worse than a smaller one that lands clean — the same discipline `/sgd:pr-monitor` applies to lanes applies here to the pool.
+Never widen a gate to grow the set. A bigger pool that merge-conflicts is worse than a smaller one that lands clean — the same discipline `/sge:pr-monitor` applies to lanes applies here to the pool.
 
 ---
 
@@ -96,11 +96,11 @@ fi
 echo "repo context: $(git remote get-url origin) ($(pwd)) host: ${HOST_KIND}"
 ```
 
-`IR` (`scripts/issue-read.sh`, #1237) is the seam for all issue read operations in this skill: with a normalised JSON output shape so the rest of the skill is backend-agnostic. It resolves **two** independent dimensions — the **ALM (issue-tracker) backend** first (`with-repo-cwd.sh alm` → `github`|`jira`, SPEC-105 S2 #1700: a repo may be GitHub-hosted yet track work in Jira, routing `list`→P1 `list-dispatchable` / `view`→P2 `view-item` / `dependencies`→P7 `item-dependencies` / `dispatch-label`→P9 `dispatch-label-config` through `scripts/jira-adapter.sh`), then the **git host** (`gh` for GitHub, `scripts/forgejo-adapter.sh` for Forgejo/Gitea). `SGD_ALM_BACKEND` unset keeps the GitHub path byte-identical; an unrecognised value fails loud (DR1) — never a silent GitHub fallback. A Jira backend also needs `SGD_JIRA_PROJECT` (the project P1 enumerates) and the jira-adapter's credential/host-allow-list env.
+`IR` (`scripts/issue-read.sh`, #1237) is the seam for all issue read operations in this skill: with a normalised JSON output shape so the rest of the skill is backend-agnostic. It resolves **two** independent dimensions — the **ALM (issue-tracker) backend** first (`with-repo-cwd.sh alm` → `github`|`jira`, SPEC-105 S2 #1700: a repo may be GitHub-hosted yet track work in Jira, routing `list`→P1 `list-dispatchable` / `view`→P2 `view-item` / `dependencies`→P7 `item-dependencies` / `dispatch-label`→P9 `dispatch-label-config` through `scripts/jira-adapter.sh`), then the **git host** (`gh` for GitHub, `scripts/forgejo-adapter.sh` for Forgejo/Gitea). `SGE_ALM_BACKEND` unset keeps the GitHub path byte-identical; an unrecognised value fails loud (DR1) — never a silent GitHub fallback. A Jira backend also needs `SGE_JIRA_PROJECT` (the project P1 enumerates) and the jira-adapter's credential/host-allow-list env.
 
 The helper verifies the checkout's `origin` actually matches the requested repo (a directory with the right name but the wrong origin is rejected) and refuses — with an actionable error — rather than proceeding in the ambient directory. Announce the resolved context once so the caller can catch a wrong-repo invocation immediately. Every `gh`/`git` snippet in the phases below assumes this entry sequence has just run in the same shell call.
 
-Read the repo's `CLAUDE.md` for the **spec/feature artefact globs** (used to tell a spec-only issue's diff surface from a code change — same resolution `/sgd:pr-monitor` does for spec-only PRs; do **not** hardcode a glob, fall back to `features/**`, `docs/**` only if `CLAUDE.md` is silent) and the **module-label convention** if one exists.
+Read the repo's `CLAUDE.md` for the **spec/feature artefact globs** (used to tell a spec-only issue's diff surface from a code change — same resolution `/sge:pr-monitor` does for spec-only PRs; do **not** hardcode a glob, fall back to `features/**`, `docs/**` only if `CLAUDE.md` is silent) and the **module-label convention** if one exists.
 
 This skill is **read-only** unless `--setup` is given. It never edits issue bodies, never comments, never pushes.
 
@@ -112,19 +112,19 @@ This skill is **read-only** unless `--setup` is given. It never edits issue bodi
 
 ### Dispatch-label gate
 
-Resolve the dispatch-label name via the port — `"$IR" dispatch-label` returns the repo-configurable quality-label name, backend-agnostic (GitHub: reads `dispatch-label:` from CLAUDE.md; Jira: reads `SGD_DISPATCH_LABEL`, default `sgd-ready`, DP2). When declared the value is the **quality-label name** — only issues carrying that label enter the ready pool; unlabelled issues are never dispatchable and are surfaced separately as "awaiting quality label" so the caller knows they exist but won't be picked. When not declared, no label filter is applied and the current behaviour is preserved (backwards-compatible).
+Resolve the dispatch-label name via the port — `"$IR" dispatch-label` returns the repo-configurable quality-label name, backend-agnostic (GitHub: reads `dispatch-label:` from CLAUDE.md; Jira: reads `SGE_DISPATCH_LABEL`, default `sge-ready`, DP2). When declared the value is the **quality-label name** — only issues carrying that label enter the ready pool; unlabelled issues are never dispatchable and are surfaced separately as "awaiting quality label" so the caller knows they exist but won't be picked. When not declared, no label filter is applied and the current behaviour is preserved (backwards-compatible).
 
 #### The `orchestrator-only` exclusion (quality-confirmed ≠ worker-dispatchable)
 
 A `dispatch-label` says an issue's build quality is confirmed. It does **not** say an autonomous worker can safely build it. Some quality-confirmed issues are structurally out of a worker's reach: changes to infrastructure-as-code, CI workflows, branch protection, Pulumi/cloud state, live-host operations, or secrets provisioning — surfaces where an unattended agent must never act, either because the change is a control the swarm depends on or because applying it is a guarded human/orchestrator step.
 
-The **`orchestrator-only`** label encodes exactly that bit. It is orthogonal to the quality label: an issue may carry *both* `sgd-ready` and `orchestrator-only` — meaning "ready, but the orchestrator (or a human), not a worker, builds it." Discovery **always** excludes `orchestrator-only` from the worker ready pool, regardless of whether a `dispatch-label` is declared, and surfaces those issues in a separate "orchestrator queue" report so they are visible, not silently dropped.
+The **`orchestrator-only`** label encodes exactly that bit. It is orthogonal to the quality label: an issue may carry *both* `sge-ready` and `orchestrator-only` — meaning "ready, but the orchestrator (or a human), not a worker, builds it." Discovery **always** excludes `orchestrator-only` from the worker ready pool, regardless of whether a `dispatch-label` is declared, and surfaces those issues in a separate "orchestrator queue" report so they are visible, not silently dropped.
 
 This replaces the fragile prior practice of encoding the exclusion as prose in a worker brief ("never touch infra/…") — a rule a worker had to re-derive by inspecting each issue's likely diff surface. Making it a label means the exclusion is declared on the issue, auditable at a glance, and enforced mechanically by the same claim-gate query, so "why was this ready issue never picked up?" is answerable from the issue itself.
 
 #### Routing verdict labels (triage exclusions)
 
-Routing verdict labels — `needs-human`, `needs-decision`, `superseded`, plus `needs-decomposition` for oversized issues — are applied by `/sgd:build-ready-audit` (Step 3R) to issues that are not worker-dispatchable for a specific, recorded reason. Discovery excludes all four from the ready pool alongside `orchestrator-only` and `blocked`. Unlike `orchestrator-only` (which is set at authoring time), verdict labels are set by the triage/audit sweep and can be cleared when the blocking condition resolves — e.g. a `needs-decision` issue is re-triaged as `sgd-ready` once the decision is recorded.
+Routing verdict labels — `needs-human`, `needs-decision`, `superseded`, plus `needs-decomposition` for oversized issues — are applied by `/sge:build-ready-audit` (Step 3R) to issues that are not worker-dispatchable for a specific, recorded reason. Discovery excludes all four from the ready pool alongside `orchestrator-only` and `blocked`. Unlike `orchestrator-only` (which is set at authoring time), verdict labels are set by the triage/audit sweep and can be cleared when the blocking condition resolves — e.g. a `needs-decision` issue is re-triaged as `sge-ready` once the decision is recorded.
 
 `needs-human` is dual-use: an auto-merge hold on a PR (SPEC-071, hold-gate), this triage verdict on an issue. No collision — hold consumers read PR labels, the audit writes issue labels.
 
@@ -141,7 +141,7 @@ if ! DISPATCH_LABEL=$("$IR" dispatch-label 2>&1); then
 fi
 ```
 
-Build the candidate set from open issues that **no one has claimed**. The lock label is the same durable, cross-agent mutex `/sgd:team-pipeline` uses — `agent-lock` — so discovery and the pipeline agree on what is taken without a shared state file.
+Build the candidate set from open issues that **no one has claimed**. The lock label is the same durable, cross-agent mutex `/sge:team-pipeline` uses — `agent-lock` — so discovery and the pipeline agree on what is taken without a shared state file.
 
 When a dispatch label is declared, add it as an explicit `--label` filter so only quality-labelled issues enter the claim-gate query. Fetch unlabelled issues in a second, read-only pass for the "awaiting quality label" report:
 
@@ -209,14 +209,14 @@ Apply optional scope filters before ranking:
 # --milestone <M>   ->  add  --milestone "<M>"
 ```
 
-Then drop anything **in-flight on a branch or PR** — an issue with live work is claimed even if its label was never applied (a hand-started branch, a crashed agent that never released its lock). This mirrors `/sgd:pr-monitor`'s "is there already a PR for this branch" check:
+Then drop anything **in-flight on a branch or PR** — an issue with live work is claimed even if its label was never applied (a hand-started branch, a crashed agent that never released its lock). This mirrors `/sge:pr-monitor`'s "is there already a PR for this branch" check:
 
 ```bash
 in_flight() {
   local n=$1
   # open PR that closes the issue, or a branch named for it
   gh pr list --state open --search "linked:issue $n" --json number -q '.[0].number' 2>/dev/null | grep -q . && return 0
-  git ls-remote --heads origin 2>/dev/null | grep -qE "refs/heads/(feat|fix|chore)/(issue-|sgd-)0*${n}([^0-9]|$)" && return 0
+  git ls-remote --heads origin 2>/dev/null | grep -qE "refs/heads/(feat|fix|chore)/(issue-|sge-)0*${n}([^0-9]|$)" && return 0
   return 1
 }
 ```
@@ -257,7 +257,7 @@ A blocked candidate moves to the **blocked list** (its blockers recorded), not t
 
 An issue can be **tracked** in this repo but **executed** in another — its
 worktree, `agent-lock`, and PR belong in the execution repo while status/labels
-stay on the tracking issue (e.g. `sgd#798`'s deliverable lived in
+stay on the tracking issue (e.g. `sge#798`'s deliverable lived in
 `client-onboarding`). Resolve each candidate's execution repo from the
 structured `Repo:` / `execution-repo:` body field — parsed via the shared
 SPEC-057 helper, **not** hand-rolled — passing the current repo as the tracking
@@ -335,9 +335,9 @@ Serial groups:
   group-2: #240, #241, #245 (shared migration: orders table)
 Blocked:
   #233  ← depends on #210 (open)
-Orchestrator queue (sgd-ready + orchestrator-only):
+Orchestrator queue (sge-ready + orchestrator-only):
   #252 "governance posture: 1 control drifted"  (infra/branch-protection — not worker-safe)
-Awaiting quality label (sgd-ready):
+Awaiting quality label (sge-ready):
   #250 "feat: add export endpoint"    (not yet quality-labelled — not dispatchable)
 ```
 
@@ -357,7 +357,7 @@ Awaiting quality label (sgd-ready):
 
 `orchestratorOnly` lists quality-confirmed issues excluded from the worker ready pool by the `orchestrator-only` label (always applied, label-gate or not). Like `awaitingQualityLabel` it is informational and never in `parallelSafe` — but the distinction matters: an `awaitingQualityLabel` issue is *not yet ready*, whereas an `orchestratorOnly` issue *is* ready and simply must be built by the orchestrator or a human, not an autonomous worker.
 
-`parallelSafe` is what `/sgd:team-pipeline` consumes as its work queue; it holds at most `--count` issues and is guaranteed pairwise conflict-free. The bare-number shape is **unchanged** (single-repo back-compat). `executionRepos` (Phase 2R, additive) maps issue number → its `executionRepo` **only for candidates that execute in a different repo than this run's tracking repo** — the signal `/sgd:team-pipeline` / `/sgd:fleet-dispatch` use to create the worktree / `agent-lock` / PR in the execution repo. An issue absent from the map executes in the tracking repo (the common case).
+`parallelSafe` is what `/sge:team-pipeline` consumes as its work queue; it holds at most `--count` issues and is guaranteed pairwise conflict-free. The bare-number shape is **unchanged** (single-repo back-compat). `executionRepos` (Phase 2R, additive) maps issue number → its `executionRepo` **only for candidates that execute in a different repo than this run's tracking repo** — the signal `/sge:team-pipeline` / `/sge:fleet-dispatch` use to create the worktree / `agent-lock` / PR in the execution repo. An issue absent from the map executes in the tracking repo (the common case).
 
 ### `--mode autonomous-next`
 
@@ -377,7 +377,7 @@ The inverse view — every blocked candidate, its blockers, and whether each blo
 
 ## Fleet mode (`--fleet`) — org-wide worklist
 
-One invocation → one conflict-safe, dependency-annotated worklist spanning every repo in the fleet. This section's output shape is the **discovery contract consumed by `/sgd:fleet-dispatch`**.
+One invocation → one conflict-safe, dependency-annotated worklist spanning every repo in the fleet. This section's output shape is the **discovery contract consumed by `/sge:fleet-dispatch`**.
 
 ### Fleet membership — from the argument only
 
@@ -411,9 +411,9 @@ done
 - **Ranking:** Phase 4's strict-priority order applied across the aggregate; cross-repo ties break by repo slug (lexicographic), then lowest issue number — deterministic, same input → same worklist.
 - **`--count`** caps the **aggregate** parallel set, not each repo's share.
 
-### Fleet output — the `/sgd:fleet-dispatch` discovery contract
+### Fleet output — the `/sge:fleet-dispatch` discovery contract
 
-Every entry is **repo-qualified** (the single-repo shapes above are unchanged — bare-number arrays — so `/sgd:team-pipeline` keeps parsing them):
+Every entry is **repo-qualified** (the single-repo shapes above are unchanged — bare-number arrays — so `/sge:team-pipeline` keeps parsing them):
 
 ```
 Fleet worklist (3 repos; 4 parallel-safe of 9 ready):
@@ -440,7 +440,7 @@ Blocked:
 }
 ```
 
-Contract guarantees for the consumer (`/sgd:fleet-dispatch`):
+Contract guarantees for the consumer (`/sge:fleet-dispatch`):
 
 - `parallelSafe` is pairwise conflict-free **and** each entry was unclaimed/unblocked in its own repo at derivation time;
 - `blocked[].blockedBy` numbers are repo-local to `blocked[].repo`;
@@ -450,7 +450,7 @@ Contract guarantees for the consumer (`/sgd:fleet-dispatch`):
 ### Flag interactions under `--fleet`
 
 - `--mode autonomous-next` → exactly one entry, with a `"repo"` field: `{ "repo": "owner/a", "issue": 218, "priority": "high", "reason": "…" }` (or `{ "repo": null, "issue": null, "reason": "…" }` when the fleet is drained).
-- `--setup` → **refused** (exit with an error). Claiming and worktree creation across repos belongs to the consumer — `/sgd:fleet-dispatch` owns the cross-repo claim lifecycle.
+- `--setup` → **refused** (exit with an error). Claiming and worktree creation across repos belongs to the consumer — `/sge:fleet-dispatch` owns the cross-repo claim lifecycle.
 - `--analyze N` → refused (issue numbers are repo-local); use `--repo <owner/name> --analyze N` instead.
 - `--module` / `--milestone` → applied per repo, same label/milestone name in each.
 
@@ -460,14 +460,14 @@ Contract guarantees for the consumer (`/sgd:fleet-dispatch`):
 
 > Single-repo only — `--setup` is refused under `--fleet` (see *Fleet mode*).
 
-`--setup` turns discovery into action for the selected set — it **claims** each chosen issue and creates its worktree, exactly the way `/sgd:team-pipeline` Phase 3c does, so the two are interchangeable and never double-claim. The in-repo `.worktrees/issue-N` path below is team-pipeline's documented exception to the canonical sibling `../<repo>-worktrees/<purpose>-<id>` layout — see [`worktrees`](../worktrees/SKILL.md):
+`--setup` turns discovery into action for the selected set — it **claims** each chosen issue and creates its worktree, exactly the way `/sge:team-pipeline` Phase 3c does, so the two are interchangeable and never double-claim. The in-repo `.worktrees/issue-N` path below is team-pipeline's documented exception to the canonical sibling `../<repo>-worktrees/<purpose>-<id>` layout — see [`worktrees`](../worktrees/SKILL.md):
 
 ```bash
 gh label create "agent-lock" --color "D93F0B" \
   --description "Issue claimed by a pipeline agent" 2>/dev/null || true
 
 WORKSPACE_ROOT=$(git rev-parse --show-toplevel)
-BRANCH_PREFIX="${SGD_BRANCH_PREFIX:-fix/issue-}"   # default preserves fix/issue-<N>
+BRANCH_PREFIX="${SGE_BRANCH_PREFIX:-fix/issue-}"   # default preserves fix/issue-<N>
 for ISSUE in $PARALLEL_SAFE; do
   # claim is the mutex — if the label add loses a race, skip and re-derive next run
   gh issue edit "$ISSUE" --add-label "agent-lock" 2>/dev/null \
@@ -478,15 +478,15 @@ for ISSUE in $PARALLEL_SAFE; do
 done
 ```
 
-The branch prefix is `SGD_BRANCH_PREFIX` (default `fix/issue-`, so existing behaviour is unchanged when unset). Set `SGD_BRANCH_PREFIX=claude/issue-` for [Claude Code Routine](https://docs.claude.com/en/docs/claude-code/routines)-triggered runs so the Anthropic-hosted sandbox's default `claude/`-only branch-push guardrail stays intact; leave it unset for normal interactive, local, or headless use.
+The branch prefix is `SGE_BRANCH_PREFIX` (default `fix/issue-`, so existing behaviour is unchanged when unset). Set `SGE_BRANCH_PREFIX=claude/issue-` for [Claude Code Routine](https://docs.claude.com/en/docs/claude-code/routines)-triggered runs so the Anthropic-hosted sandbox's default `claude/`-only branch-push guardrail stays intact; leave it unset for normal interactive, local, or headless use.
 
-Claiming with the label **before** handing the set out closes the gap where two concurrent discovery runs pick the same issue. Without `--setup`, this skill claims nothing — the caller (or `/sgd:team-pipeline`) owns the claim.
+Claiming with the label **before** handing the set out closes the gap where two concurrent discovery runs pick the same issue. Without `--setup`, this skill claims nothing — the caller (or `/sge:team-pipeline`) owns the claim.
 
 ---
 
 ## Running across sessions
 
-The ready pool is derived **live** every run from open issues, the `agent-lock` mutex, open branches and PRs, and dependency state — there is no remembered queue. That makes re-entry idempotent: a fresh `/sgd:available-issues` after a blocker closes, a PR merges, or a lock releases just produces the now-correct set. For an autonomous picker, wrap `--mode autonomous-next` in a [recurring loop](../loops/SKILL.md#d-recurring--cross-session-loop) (`/loop <interval> /sgd:available-issues --mode autonomous-next`) and stop when it emits `"issue": null`.
+The ready pool is derived **live** every run from open issues, the `agent-lock` mutex, open branches and PRs, and dependency state — there is no remembered queue. That makes re-entry idempotent: a fresh `/sge:available-issues` after a blocker closes, a PR merges, or a lock releases just produces the now-correct set. For an autonomous picker, wrap `--mode autonomous-next` in a [recurring loop](../loops/SKILL.md#d-recurring--cross-session-loop) (`/loop <interval> /sge:available-issues --mode autonomous-next`) and stop when it emits `"issue": null`.
 
 ---
 
@@ -500,12 +500,12 @@ The ready pool is derived **live** every run from open issues, the `agent-lock` 
 
 ## Related commands
 
-- `/sgd:issue-loop` — the serial, queue-empty-bounded drain: the consumer `--mode autonomous-next` was designed for. It calls this skill once per cycle for its next safe job and stops cleanly on `{"issue": null}`.
-- `/sgd:team-pipeline` — the parallel orchestrator that consumes `parallelSafe` as its work queue.
-- `/sgd:fleet-dispatch` — the org-wide orchestrator that consumes the `--fleet` worklist (repo-qualified contract above) and owns cross-repo claiming.
-- `/sgd:sgd-implement [N]` — implement one selected issue end-to-end.
-- `/sgd:pr-monitor` — shepherds the PRs the pipeline opens from this set.
-- `/sgd:tidy-worktrees` — cleans up the worktrees `--setup` creates once their PRs land.
+- `/sge:issue-loop` — the serial, queue-empty-bounded drain: the consumer `--mode autonomous-next` was designed for. It calls this skill once per cycle for its next safe job and stops cleanly on `{"issue": null}`.
+- `/sge:team-pipeline` — the parallel orchestrator that consumes `parallelSafe` as its work queue.
+- `/sge:fleet-dispatch` — the org-wide orchestrator that consumes the `--fleet` worklist (repo-qualified contract above) and owns cross-repo claiming.
+- `/sge:sge-implement [N]` — implement one selected issue end-to-end.
+- `/sge:pr-monitor` — shepherds the PRs the pipeline opens from this set.
+- `/sge:tidy-worktrees` — cleans up the worktrees `--setup` creates once their PRs land.
 
 ## Shared conventions
 

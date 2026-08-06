@@ -23,7 +23,7 @@ removed from the **tracking** issue.
 
 ```bash
 git -C .worktrees/issue-<N> log --oneline -5
-gh pr list --head "${SGD_BRANCH_PREFIX:-fix/issue-}<N>"
+gh pr list --head "${SGE_BRANCH_PREFIX:-fix/issue-}<N>"
 ```
 
 **"CI gate blocking"** — Too many open PRs. Drain the queue:
@@ -57,14 +57,14 @@ suite has passed on CI.** Concretely, for the pipeline this means:
 
 1. **PR monitor agent** — the `pr-monitor` agent running in Phase 2 must detect
    carve-out PRs at lane-assignment time (using `is_blast_radius_pr` from
-   Appendix A) and dispatch `/sgd:pr-fix` with a note that the full suite must
+   Appendix A) and dispatch `/sge:pr-fix` with a note that the full suite must
    be run. Gate 3 (CI green) for a carve-out lane is only satisfied by a
    full-suite run, not a partial one.
 
 2. **Health monitor (Phase 4)** — when reading a completion file
    (`/tmp/team-pipeline-agent-<N>.json`) for a carve-out PR, check that
    `carve_out: true` appears in the associated `pr-fix-report`. If it is absent,
-   do **not** treat the PR as green — re-dispatch `/sgd:pr-fix` and note the
+   do **not** treat the PR as green — re-dispatch `/sge:pr-fix` and note the
    requirement.
 
 3. **Review agent (Phase 3d)** — carve-out PRs carry higher risk. The review

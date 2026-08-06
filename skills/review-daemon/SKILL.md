@@ -1,17 +1,17 @@
 ---
-description: "Operational reference for the SGD review daemon (SPEC-090 Layer 1). Read before operating, configuring, or extending the daemon or its claim-mutex protocol."
+description: "Operational reference for the SGE review daemon (SPEC-090 Layer 1). Read before operating, configuring, or extending the daemon or its claim-mutex protocol."
 ---
 
 # Review Daemon — Operator Reference
 
 The **review daemon** (`services/review-daemon-poc/`) polls a fleet of repos for
-open, non-draft PRs and dispatches `/sgd:pr-review --no-automerge` against eligible
+open, non-draft PRs and dispatches `/sge:pr-review --no-automerge` against eligible
 candidates.  All code-host access goes through the provider-agnostic `HostPort`
 (`hostport.py`) so the daemon core is decoupled from GitHub specifics.
 
 This document covers the **claim-mutex protocol** (issue #1312) in full — the
 mechanism that prevents double-review races across daemon pods, interactive
-orchestrators, and sgd-implement Phase-7 lanes.
+orchestrators, and sge-implement Phase-7 lanes.
 
 ---
 
@@ -23,14 +23,14 @@ declares the TTL so any other actor can determine liveness without a timeline AP
 call.
 
 ```
-```sgd-claim-metadata
+```sge-claim-metadata
 {"owner":"<agent-id>","claimedAt":"<ISO-8601-UTC>","ttl":900}
 ```
 ```
 
 | Field | Type | Description |
 |---|---|---|
-| `owner` | string | The claiming agent's identity.  Review daemon: `REVIEW_DAEMON_AGENT_ID` env var or hostname.  Interactive: `SGD_AGENT_ID` env var or hostname. |
+| `owner` | string | The claiming agent's identity.  Review daemon: `REVIEW_DAEMON_AGENT_ID` env var or hostname.  Interactive: `SGE_AGENT_ID` env var or hostname. |
 | `claimedAt` | ISO-8601 string | UTC timestamp when the claim was placed. |
 | `ttl` | integer | Seconds before the claim is considered stale **if no heartbeat was posted**.  Default 900 (15 min). |
 
@@ -44,7 +44,7 @@ The stale-claim sweep (`list_stale_reclaimable_changes`) treats a claim as
 **orphaned** (reclaimable) when **both** conditions hold:
 
 1. `claimedAt + ttl` has elapsed (the base TTL window).
-2. No `sgd-claim-heartbeat` comment was posted within the last `ttl` seconds.
+2. No `sge-claim-heartbeat` comment was posted within the last `ttl` seconds.
 
 A heartbeat comment (see below) posted by the daemon during a long dispatch
 extends the effective window, so a review that legitimately takes > 15 minutes is
@@ -53,7 +53,7 @@ extends the effective window, so a review that legitimately takes > 15 minutes i
 ### Heartbeat comment format
 
 ```
-```sgd-claim-heartbeat
+```sge-claim-heartbeat
 {"owner":"<agent-id>","at":"<ISO-8601-UTC>"}
 ```
 ```
@@ -110,7 +110,7 @@ window: milliseconds (label read → label write gap).
 ## Draft-skip rule
 
 The daemon **never** claims or dispatches a draft PR.  Drafts signal lane
-ownership: an `sgd-implement` Phase-7 or similar pipeline is the exclusive owner
+ownership: an `sge-implement` Phase-7 or similar pipeline is the exclusive owner
 and runs its own review (issue #699, SPEC-090 §2.2).
 
 The skip is applied at two points:
@@ -135,8 +135,8 @@ pr-labels.sh start-review <PR> --force-claim
 
 # Daemon pre-claim (pre-dispatched by the daemon's force-claim path):
 # The daemon already pre-claims before dispatching; this flag is for the
-# dispatched /sgd:pr-review invocation when the daemon pre-claimed first.
-/sgd:pr-review <PR> --no-automerge   # prompt carries --force-claim authorisation
+# dispatched /sge:pr-review invocation when the daemon pre-claimed first.
+/sge:pr-review <PR> --no-automerge   # prompt carries --force-claim authorisation
 ```
 
 **When to use:**
@@ -155,8 +155,8 @@ cause (heartbeat posting failure, unexpectedly long reviews) should be fixed.
 | Variable | Default | Effect |
 |---|---|---|
 | `REVIEW_DAEMON_AGENT_ID` | `$(hostname)` | Owner field in claim comments posted by the daemon. Set per pod for fleet-wide identity. |
-| `SGD_AGENT_ID` | `$(hostname)` | Owner field in claim comments posted by `pr-labels.sh` (interactive reviews). |
-| `SGD_REVIEW_CLAIM_TTL` | `900` | Claim comment TTL in seconds (used by `pr-labels.sh`). |
+| `SGE_AGENT_ID` | `$(hostname)` | Owner field in claim comments posted by `pr-labels.sh` (interactive reviews). |
+| `SGE_REVIEW_CLAIM_TTL` | `900` | Claim comment TTL in seconds (used by `pr-labels.sh`). |
 | `REVIEW_DAEMON_CLAIM_TTL_SECONDS` | `2700` | Daemon's fallback reclaim TTL for label-only (pre-#1312) claims. |
 
 ---
@@ -238,13 +238,13 @@ no extra REST calls — same behaviour as concurrency=1 on a solo queue.
 ## Pre-PR review and the daemon are complementary (issue #1324)
 
 The implement-lane's Phase-5 independent review (pre-PR, fresh-context
-`/sgd:sgd-review`) is **not duplicated** by the daemon's merge-gate review — they
+`/sge:sge-review`) is **not duplicated** by the daemon's merge-gate review — they
 serve different roles and should both run:
 
 | Layer | When | Guards against |
 |-------|------|----------------|
-| Phase 5 (`/sgd:sgd-review`, pre-PR) | Before the draft lands in the merge queue | Wasted daemon dispatch on a doomed PR |
-| Daemon (`/sgd:pr-review`, merge-gate) | After the PR is ready | Cross-author review; gate label + auto-merge |
+| Phase 5 (`/sge:sge-review`, pre-PR) | Before the draft lands in the merge queue | Wasted daemon dispatch on a doomed PR |
+| Daemon (`/sge:pr-review`, merge-gate) | After the PR is ready | Cross-author review; gate label + auto-merge |
 
 Never suppress Phase 5 on daemon-covered repos. Evidence: on client-onboarding#2389,
 Phase 5 caught 2 CI-confirmed blockers before the daemon pod fired, preventing a

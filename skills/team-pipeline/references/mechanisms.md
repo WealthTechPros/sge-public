@@ -60,7 +60,7 @@ review-lane dispatch on each. A candidate is flushed only if **both** gates pass
    closed issue is presumed landed, not lost. This gate catches the
    *multi-commit* squash false-positive that slips past gate 1.
 
-Everything failing either gate is **reported as a `/sgd:tidy-worktrees`
+Everything failing either gate is **reported as a `/sge:tidy-worktrees`
 candidate, never pushed**. The classification is a bundled script (#729
 script-extraction pattern) so the gate logic is script-anchored and
 regression-tested (`skills/tests/team-pipeline-reconcile-flush.test.sh`). It
@@ -78,7 +78,7 @@ report=$(BASE=origin/main WORKTREE_BASE="$WORKTREE_BASE" SIBLING_BASE="$SIBLING_
   bash "${CLAUDE_PLUGIN_ROOT}/skills/team-pipeline/assets/reconcile-flush.sh")
 
 # Push + draft-PR the decision:"flush" candidates only; report the rest as
-# /sgd:tidy-worktrees hand-off candidates. (node is used to read the JSON — it
+# /sge:tidy-worktrees hand-off candidates. (node is used to read the JSON — it
 # is always present; jq is not guaranteed on Windows Git Bash agents.)
 printf '%s' "$report" \
   | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{for(const c of JSON.parse(s).candidates)console.log([c.decision,c.branch,c.issue,c.path,c.reason].join("\t"))})' \
@@ -107,7 +107,7 @@ printf '%s' "$report" \
 
 ```bash
 # $IR (scripts/issue-read.sh) is the backend-aware read seam: it routes P1
-# list-dispatchable through the Jira adapter when SGD_ALM_BACKEND=jira and to
+# list-dispatchable through the Jira adapter when SGE_ALM_BACKEND=jira and to
 # `gh` otherwise (byte-identical for GitHub). Never shell `gh issue list`
 # directly here. See references/alm-routing.md.
 # $IW (scripts/issue-write.sh) is the WRITE analogue (SPEC-105 S3): route every
@@ -202,7 +202,7 @@ result as an ordered array in `/tmp/team-pipeline-queue.json`.
 
 > Only run when `QUEUE` contains ≥ 2 issues. Single-issue runs skip this step.
 
-Build the comma-separated issue list and call `/sgd:build-ready-audit` once for
+Build the comma-separated issue list and call `/sge:build-ready-audit` once for
 the whole wave:
 
 ```bash
@@ -211,7 +211,7 @@ ISSUE_LIST=$(cat /tmp/team-pipeline-queue.json \
   | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).join(",")))')
 
 # Batch governance-classify the whole wave in one hop (--skip-governance opt-out)
-BATCH_RESULT=$(/sgd:build-ready-audit "$ISSUE_LIST")
+BATCH_RESULT=$(/sge:build-ready-audit "$ISSUE_LIST")
 
 # Extract the govtraceMap keyed by issue number (string keys)
 GOVTRACE_MAP=$(printf '%s' "$BATCH_RESULT" \
@@ -257,7 +257,7 @@ GOVTRACE_VERDICT=$(node -e "
 Include `GOVTRACE_VERDICT` in the lane Task prompt as:
 
 ```
-SGD_GOVTRACE_VERDICT: ${GOVTRACE_VERDICT}
+SGE_GOVTRACE_VERDICT: ${GOVTRACE_VERDICT}
 ```
 
 (Leave it blank/absent when the batch did not classify this issue — the lane falls
@@ -270,7 +270,7 @@ through to a per-lane fork, which is the correct fallback behaviour.)
    verdict whose issue number does not match its own and falls back to forking, so a
    verdict batched for one issue can never be silently adopted by another lane.
 2. **Blocking verdicts inject as-is, never filtered.** `MATCHES_EXISTING_MODIFIED`,
-   `NOT_SGD_SCOPE`, and any `matchConfidence: "low"` verdict are passed through
+   `NOT_SGE_SCOPE`, and any `matchConfidence: "low"` verdict are passed through
    unchanged; the lane surfaces them (or writes `outcome:"blocked"` headless) before
    writing any code. Only the fork is front-loaded away — the gate is never skipped.
 
@@ -357,7 +357,7 @@ gh issue edit "$ISSUE" --add-label "agent-lock" 2>/dev/null \
 # Worktree + branch in the EXECUTION repo (EXEC_ROOT == WORKSPACE_ROOT for the
 # common same-repo case). Record EXEC_ROOT/EXEC_REPO on the lane's state entry
 # so Phase 4/6 cleanup removes the tree from the right checkout.
-BRANCH_PREFIX="${SGD_BRANCH_PREFIX:-fix/issue-}"   # default preserves fix/issue-<N>
+BRANCH_PREFIX="${SGE_BRANCH_PREFIX:-fix/issue-}"   # default preserves fix/issue-<N>
 git -C "$EXEC_ROOT" worktree add \
   "$EXEC_WT_BASE/issue-${ISSUE}" -b "${BRANCH_PREFIX}${ISSUE}" origin/main
 ```
@@ -411,7 +411,7 @@ for ISSUE in $(active_agent_issues); do
   WORKTREE="$WORKTREE_BASE/issue-${ISSUE}"
   LAST_COMMIT=$(git -C "$WORKTREE" log -1 --format="%cr" 2>/dev/null || echo "no commits")
   LAST_COMMIT_MSG=$(git -C "$WORKTREE" log -1 --format="%s" 2>/dev/null || echo "—")
-  DRAFT_PR=$(gh pr list --head "${SGD_BRANCH_PREFIX:-fix/issue-}${ISSUE}" --json number,isDraft \
+  DRAFT_PR=$(gh pr list --head "${SGE_BRANCH_PREFIX:-fix/issue-}${ISSUE}" --json number,isDraft \
     --jq '.[0] | if . then "#\(.number)(draft=\(.isDraft))" else "no-PR" end' 2>/dev/null)
   AGE_MIN=$(( ( $(date +%s) - AGENT_STARTED_AT[$ISSUE] ) / 60 ))
   echo "[Lane #${ISSUE}] age=${AGE_MIN}m last_commit='${LAST_COMMIT}' pr=${DRAFT_PR} msg='${LAST_COMMIT_MSG}'"
@@ -454,7 +454,7 @@ comment lands on the item; on GitHub `$IW comment` is the same `gh issue comment
 
 ```bash
 "$IW" comment <N> "$(cat <<EOF
-**/sgd:team-pipeline** killed this lane after <M>m with no draft PR
+**/sge:team-pipeline** killed this lane after <M>m with no draft PR
 (time-box=${staleKillMinutes}m).
 
 Recommendation: re-scope — break into a smaller slice or add a file-map
@@ -500,7 +500,7 @@ TRACKING=$("$IR" search "pipeline runs" --state open --limit 1 \
   | jq -r '.[0].number // empty')
 [ -n "$TRACKING" ] || TRACKING=$(JIRA_ADAPTER_ALLOW_CREATE=1 "$IW" create \
   "pipeline runs" \
-  "Rolling log of /sgd:team-pipeline run reports. One comment per run.")
+  "Rolling log of /sge:team-pipeline run reports. One comment per run.")
 "$IW" comment "$TRACKING" "## team-pipeline run ${RUN_ID}
 \`\`\`
 ${PHASE6_REPORT}
@@ -517,16 +517,16 @@ ${PHASE6_REPORT}
 > created every run. P10 `search` (S4) adds the backend-neutral free-text title
 > search this needs, so the rolling log is now genuinely rolling on every backend.
 
-**When `SGD_BACKEND_URL` is set:** additionally POST the report via the same
-snapshot mechanism `/sgd:roi-report` Step 6 uses (reuse its `curl`/auth
+**When `SGE_BACKEND_URL` is set:** additionally POST the report via the same
+snapshot mechanism `/sge:roi-report` Step 6 uses (reuse its `curl`/auth
 pattern), tagging the payload so the backend can tell a pipeline-run snapshot
 apart from an ROI snapshot:
 
 ```bash
-if [ -n "${SGD_BACKEND_URL:-}" ] && [ -n "${SGD_API_TOKEN:-}" ]; then
+if [ -n "${SGE_BACKEND_URL:-}" ] && [ -n "${SGE_API_TOKEN:-}" ]; then
   curl -s -X POST \
-    "${SGD_BACKEND_URL}/api/organizations/${ORG_ID}/token-cost/snapshot" \
-    -H "Authorization: Bearer ${SGD_API_TOKEN}" -H "Content-Type: application/json" \
+    "${SGE_BACKEND_URL}/api/organizations/${ORG_ID}/token-cost/snapshot" \
+    -H "Authorization: Bearer ${SGE_API_TOKEN}" -H "Content-Type: application/json" \
     -d "$(jq -n --arg runId "$RUN_ID" --arg report "$PHASE6_REPORT" \
           '{reportType:"pipeline-run", runId:$runId, report:$report}')" \
     || echo "[Report] snapshot POST failed — the issue-comment copy above is still posted"
@@ -534,7 +534,7 @@ fi
 ```
 
 On failure, do NOT abort — the issue-comment copy is the primary durable record
-(mirrors `/sgd:roi-report`'s "local report is primary" graceful-degradation
+(mirrors `/sge:roi-report`'s "local report is primary" graceful-degradation
 rule).
 
 ---
@@ -542,12 +542,12 @@ rule).
 ## Duration Mode — discover → gate → decompose front end (Phase 1 overlay)
 
 Primary steps (core SKILL.md summarises the decision rule): (1) **Discover** via
-`/sgd:available-issues --parallel --count <pool_size>`; (2) **Reconcile**
+`/sge:available-issues --parallel --count <pool_size>`; (2) **Reconcile**
 (MANDATORY — the Phase 1 reconcile pre-flight, on the candidates); (3) **Gate**
-each candidate through `/sgd:build-ready-audit <issue>` **before any claim** —
+each candidate through `/sge:build-ready-audit <issue>` **before any claim** —
 READY → queue, NOT_READY → drop (record the blocker in `failedIssues`; never
 lock/spawn), TOO_LARGE → decompose; (4) **Decompose** TOO_LARGE via
-`/sgd:decompose-issue`, re-gate each child, merge READY children into the queue
+`/sge:decompose-issue`, re-gate each child, merge READY children into the queue
 (record the parent in `decomposed`; never claim it; dedupe by issue number so a
 relaunch never re-decomposes). **Re-fill** when the queue runs low, but only if
 `time_remaining >= MIN_AGENT_RUNWAY`.
@@ -557,10 +557,10 @@ When the gated front-end tools are unavailable, each step degrades safely:
 1. **Discover** — fallback: the raw Phase 1 `gh issue list` discovery above.
 2. **Reconcile** — unchanged; the Phase 1 reconcile pre-flight always runs on
    the candidates.
-3. **Gate** (`/sgd:build-ready-audit`) — fallback when unavailable: treat
+3. **Gate** (`/sge:build-ready-audit`) — fallback when unavailable: treat
    candidates as READY (the lane's governance-trace gate still runs) and use a
    size heuristic (body length / AC count) to flag TOO_LARGE.
-4. **Decompose** (`/sgd:decompose-issue`) — fallback when unavailable: skip the
+4. **Decompose** (`/sge:decompose-issue`) — fallback when unavailable: skip the
    oversized issue, comment that it needs manual decomposition, add to
    `failedIssues` with reason `too-large-no-decomposer` — never let a lane
    swallow an un-split epic.
@@ -594,7 +594,7 @@ rules that would have resolved the ambiguity at tier (a). See
 
 ## Phase 6 — unattended report sections
 
-When unattended (`SGD_UNATTENDED=1` or `--unattended`), Phase 6 appends two
+When unattended (`SGE_UNATTENDED=1` or `--unattended`), Phase 6 appends two
 sections to `$PHASE6_REPORT` **and** to the machine-readable exit block. Full
 schema, table format and exact JSON shapes are in the canonical
 [`run-report/decision-journal.md`](../../run-report/decision-journal.md); the
@@ -620,7 +620,7 @@ normally instead).
 file-map before re-dispatch. `Blocked (governance)` lists issues the
 governance-trace gate paused (from `governanceBlockedIssues[]`) — **not**
 failures or re-scope candidates; the issue carries the gate's comment; a human
-re-runs `/sgd:sgd-implement <n>` once resolved. `Questions/run` counts
+re-runs `/sge:sge-implement <n>` once resolved. `Questions/run` counts
 SPEC-093 tier-b decisions across all lanes (unattended only; target → 0).
 
 ---
@@ -629,7 +629,7 @@ SPEC-093 tier-b decisions across all lanes (unattended only; target → 0).
 
 ```
 ==============================================
-/sgd:team-pipeline complete
+/sge:team-pipeline complete
 ----------------------------------------------
 Completed : <N> issues -> PRs open
 Reviewed  : <N> PRs approved + undrafted

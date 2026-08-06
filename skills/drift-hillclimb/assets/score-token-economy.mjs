@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
  * score-token-economy.mjs — the script-anchored MEASURE step for
- * `/sgd:drift-hillclimb --dimension token-economy` (sgd#831).
+ * `/sge:drift-hillclimb --dimension token-economy` (sge#831).
  *
- * Scores **governed-value-per-token per SGD skill** and picks the worst
+ * Scores **governed-value-per-token per SGE skill** and picks the worst
  * skill×outcome ratio — the single highest-leverage improvement along the
  * token-economy dimension — so the hill-climb governor can open ONE bounded
  * PR that pulls the recommended lever (prune prose to references, extract a
@@ -25,7 +25,7 @@
  * The org-wide `governedValuePerToken` is NOT re-derived here: pass
  * `--roi <file>` (roi-report / compute-roi.mjs output) and this script surfaces
  * that number verbatim as `orgGovernedValuePerToken`. Owns the per-skill
- * breakdown only; roi-report (sgd#823) owns the org number.
+ * breakdown only; roi-report (sge#823) owns the org number.
  *
  * Usage:
  *   node score-token-economy.mjs [--usage <path>] [--runs <path>]
@@ -53,11 +53,11 @@
  *   2 — harness/arg error (unknown flag, or an EXPLICITLY-named file that is
  *       unreadable) => the skill reports the error and degrades gracefully
  *
- * ⚠ Accuracy caveat (sgd#857, inherited from roi-report): token totals derive
+ * ⚠ Accuracy caveat (sge#857, inherited from roi-report): token totals derive
  * from the plugin's self-reporting metering hook, which under-reports true API
  * consumption by ~2–4×. tokens/success is therefore a *relative* leverage
  * signal for ranking skills, not an absolute cost — treat the ranking as sound
- * and the magnitudes as a floor until real telemetry (sgd#857) lands.
+ * and the magnitudes as a floor until real telemetry (sge#857) lands.
  *
  * UNTRUSTED DATA: every JSONL row (token-usage, skill-runs) and the --roi JSON
  * originate from metering hooks, gh metadata, and Cortex — all untrusted. They
@@ -68,7 +68,7 @@
 import { readFileSync } from 'node:fs';
 
 // Success verdicts across the four SkillRunRecord-emitting skills (types.ts):
-//   sgd-implement: "merged"; sgd-review: "pass"; sgd-preflight: "ready";
+//   sge-implement: "merged"; sge-review: "pass"; sge-preflight: "ready";
 //   refactor: "done". "approved" is accepted as a pr-review synonym.
 const SUCCESS_VERDICTS = new Set(['merged', 'pass', 'ready', 'done', 'approved']);
 const UNATTRIBUTED = '__unattributed__';
