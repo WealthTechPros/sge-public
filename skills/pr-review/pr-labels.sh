@@ -34,7 +34,10 @@
 #                                             holding pr-reviewing (normal claim) or
 #                                             pr-reviewed (re-assert/delta) proceeds.
 #                                             --skip-claim-check bypasses (loud warning).
-#                                             optionally enable squash auto-merge;
+#                                             optionally enable squash auto-merge — skipped
+#                                             when the repo runs its own dedicated auto-merge
+#                                             bot workflow (issue #2079), deferring to it
+#                                             instead; see _repo_has_dedicated_automerge_bot;
 #                                             --expect-head refuses if the head moved
 #                                             since the review — forces a delta re-review;
 #                                             before auto-merge, a 3-way convergence check
@@ -798,6 +801,62 @@ assert_followups_preserved() {
   return 0
 }
 
+# ── Dedicated auto-merge bot detection (issue #2079) ──────────────────────
+# Several WTP repos run their own dedicated "SGD/SGE Auto-Approve & Merge"
+# GitHub Actions workflow (pull_request_target, triggered on the pr-reviewed
+# label) that mints a proper GitHub App token and does its own full
+# approve+merge sequence, attributing the merge to a bot identity. When such
+# a workflow exists, this script's own `gh pr merge --squash --auto` (below)
+# races it: whichever mechanism actually executes the merge determines the
+# audit-trail attribution, and this script's own --auto arm runs under
+# whatever `gh` session is invoking it — the operator's own account in an
+# interactive session, not a bot. Observed live: adviser-mcp#160 merged as
+# the human operator because this script's --auto arm won the race, while
+# adviser-mcp#162 (reviewed moments later, same session) merged cleanly via
+# the bot. Detecting the dedicated workflow and skipping the local arm in
+# that case removes the race at the root; repos without one keep the
+# existing --auto fallback unchanged.
+_repo_has_dedicated_automerge_bot() {
+  local toplevel hit cwd_remote
+  toplevel="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
+  # PR #2081 review follow-up: this function only ever reads the LOCAL
+  # working tree, so if GH_REPO names a different repo than the one CWD is
+  # actually a clone of — the documented "gh-only, no cd" control-session
+  # mode (this skill's own SKILL.md "Target repo" section: "export
+  # GH_REPO=owner/repo for gh-only work; every gh call/script honours it")
+  # — trusting CWD would answer about the WRONG repo. Both directions are
+  # unsafe: a hub session whose own CWD happens to carry the marker
+  # (verified live: both `sge` and `wtp-org` do) would falsely report a bot
+  # for a bot-less target repo, permanently skipping the local --auto arm
+  # and leaving that PR unmerged by anything; the converse falsely reports
+  # no bot and reintroduces the #2079 race for a repo that has one. So when
+  # GH_REPO is set, confirm CWD's own remote actually names that repo before
+  # trusting the local tree; otherwise refuse to answer — fall through to
+  # the pre-existing --auto arm, the same safe direction every other failure
+  # mode below already falls to. A GH_REPO-only session simply doesn't get
+  # this optimisation rather than getting a wrong one; `cd`-based invocation
+  # (the documented preferred mode) is unaffected.
+  if [ -n "${GH_REPO:-}" ]; then
+    cwd_remote="$(git -C "$toplevel" remote get-url origin 2>/dev/null)" || cwd_remote=""
+    case "$cwd_remote" in
+      *"$GH_REPO"*) : ;;
+      *) return 1 ;;
+    esac
+  fi
+  [ -d "$toplevel/.github/workflows" ] || return 1
+  # find, not a shell glob loop: a glob pattern that matches nothing (e.g.
+  # *.yaml when every workflow here is *.yml) errors out under zsh and any
+  # bash with `failglob` set, silently skipping the whole check rather than
+  # just that one pattern — find has no such failure mode. Match on the
+  # workflow's own self-description, not its filename (which varies:
+  # sgd-auto-merge.yml vs sge-auto-merge.yml) — every known instance of this
+  # pattern carries this exact marker comment. `-exec … ; -print -quit`
+  # stops at the first match; grep -l -q keeps it a pure boolean test.
+  hit="$(find "$toplevel/.github/workflows" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) \
+    -exec grep -lq "Standing automation for WealthTech Pros' Model-B autonomous review loop" {} \; -print -quit 2>/dev/null)"
+  [ -n "$hit" ]
+}
+
 # ── Forgejo function overrides (issue #1239) ──────────────────────────────
 # Redefine the gh-calling label helpers for the Forgejo/Gitea REST adapter path.
 # Output contracts (label_status → "reviewing=<bool> reviewed=<bool>",
@@ -1451,6 +1510,13 @@ case "$CMD" in
           echo "PR #$PR: merge request failed — $merge_out" >&2
           echo "PR #$PR: merge not triggered — leaving merge to be done manually"
         fi
+      elif _repo_has_dedicated_automerge_bot; then
+        # issue #2079: this repo already runs its own dedicated Auto-Approve
+        # & Merge bot workflow, which mints a proper GitHub App token and
+        # does its own full approve+merge sequence once pr-reviewed lands.
+        # Arming --auto here too would race it under this session's own gh
+        # identity — skip and defer entirely to the bot.
+        echo "PR #$PR: repo has its own dedicated auto-merge bot workflow (issue #2079) — skipping local --auto arm; the bot will approve+merge once checks are green."
       else
         # --auto queues the merge behind branch protection; it never force-merges.
         # Tolerant: repos without auto-merge fall back to /sge:pr-monitor.

@@ -159,6 +159,13 @@ If you pin:
 If you do not pin, you track `main` and get whatever is current when you
 run `/plugin update sge`. This is the recommended default for most teams.
 
+## Vendor independence and data custody
+
+For client-facing architecture positioning on model-provider independence and
+retained usage custody, see:
+
+- [`vendor-independence-and-data-custody.md`](vendor-independence-and-data-custody.md)
+
 ## Licence
 
 SGE is commercial software. Use is governed by the licence file published
