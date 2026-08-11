@@ -30,12 +30,34 @@ Subscribers must not redistribute the Software or derivative works,
 sublicense it, or make it available to any third party — including as part of
 a hosted or managed service — without WTP's prior written consent.
 
-## 4. Termination
+Subscribers must not embed, bundle, or otherwise integrate the Software or
+derivative works into any other product, platform, or service that is sold,
+licensed, or otherwise made commercially available to third parties. Using
+the Software internally to help design, build, govern, or operate a separate
+product is permitted; the Software (or a derivative of it) being shipped
+inside that product is not, without WTP's prior written consent.
+
+## 4. Ownership of Subscriber output
+
+The Software is a development and governance tool. Specifications, code,
+documentation, and any other work product that a Subscriber's personnel
+create using the Software — including material authored by following SGE's
+operating model and methodology — belong to the Subscriber (or, as between
+the Subscriber and its own clients, whoever the Subscriber's own agreements
+say they belong to). WTP claims no ownership of, and no licence over, that
+output by virtue of it having been produced with the Software.
+
+This section does not extend to the Software itself or to any part of it
+(including WTP's own skill, agent, template, or governance-artefact files)
+that a Subscriber copies, adapts, or configures rather than originally
+authors — those remain WTP's property under Section 1.
+
+## 5. Termination
 
 This licence ends automatically when the relevant subscription or agreement
 lapses or terminates. On termination, all use of the Software must cease.
 
-## 5. No warranty
+## 6. No warranty
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -45,7 +67,7 @@ CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. NOTHING IN THIS
 LICENCE EXCLUDES LIABILITY THAT CANNOT BE EXCLUDED UNDER APPLICABLE LAW.
 
-## 6. Governing law
+## 7. Governing law
 
 This licence is governed by the laws of England and Wales.
 
