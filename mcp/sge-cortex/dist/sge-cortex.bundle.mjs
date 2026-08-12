@@ -3658,7 +3658,12 @@ var require_fast_uri = __commonJS({
     }
     function resolve3(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
-      const resolved = resolveComponent(parse4(baseURI, schemelessOptions), parse4(relativeURI, schemelessOptions), schemelessOptions, true);
+      const { parsed: baseParsed, malformedAuthorityOrPort: baseMalformed } = parseWithStatus(baseURI, schemelessOptions);
+      const { parsed: relativeParsed, malformedAuthorityOrPort: relativeMalformed } = parseWithStatus(relativeURI, schemelessOptions);
+      if (baseMalformed || relativeMalformed) {
+        throw new Error(baseParsed.error || relativeParsed.error || "URI is malformed.");
+      }
+      const resolved = resolveComponent(baseParsed, relativeParsed, schemelessOptions, true);
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
@@ -3784,6 +3789,7 @@ var require_fast_uri = __commonJS({
     }
     var URI_PARSE = /^(?:([^#/:?]+):)?(?:\/\/((?:([^#/?@]*)@)?(\[[^#/?\]]+\]|[^#/:?]*)(?::(\d*))?))?([^#?]*)(?:\?([^#]*))?(?:#((?:.|[\n\r])*))?/u;
     var AUTHORITY_PREFIX = /^(?:[^#/:?]+:)?\/\/([^/?#]*)/;
+    var AUTHORITY_INTRODUCER_REGION = /^(?:[^#/:?]+:)?([/\\\t\n\r]*)/;
     function getParseError(parsed, matches) {
       if (matches[2] !== void 0 && parsed.path && parsed.path[0] !== "/") {
         return 'URI path must start with "/" when authority is present.';
@@ -3817,6 +3823,20 @@ var require_fast_uri = __commonJS({
       if (authorityMatch !== null && authorityMatch[1].indexOf("\\") !== -1) {
         parsed.error = "URI authority must not contain a literal backslash.";
         malformedAuthorityOrPort = true;
+      }
+      const introducerMatch = uri.match(AUTHORITY_INTRODUCER_REGION);
+      if (introducerMatch !== null) {
+        const region = introducerMatch[1];
+        const normalizedRegion = region.replace(/[\t\n\r]/g, "");
+        if (normalizedRegion.length >= 2) {
+          if (normalizedRegion.slice(0, 2) !== "//") {
+            parsed.error = parsed.error || "URI authority must not contain a literal backslash.";
+            malformedAuthorityOrPort = true;
+          } else if (region.length !== normalizedRegion.length) {
+            parsed.error = parsed.error || "URI authority introducer must not contain whitespace.";
+            malformedAuthorityOrPort = true;
+          }
+        }
       }
       const matches = uri.match(URI_PARSE);
       if (matches) {
@@ -24368,6 +24388,10 @@ var SCHEMA_STATEMENTS = [
   // being true) and superseded_by (the replacing row's id, NULL if just retired).
   // Erasure (delete_entity/delete_scope) still hard-deletes via the FK cascade —
   // GDPR erasure wins over history retention.
+  // SPEC-052/A4 (#1961): per-fact provenance. source_type/source_ref live on the
+  // OBSERVATION, not only the node, so a grounded-recall citation resolves to the
+  // individual fact rather than to the entity's most recent write. valid_from
+  // (already here from A1) is the temporal half of the citation — no third column.
   `CREATE TABLE IF NOT EXISTS observations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     node_id TEXT NOT NULL,
@@ -24376,6 +24400,8 @@ var SCHEMA_STATEMENTS = [
     valid_from TEXT NOT NULL DEFAULT (datetime('now')),
     valid_to TEXT,
     superseded_by INTEGER,
+    source_type TEXT NOT NULL DEFAULT 'SESSION',
+    source_ref TEXT,
     FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE
   )`,
   `CREATE TABLE IF NOT EXISTS relations (
@@ -24385,6 +24411,12 @@ var SCHEMA_STATEMENTS = [
     type TEXT NOT NULL,
     scope TEXT NOT NULL DEFAULT 'network',
     classification TEXT NOT NULL DEFAULT 'internal',
+    -- SPEC-052/A5 (#1962): connection strength. A relation is created at weight
+    -- 1 and STRENGTHENS on repeated co-occurrence (createRelations bumps it via
+    -- ON CONFLICT), mirroring how nodes.reinforcement_count accumulates. The
+    -- weight feeds a separable, capped term in search_nodes ranking so a
+    -- heavily-connected entity outranks an isolated one of equal lexical score.
+    weight REAL NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (from_id) REFERENCES nodes(id) ON DELETE CASCADE,
     FOREIGN KEY (to_id) REFERENCES nodes(id) ON DELETE CASCADE,
@@ -24440,6 +24472,9 @@ var PROVENANCE_MIGRATION_STATEMENTS = [
   `ALTER TABLE audit_log ADD COLUMN source_type TEXT`,
   `ALTER TABLE audit_log ADD COLUMN source_ref TEXT`,
   `ALTER TABLE audit_log ADD COLUMN source_repo TEXT`
+];
+var RELATION_WEIGHT_MIGRATION_STATEMENTS = [
+  `ALTER TABLE relations ADD COLUMN weight REAL NOT NULL DEFAULT 1`
 ];
 
 // src/db/paths.ts
@@ -24640,10 +24675,18 @@ var DURABLE_BASE_SALIENCE = 1;
 var EPISODIC_BASE_SALIENCE = 0.5;
 var SALIENCE_HALFLIFE_DAYS = 30;
 var SALIENCE_FEEDBACK_BUMP = 0.5;
+var CONNECTION_STRENGTH_SATURATION = 5;
 function baseSalienceForType(type) {
   return DURABLE_ENTITY_TYPES.has(type) ? DURABLE_BASE_SALIENCE : EPISODIC_BASE_SALIENCE;
 }
 var DEDUP_SIMILARITY_THRESHOLD = 0.65;
+var DEFAULT_SUPPORT_FLOOR = 0.25;
+function resolveSupportFloor(value) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) {
+    return DEFAULT_SUPPORT_FLOOR;
+  }
+  return value;
+}
 function observationContentHash(observations) {
   const normalised = observations.map((o) => o.trim().replace(/\s+/g, " ").toLowerCase()).join("\n");
   return createHash("sha256").update(normalised).digest("hex");
@@ -24691,6 +24734,8 @@ var CortexStore = class {
   sourceType;
   sourceRef;
   sourceRepo;
+  /** A4 (#1961): abstention support floor for searchNodes. Frozen at construction. */
+  supportFloor;
   constructor(path, opts = {}) {
     this.scope = opts.scope ?? DEFAULT_SCOPE;
     this.classification = opts.classification ?? DEFAULT_CLASSIFICATION;
@@ -24698,6 +24743,7 @@ var CortexStore = class {
     this.sourceType = opts.sourceType ?? DEFAULT_SOURCE_TYPE;
     this.sourceRef = opts.sourceRef ?? null;
     this.sourceRepo = opts.sourceRepo ?? null;
+    this.supportFloor = resolveSupportFloor(opts.supportFloor);
     if (path !== ":memory:") {
       mkdirSync(dirname2(path), { recursive: true });
     }
@@ -24744,6 +24790,38 @@ var CortexStore = class {
       }
     }
     for (const stmt of PROVENANCE_MIGRATION_STATEMENTS) {
+      try {
+        this.db.exec(stmt);
+      } catch (err) {
+        if (!/duplicate column/i.test(err instanceof Error ? err.message : String(err))) {
+          throw err;
+        }
+      }
+    }
+    const obsCols = new Set(
+      this.db.prepare(`PRAGMA table_info(observations)`).all().map(
+        (c) => c.name
+      )
+    );
+    if (!obsCols.has("source_type")) {
+      this.db.exec("BEGIN");
+      try {
+        this.db.exec(`ALTER TABLE observations ADD COLUMN source_type TEXT`);
+        this.db.exec(`ALTER TABLE observations ADD COLUMN source_ref TEXT`);
+        this.db.exec(
+          `UPDATE observations SET
+             source_type = COALESCE(
+               (SELECT n.source_type FROM nodes n WHERE n.id = observations.node_id),
+               'IMPORT'),
+             source_ref = (SELECT n.source_ref FROM nodes n WHERE n.id = observations.node_id)`
+        );
+        this.db.exec("COMMIT");
+      } catch (err) {
+        this.db.exec("ROLLBACK");
+        throw err;
+      }
+    }
+    for (const stmt of RELATION_WEIGHT_MIGRATION_STATEMENTS) {
       try {
         this.db.exec(stmt);
       } catch (err) {
@@ -24930,7 +25008,8 @@ var CortexStore = class {
         "SELECT id, content FROM observations WHERE node_id = ? AND valid_to IS NULL ORDER BY id"
       );
       const insObs = this.db.prepare(
-        `INSERT INTO observations (node_id, content, valid_from) VALUES (?, ?, datetime('now'))`
+        `INSERT INTO observations (node_id, content, valid_from, source_type, source_ref)
+         VALUES (?, ?, datetime('now'), ?, ?)`
       );
       const closeObs = this.db.prepare(
         `UPDATE observations SET valid_to = datetime('now'), superseded_by = ? WHERE id = ?`
@@ -24952,7 +25031,7 @@ var CortexStore = class {
         const insertedIds = [];
         for (const obs of uniqueObs) {
           if (!priorByContent.has(obs)) {
-            const res = insObs.run(nodeId, obs);
+            const res = insObs.run(nodeId, obs, this.sourceType, this.sourceRef);
             insertedIds.push(Number(res.lastInsertRowid));
           }
         }
@@ -25034,8 +25113,10 @@ var CortexStore = class {
     this.db.exec("BEGIN");
     try {
       const ins = this.db.prepare(
-        `INSERT OR IGNORE INTO relations (from_id, to_id, type, scope, classification)
-         VALUES (?, ?, ?, ?, ?)`
+        `INSERT INTO relations (from_id, to_id, type, scope, classification)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(from_id, to_id, type)
+           DO UPDATE SET weight = weight + 1`
       );
       for (const r of relations) {
         if (!r.from || !r.to || !r.relationType) {
@@ -25105,7 +25186,8 @@ var CortexStore = class {
            VALUES (?, ?, ?, ?, ?, ?, 'IMPORT', NULL, ?, ?, ?, 0)`
         );
         const insObs = this.db.prepare(
-          `INSERT INTO observations (node_id, content, valid_from) VALUES (?, ?, datetime('now'))`
+          `INSERT INTO observations (node_id, content, valid_from, source_type, source_ref)
+           VALUES (?, ?, datetime('now'), 'IMPORT', NULL)`
         );
         for (const n of nodeRows) {
           const scope = n.scope && n.scope.trim() ? n.scope : DEFAULT_SCOPE;
@@ -25505,19 +25587,26 @@ var CortexStore = class {
       queryVec = null;
     }
     const vecById = this.embeddingsFor(ftsRows.map((r) => r.id));
+    const connById = this.connectionStrengthFor(ftsRows.map((r) => r.id));
     const FTS_WEIGHT = 0.45;
     const VEC_WEIGHT = 0.35;
     const SALIENCE_WEIGHT = 0.2;
+    const CONNECTION_WEIGHT = 0.15;
     const scored = ftsRows.map((r) => {
       const stored = vecById.get(r.id);
       const vecScore = queryVec && stored ? Math.max(0, cosineSimilarity(queryVec, stored)) : 0;
       const salienceScore = salienceRecencyScore(r.salience, r.type, r.age);
-      const combined = FTS_WEIGHT * ftsScore(r.rank) + VEC_WEIGHT * vecScore + SALIENCE_WEIGHT * salienceScore;
+      const connectionScore = connectionStrengthScore(connById.get(r.id) ?? 0);
+      const combined = FTS_WEIGHT * ftsScore(r.rank) + VEC_WEIGHT * vecScore + SALIENCE_WEIGHT * salienceScore + CONNECTION_WEIGHT * connectionScore;
       return { row: r, score: combined };
     });
     scored.sort((a, b) => b.score - a.score || a.row.rank - b.row.rank);
+    const floor = resolveSupportFloor(opts.supportFloor ?? this.supportFloor);
+    if ((scored[0]?.score ?? 0) < floor) {
+      return auditSearch({ entities: [], relations: [], abstained: true });
+    }
     const top = scored.slice(0, cap).map((s) => s.row);
-    const hydrated = this.hydrate(top, asOf);
+    const hydrated = this.hydrate(top, asOf, opts.includeCitations === true);
     if (asOf === void 0) {
       return auditSearch({ entities: hydrated, relations: this.relationsFor(top) });
     }
@@ -25614,7 +25703,7 @@ var CortexStore = class {
    * Hydrate a set of node rows into entities, fetching all their observations in
    * a SINGLE query (avoids an N+1 over the node set).
    */
-  hydrate(rows, asOf) {
+  hydrate(rows, asOf, includeCitations = false) {
     if (rows.length === 0) {
       return [];
     }
@@ -25622,10 +25711,11 @@ var CortexStore = class {
     const temporal = asOf ? `(valid_from IS NULL OR valid_from <= ?) AND (valid_to IS NULL OR valid_to > ?)` : `valid_to IS NULL`;
     const temporalParams = asOf ? [asOf, asOf] : [];
     const obsRows = this.db.prepare(
-      `SELECT node_id, content FROM observations
+      `SELECT id, node_id, content, source_type, source_ref, valid_from FROM observations
          WHERE node_id IN (${placeholders}) AND ${temporal} ORDER BY id`
     ).all(...rows.map((r) => r.id), ...temporalParams);
     const byNode = /* @__PURE__ */ new Map();
+    const citesByNode = /* @__PURE__ */ new Map();
     for (const o of obsRows) {
       const list = byNode.get(o.node_id);
       if (list) {
@@ -25633,12 +25723,33 @@ var CortexStore = class {
       } else {
         byNode.set(o.node_id, [o.content]);
       }
+      if (includeCitations) {
+        const cite = {
+          observationId: Number(o.id),
+          content: o.content,
+          sourceType: o.source_type,
+          sourceRef: o.source_ref,
+          validFrom: o.valid_from
+        };
+        const cites = citesByNode.get(o.node_id);
+        if (cites) {
+          cites.push(cite);
+        } else {
+          citesByNode.set(o.node_id, [cite]);
+        }
+      }
     }
-    return rows.map((r) => ({
-      name: r.name,
-      entityType: r.type,
-      observations: byNode.get(r.id) ?? []
-    }));
+    return rows.map((r) => {
+      const entity = {
+        name: r.name,
+        entityType: r.type,
+        observations: byNode.get(r.id) ?? []
+      };
+      if (includeCitations) {
+        entity.citations = citesByNode.get(r.id) ?? [];
+      }
+      return entity;
+    });
   }
   /**
    * Relations where BOTH endpoints are in the given (already in-scope) node set
@@ -25675,6 +25786,39 @@ var CortexStore = class {
       to: idToName.get(r.to_id) ?? r.to_id,
       relationType: r.type
     }));
+  }
+  /**
+   * SPEC-052/A5 (#1962): accumulated in-scope edge weight per candidate node —
+   * the raw connection strength that connectionStrengthScore maps to a capped
+   * [0,1] ranking term. A relation contributes to BOTH its endpoints (undirected
+   * degree/weight), so a node's strength reflects its total connectedness, not
+   * just outgoing edges. Scope-filtered (`scope IN activeScopes`) exactly like
+   * relationsFor, so a relation pinned to another tenant's scope can never leak
+   * into an in-scope node's strength (cortex-scope-isolation, SPEC-052 S2). The
+   * other endpoint need not be in the candidate set — a candidate's edges to
+   * off-result hubs still count toward its connectedness.
+   */
+  connectionStrengthFor(ids) {
+    const strength = /* @__PURE__ */ new Map();
+    if (ids.length === 0 || this.activeScopes.length === 0) {
+      return strength;
+    }
+    const idPh = ids.map(() => "?").join(",");
+    const scopePh = this.scopePlaceholders();
+    const rows = this.db.prepare(
+      `SELECT node_id, SUM(weight) AS strength FROM (
+           SELECT from_id AS node_id, weight FROM relations
+             WHERE scope IN (${scopePh}) AND from_id IN (${idPh})
+           UNION ALL
+           SELECT to_id AS node_id, weight FROM relations
+             WHERE scope IN (${scopePh}) AND to_id IN (${idPh}) AND from_id <> to_id
+         )
+         GROUP BY node_id`
+    ).all(...this.activeScopes, ...ids, ...this.activeScopes, ...ids);
+    for (const r of rows) {
+      strength.set(r.node_id, r.strength);
+    }
+    return strength;
   }
   /** Comma-joined `?` placeholders for the active scope set. */
   scopePlaceholders() {
@@ -25923,6 +26067,12 @@ function salienceRecencyScore(salience, type, ageDays) {
   const age = Number.isFinite(ageDays) && ageDays > 0 ? ageDays : 0;
   const recency = Math.exp(-Math.LN2 * age / SALIENCE_HALFLIFE_DAYS);
   return Math.min(1, Math.max(0, base * recency));
+}
+function connectionStrengthScore(rawStrength) {
+  if (!Number.isFinite(rawStrength) || rawStrength <= 0) {
+    return 0;
+  }
+  return Math.min(1, rawStrength / CONNECTION_STRENGTH_SATURATION);
 }
 function ftsTokens(query) {
   return (query ?? "").toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
@@ -26369,6 +26519,12 @@ function parseActiveScopes(raw) {
   }
   return scopes;
 }
+function parseSupportFloor(raw) {
+  if (raw === void 0 || raw.trim() === "") return void 0;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0 || value > 1) return void 0;
+  return value;
+}
 function parseSourceType(raw) {
   if (!raw) return DEFAULT_SOURCE_TYPE;
   const upper = raw.toUpperCase();
@@ -26395,7 +26551,8 @@ function loadConfig(env = process.env) {
     // session. The hash still correlates writes from one session without
     // exposing the id itself; pass SGE_CORTEX_SOURCE_REF to persist verbatim.
     sourceRef: env.SGE_CORTEX_SOURCE_REF ?? hashSessionRef(env.CLAUDE_SESSION_ID),
-    sourceRepo: env.SGE_CORTEX_SOURCE_REPO ?? (owner && repo ? `${owner}/${repo}` : void 0)
+    sourceRepo: env.SGE_CORTEX_SOURCE_REPO ?? (owner && repo ? `${owner}/${repo}` : void 0),
+    supportFloor: parseSupportFloor(env.SGE_CORTEX_SUPPORT_FLOOR)
   };
 }
 
@@ -26582,7 +26739,7 @@ var TOOLS = [
   },
   {
     name: "search_nodes",
-    description: 'Search for entities and their relations using AND-biased text search with relevance ranking. Tries an all-terms (AND) match first for precision and falls back to any-term (OR) only when that is empty. Optional filters narrow BEFORE ranking: entityType (restrict to one node type, e.g. "gotcha") and sinceDays (only entities updated within the last N days). Default limit is small (10); pass limit to widen (max 50).',
+    description: 'Search for entities and their relations using AND-biased text search with relevance ranking. Tries an all-terms (AND) match first for precision and falls back to any-term (OR) only when that is empty. Optional filters narrow BEFORE ranking: entityType (restrict to one node type, e.g. "gotcha") and sinceDays (only entities updated within the last N days). Default limit is small (10); pass limit to widen (max 50). GROUNDING (SPEC-052/A4): pass includeCitations to get, per entity, the supporting observation rows with their provenance. ABSTENTION: when candidates matched but none cleared the support floor, the result is empty AND carries "abstained": true \u2014 treat that as "the store does not know", distinct from an empty result with no abstained flag, which means nothing matched at all. Neither is a confident answer: prefer primary sources over guessing.',
     inputSchema: {
       type: "object",
       properties: {
@@ -26595,6 +26752,14 @@ var TOOLS = [
         sinceDays: {
           type: "number",
           description: "Optional: only entities updated within the last N days (recency filter)."
+        },
+        supportFloor: {
+          type: "number",
+          description: "Optional (SPEC-052/A4): override the abstention support floor for this call, in [0,1]. Above the configured default makes the store more willing to say it does not know; 0 disables abstention. Out-of-range values fall back to the configured default. Omitted \u2192 SGE_CORTEX_SUPPORT_FLOOR, else 0.25."
+        },
+        includeCitations: {
+          type: "boolean",
+          description: "Optional (SPEC-052/A4): return, for each matched entity, the supporting observation rows as citations \u2014 observationId, content, sourceType, sourceRef and validFrom. Citations resolve only to CURRENT observations (a superseded fact is never cited as live support); under as_of they resolve to the rows valid at that instant. Omitted or false \u2192 the result shape is exactly as before. Not supported in broker mode."
         },
         as_of: {
           type: "string",
@@ -26759,6 +26924,13 @@ async function asyncDispatchTool(store, name, args) {
         )
       );
     }
+    if (name === "search_nodes" && args.includeCitations !== void 0) {
+      return errorResult(
+        new Error(
+          "search_nodes: citations are only supported against the local store; the broker-backed remote store has no observation-level provenance yet (SPEC-052/A4 is local-store only; broker parity tracked with #1691/#1695)."
+        )
+      );
+    }
     switch (name) {
       case "create_entities": {
         const entities = args.entities ?? [];
@@ -26867,7 +27039,14 @@ function dispatchTool(store, name, args) {
           limit: typeof args.limit === "number" ? args.limit : void 0,
           entityType: typeof args.entityType === "string" ? args.entityType : void 0,
           sinceDays: typeof args.sinceDays === "number" ? args.sinceDays : void 0,
-          asOf: asOfArg(args)
+          asOf: asOfArg(args),
+          // SPEC-052/A4 (#1961): opt-in citations. Only `true` enables them, so
+          // a truthy-but-not-boolean argument does not silently change the
+          // result shape a caller is parsing.
+          includeCitations: args.includeCitations === true,
+          // Per-call floor override; an out-of-range value is clamped back to
+          // the configured default by resolveSupportFloor, not honoured.
+          supportFloor: typeof args.supportFloor === "number" ? args.supportFloor : void 0
         });
         return textResult(JSON.stringify(result, null, 2));
       }
@@ -26990,7 +27169,9 @@ async function main() {
     activeScopes,
     sourceType: config2.sourceType,
     sourceRef: config2.sourceRef,
-    sourceRepo: config2.sourceRepo
+    sourceRepo: config2.sourceRepo,
+    // SPEC-052/A4: abstention support floor (SGE_CORTEX_SUPPORT_FLOOR).
+    supportFloor: config2.supportFloor
   };
   let store;
   if (config2.brokerUrl) {

@@ -112,7 +112,7 @@ The cortex **write** is not conditional on this lookup's outcome — see [Step W
 | **`NOT_ONBOARDED` early return** (Step 1, skips Steps 2–5) | create/reinforce — `path: not-onboarded` |
 | Front-loaded verdict adopted by the caller | create/reinforce — the adopted verdict |
 
-On the **front-loaded** path this skill never executes, so the **adopting caller** owns the write (wiring tracked in #1938). Two exemption classes write nothing and must not be conflated: **no verdict produced** (`NO_TARGET_ISSUE`), and **verdict produced but the write is impossible** (sge-memory unavailable — skip silently; a memory failure must never block the gate).
+On the **front-loaded** path this skill never executes, so the **adopting caller** owns the write (wired in `/sge:sge-implement` Phase 0.5 and `/sge:team-pipeline`'s lane; #1938). Two exemption classes write nothing and must not be conflated: **no verdict produced** (`NO_TARGET_ISSUE`), and **verdict produced but the write is impossible** (sge-memory unavailable — skip silently; a memory failure must never block the gate).
 
 **Reinforcement, not duplication.** `create_entities` on an existing entity name is *already* an upsert that bumps `reinforcement_count` and `current_confidence` — keep the name stable (`govtrace-<owner>-<repo>-<issue>`) and let the store reinforce. Never guard the write with an existence check.
 

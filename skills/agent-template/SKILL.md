@@ -149,6 +149,16 @@ writing any code; in headless dispatch it writes `outcome:"blocked"` and
 terminates without building. The orchestrator's Phase 4 branch 4a parks it for
 a human decision.
 
+**Caller-owned cortex write (SPEC-108 §2.4a, #1938).** On the `VALID → adopt;
+skip fork` branch, `/sge:governance-trace` never runs, so its Step W write can
+never fire — the adopting lane owns it. When it adopts the front-loaded verdict,
+`create_entities` the adopted verdict with `path: front-loaded`, reinforcing the
+stable `govtrace-<owner>-<repo>-<issue>` entity — fire-and-forget, never blocking
+the lane on the write, skipped silently if sge-memory is unavailable. This is the
+#1664 silent-write-loss defect one level up: an optimisation that skips the work
+must not skip the memory of the work. Write shape + closed vocabulary:
+[`cortex-write.md`](../governance-trace/references/cortex-write.md).
+
 ---
 
 ## Stoppable-only fan-out rule (reminder)
@@ -168,6 +178,7 @@ gate's decision strands a worktree.
 [ ] Dependency gate: drop issues with unresolved blockers
 [ ] Phase 1.5: batch /sge:build-ready-audit when queue >= 2; store govtraceMap
 [ ] Phase 3c: look up govtraceMap[N]; inject SGE_GOVTRACE_VERDICT in lane prompt
+[ ] Lane adopts a front-loaded verdict → caller-owned cortex write, path: front-loaded (SPEC-108 §2.4a, #1938)
 [ ] Stoppable-only: every spawned agent is a named Task (not remote/detached)
 [ ] Per-Task budget ceiling stated in every Task prompt
 [ ] Draft PR after first commit (lane Rule 2); stale-lane kill on no-PR timeout

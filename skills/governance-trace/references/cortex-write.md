@@ -89,7 +89,11 @@ verdict and *skips the fork entirely*.
 On that path **this skill never executes**, so it cannot write. The obligation
 does not vanish with it — the **adopting caller** owns the Step W write
 (`path: front-loaded`, reinforcing the existing entity). SKILL.md's Step W
-table records the contract; the caller-side wiring is tracked in **#1938**.
+table records the contract; the caller-side wiring (#1938) lives in
+`/sge:sge-implement` Phase 0.5 (the front-loaded fast-path and, with
+`path: tier-gate`, the inline-trivial tier gate), `/sge:team-pipeline`'s
+implementation lane, and the `agent-template` lane-side guard (the reference
+contract for custom fan-out orchestrators).
 
 This is the original #1664 defect one level up: an optimisation that skips the
 work also skips the memory of the work, and nothing in the skipped code can

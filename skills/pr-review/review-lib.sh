@@ -184,9 +184,16 @@
 # Canonical security-sensitive path list — the ONE place it lives (SKILL.md
 # refers here; issue #820 deduped the twice-listed globs). Glob form:
 #   **/auth/**, **/middleware/**, **/*token*, **/*secret*, **/config/**,
-#   **/crypto*, any DB migration
+#   **/crypto*, any DB migration, **/security/**, **/secrets/**
+#
+# issue #1991: `secret` was relied on as a literal-substring proxy for a
+# `security/` directory, but "security" does not contain "secret" as a
+# substring (s-e-c-r-e-t vs s-e-c-u-r-i-t-y — the letters diverge after
+# "sec"), so files under security/ were silently NOT classified as
+# security-sensitive. Added explicit (^|/)security/ and (^|/)secrets/
+# alternatives rather than relying on substring luck.
 rl_security_glob_regex() {
-  printf '%s\n' '(^|/)auth/|(^|/)middleware/|token|secret|(^|/)config/|(^|/)crypto|migrat'
+  printf '%s\n' '(^|/)auth/|(^|/)middleware/|token|secret|(^|/)config/|(^|/)crypto|migrat|(^|/)security/|(^|/)secrets/'
 }
 
 # Internal: resolve owner/repo once per call (GH_REPO wins — #662).

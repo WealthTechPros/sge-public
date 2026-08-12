@@ -7,5 +7,5 @@ Every box ticked before `pr-reviewed`:
 - [ ] Type check, lint (zero warnings), tests: green on the promoted head.
 - [ ] CI: all required checks GREEN (Phase 7); PR **MERGEABLE**.
 - [ ] Every unfixed finding has an inline/summary comment; no leftover dead code / debug lines.
-- [ ] Phase 5 *Verify against head* checks 1–5 all pass (head re-pinned; every claimed fix in the diff; reviewers attested; no `REQUEST_CHANGES`; threads resolved).
+- [ ] Phase 5 *Verify against head* checks 1–6 all pass (head re-pinned; every claimed fix in the diff; reviewers attested; no `REQUEST_CHANGES`; transaction atomicity; threads resolved).
 - [ ] Every declared follow-up references a tracking issue (#859) — else `pr-labels.sh pass` refuses (exit 6).
