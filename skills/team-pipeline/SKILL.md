@@ -76,8 +76,8 @@ nothing on overrun. What stops a runaway lane is the **time-box kill** (stale-ki
 (Stoppable-Only rule). There is **no separate "budget-exceeded" kill** — an
 overrunning lane is caught by that same time-box.
 
-State these ceilings in every Task prompt, plus *"If approaching this ceiling,
-stop scope-expansion — commit, push, open/update the draft PR, terminate."*
+State these ceilings in every Task prompt (*near the ceiling: stop
+scope-expansion — commit, push, update the draft PR, terminate*).
 
 | Task | Target ceiling (output tokens) |
 |------|---------------------------------|
@@ -93,11 +93,10 @@ lanes, stop spawning, enter Phase 6. Never raise a budget to "fix" a stall —
 decompose instead. Full rationale + session-budget bash:
 [budget-model](references/budget-model.md).
 
-**GitHub API budget** is a second, shared ceiling every lane draws on: all lanes
-share ONE org REST rate-limit bucket (5000/hr), so fan-out that ignores it stalls
-every lane in lockstep (#1153). Each dispatch prompt therefore carries the
-GraphQL-first / floor-check / switch-on-403 rules — see *Shared: GitHub API
-budget discipline* in [dispatch-prompts](references/dispatch-prompts.md).
+**GitHub API budget** — a second shared ceiling: all lanes share ONE org REST
+bucket (5000/hr); fan-out that ignores it stalls every lane in lockstep (#1153).
+Dispatch prompts carry the GraphQL-first / floor-check / switch-on-403 rules:
+[dispatch-prompts](references/dispatch-prompts.md).
 
 ---
 
@@ -428,11 +427,13 @@ budget target, the full **Lean Agent Contract** (Rules 1–3), and these Steps
    Any other verdict, or `matchConfidence` low → **do NOT build:** write
    `/tmp/team-pipeline-agent-<N>.json` (`"outcome":"blocked","prNumber":null`,
    `note:"governance-trace: <why>"`) and **terminate WITHOUT building** (Phase 4
-   4a parks it; never auto-override).
-3. Implement the change (TDD per AC); push + open a DRAFT PR after the FIRST
-   commit (same-repo `Fixes #<N>`; cross-repo `Fixes owner/repo#<N>`); cheap inline
-   gates only; write the completion file (`outcome`/`prNumber`/`note`; no
-   self-reported token count, #857); terminate without running `/sge:pr-review`.
+   4a parks it; never auto-override). **Caller owns Step W (§2.4a, #1938):** on
+   adoption the fork is skipped, so `create_entities` the adopted front-loaded
+   verdict, `path: front-loaded` (fire-and-forget).
+3. Implement the change (TDD per AC) per the Lean Agent Contract — draft PR on
+   first commit (`Fixes #<N>`; cross-repo `Fixes owner/repo#<N>`), cheap inline
+   gates, write the completion file (no self-reported token count, #857), no
+   `/sge:pr-review`.
 
 Update state: add the lane to `activeAgents` with spawn time + execution worktree
 path.
