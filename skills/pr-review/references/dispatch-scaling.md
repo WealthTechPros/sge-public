@@ -5,6 +5,27 @@ dispatch-scaling, budget, and investigation-depth rules in `../SKILL.md` Phase 2
 actionable rules, tables, and helper calls live in the SKILL; this file records *why* they
 are shaped that way. Nothing here is a new control.
 
+## Diff risk classification & dispatch tier table (issue #688)
+
+Extracted from `../SKILL.md`'s *Diff risk classification & dispatch scaling* section under the
+35 KB budget; content unchanged. `DIFF_RISK=$(rl_diff_risk "$PR" <bot_hot>)` (`bot_hot=1` when
+`BOT_FINDINGS` has a major/blocker). The `prose`/`trivial`/`generated` gates are narrower checks
+run **before** `low`, in that order. Record `diff_risk` in the verdict block.
+
+| Tier | Criteria | Dispatch | `specialist_dispatch:` |
+|---|---|---|---|
+| **prose** | `rl_diff_prose`=1 — docs-only (#2215) | **nothing** — Phase 2 skipped entirely | `skipped` |
+| **trivial** | `rl_diff_trivial`=1 (#973) | native Layer 1 `low` only — **no specialists ever** (not even on a bot major/blocker) | `skipped` |
+| **generated** | `rl_diff_generated`=1 (#1757) | regenerate-and-byte-diff replaces the correctness lane (drift = **blocker** → full review); content-safety for published artefacts | `reduced` |
+| **low** + clean bot review | ≤ ~150 **raw** lines, no security path, no bot `major`/`blocker` | **skip fresh specialist dispatch**; Layer 1 `low`/`medium`, cite the bot review | `skipped` |
+| **low**, no bot review | as above | Layer 1 `low`/`medium` + **one** specialist (`@code-reviewer`) | `reduced` |
+| **medium** | anything not `low` or `high` | Layer 1 `high` + both bundled specialists | `full` |
+| **high risk** (auth/payments/migrations/data-isolation) | a security-sensitive path, OR > ~400 **weighted** lines, OR a bot `major`/`blocker` | Layer 1 `max`/`ultra` + both bundled + matching Layer 3 — **always full regardless of bot signal** | `full` |
+
+**Security-sensitive paths** — the one `rl_security_glob_regex` list in `review-lib.sh`
+(`rl_security_files "$PR"` prints matches) drives the risk tier, `/security-review` trigger, and
+`@security-auditor` dispatch. Never downgrade a `high`-risk diff on a bot review alone.
+
 ## Why the short-circuits run before bot-signal detection (issue #973)
 
 The concurrency short-circuit and the delta-mode / Phase-5-passthrough checks in Phase 1 are
@@ -45,6 +66,111 @@ extra cheap `gh pr view --json files` call, no new tool. `rl_diff_risk` calls th
 callers never need to invoke it directly. **Fails closed:** any fetch/parse failure on the
 per-file breakdown falls back to `weighted == raw`, so a diff that can't be weighted is never
 silently downgraded out of `high`.
+
+## `prose` tier — full mechanics (issue #2215)
+
+`PROSE=$(rl_diff_prose "$PR")`. The **only zero-dispatch tier**: when it fires, Phase 2 runs
+nothing at all — no Layer 1 native review, no bundled specialists, no repo specialists. Checked
+**first**, before `trivial`.
+
+This changes review **depth**, not the merge gate. The lane still claims `pr-reviewing`, still
+runs Phase 3 CI gates and Phase 5.5 thread resolution, still posts an `sge-verdict` (with
+`diff_risk: prose`, `specialist_dispatch: skipped`) and still promotes `pr-reviewed`. A
+prose-tier PR is as merge-gated as any other; it just isn't read by a reviewer.
+
+**Why it exists.** `rl_diff_trivial` (#973) fires only on a whitespace-only diff or a single-file
+lockfile bump, and even then still runs a Layer 1 pass — it skips *specialists*, not the review.
+#984 de-weighted doc/test lines so they stop pushing a diff into `high`, which fixed
+over-*escalation* but lands doc-only diffs in `low`/`medium`, still paying for Layer 1. A
+documentation-only diff has no correctness surface for a code reviewer to examine, so the
+remaining gap was a tier that dispatches nothing.
+
+### Classification — allowlist AND denylist
+
+Returns `1` only when **every** changed file matches the allowlist **and no** changed file
+matches the denylist.
+
+- **Allowlist (extension):** `.md`, `.mdx` — **not `.txt`**, see below
+- **Denylist (path), any match forces `0`**, matched **case-insensitively** and
+  anchored at **any path segment** (`(^|/)`), not just the repo root:
+
+| Path | Why it is not prose |
+|---|---|
+| `**/skills/**` | `SKILL.md` **is** the executable artefact — prose-as-behaviour |
+| `**/agents/**` | agent definitions are behaviour |
+| `**/.claude/**` | harness config that steers agents |
+| `**/.github/**` | anything CI consumes — workflows, scripts, control lists |
+| `**/docs/specs/**` | governance artefacts; feed the C4 coherence check |
+| `**/docs/decisions/**` | ADRs; feed C7 |
+| `**/CLAUDE.md`, `**/AGENTS.md` | repo instructions that steer every agent in that subtree |
+
+**Segment anchoring, not root anchoring.** A repo can host more than one Claude
+Code root, and this one does: `platform/` carries its own
+`platform/.claude/agents/*.md`, `platform/.claude/skills/*/SKILL.md` (59 tracked
+files) and `platform/AGENTS.md`. A root-anchored `^\.claude/` matched only the
+top-level copies, so a PR editing `platform/.claude/agents/security-auditor.md`
+— the security reviewer's own instructions — classified as prose and would have
+merged unreviewed. `(^|/)` still refuses false positives: `myskills/x.md` and
+`docs/specs-old/x.md` need a separator immediately before the segment.
+
+**Case-insensitive on the deny side only.** On a case-insensitive filesystem
+(macOS, Windows) a file committed as `claude.md` *is* `CLAUDE.md` to every tool
+that opens it. The allowlist stays case-sensitive so an odd-cased extension
+(`.MD`) fails closed rather than being quietly admitted.
+
+**Why `.txt` is not on the allowlist.** It is not a prose signal in a software
+repo — it is this repo's format for CI control lists, none of which read as
+documentation:
+
+- `.github/scripts/hold-labels.txt` calls itself the *"SINGLE SOURCE OF TRUTH …
+  blocks EVERY merge path"*, read by both `hold-gate.yml` and
+  `sge-auto-merge.yml`. A zero-dispatch PR deleting `do-not-merge` /
+  `needs-human` / `blocked` disarms the human-hold gate repo-wide — **the merge
+  gate's own kill-switch, edited through the gate that guards it.**
+- `publish-redact-list.txt` is the rsync `--exclude-from` for the public mirror;
+  dropping a line leaks whatever it redacted.
+- `requirements.txt` files are `pip install -r`'d in CI — a swapped pin is code
+  execution on a runner holding repo credentials.
+
+A `.txt` extension carries no evidence that the content is prose rather than a
+manifest or a policy list, so it cannot earn the zero-dispatch tier.
+
+**The denylist is the whole point.** A naive "`.md` ⇒ skip the review" rule is wrong in this
+repo and dangerously so: a large share of tracked `.md` files live under `skills/`, where the
+markdown *is* the product logic. Auto-passing those would blind the merge gate to exactly the
+class of change issues #2210–#2214 are about — reviewing the reviewer's own instructions.
+
+A **mixed** diff is not prose: one non-allowlisted file, or one denylisted path, sinks the whole
+PR back to normal tiering. A docs+code PR is a code PR.
+
+**Renames count as a change to both paths.** A name-only diff with rename detection on lists
+only the *new* path — `git mv skills/x/SKILL.md README.md` shows `README.md` alone, and the
+`skills/` path the denylist would have caught simply disappears. Deleting a skill, an agent
+definition or a spec by renaming it to a doc would otherwise be a pure-prose diff and skip review
+entirely. So `rl_diff_prose` folds every `previous_filename` from the PR's files API into the set
+and judges it by the same allow/deny rules, failing closed if that lookup fails.
+
+### Fail-closed, and high-risk still wins
+
+Fails closed to `0` on any error — the same rationale as `trivial`, but stronger, because this
+tier skips dispatch **entirely**: a wrong `1` costs far more than a missed `1`, which merely
+falls back to normal `low` scaling and is never a correctness gap.
+
+It also fails closed when **any** changed file matches `rl_security_glob_regex`, the same guard
+`generated` applies. A document on a security-sensitive path keeps its normal tier.
+
+**Shell portability (#1492).** The changed-file list is read into an array split on newlines
+only, never left to the caller's shell to word-split — `review-lib.sh` is sourced, and zsh does
+not split unquoted parameters, which is precisely how #1492 misclassified multi-file diffs as
+`trivial` and silently skipped `@security-auditor` dispatch.
+
+### Sizing, honestly
+
+Sampled over the last 30 merged PRs in this repo: **3** were pure prose, 6 touched
+`skills/`/`agents/`, and 21 mixed code with docs. At the cost of a review, that is roughly a
+**3% saving on review spend** — worth having, since the classifier is mechanical and cheap, but
+it is deliberately the small, safe half. The larger cost lever is duplicated repository reading
+across lanes (#2214), which recurs on nearly every PR rather than one in ten.
 
 ## `trivial` tier — full mechanics (issue #973)
 

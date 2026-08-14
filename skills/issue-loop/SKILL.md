@@ -43,7 +43,7 @@ Declared per the [loop anatomy gate](../loops/SKILL.md#loop-anatomy--the-six-par
 | Decompose | `/sge:decompose-issue` | split a `TOO_LARGE` issue; children re-enter the pool on the next pick |
 | Implement | **full `/sge:sge-implement <N>`** | the complete pipeline — preflight, TDD, forked review, PR, pr-review loop |
 | Verify | `/sge:pr-review` gate (chained by sge-implement) | independent merge-gate verdict; the driver confirms, never duplicates |
-| Land | `gh pr checks --watch` + merge state ([loops §B](../loops/SKILL.md#b-wait-for-condition-loop)) | block on the condition, fast-forward main, then re-arm |
+| Land | bounded synchronous poll + merge state ([loops §B](../loops/SKILL.md#b-wait-for-condition-loop)) | block on the condition, fast-forward main, then re-arm |
 | Shepherd (opt-out path) | `/sge:pr-monitor` | owns stacked PRs when `--no-merge-wait` is chosen |
 
 The serial loop deliberately pays for the **full `sge-implement` pipeline** — not the swarm's lean agent contract — because only one agent runs at a time; depth beats fan-out here.
@@ -96,9 +96,25 @@ gh label create "loop-skip" --color "E4E669" \
 
 ---
 
+## Turn-ending contract (MANDATORY — issue #2198)
+
+**The driver returns control only on a stop condition.** "Waiting for X", "still waiting on PR #N", "waiting for the build-ready-audit result before dispatching" is a **contract violation, not an interim report** — it ends the run without a stop reason, and an unattended drain then sits idle until a human notices and nudges it, which defeats the whole premise of the skill.
+
+The rule is mechanical, so it needs no judgement:
+
+> **Every turn this skill ends MUST carry the `exit-report` block with a `stopReason` from the enum below. If you cannot name one, you are not finished — go back and block on the condition.**
+
+There is no `stopReason` for "waiting", by design. Three concrete corollaries:
+
+- **Nested skill calls are synchronous.** `/sge:available-issues`, `/sge:reconcile-worklist`, `/sge:build-ready-audit`, `/sge:decompose-issue` (steps 1–2) run to completion **inside the current turn**. Announcing that one is outstanding and yielding is the same violation.
+- **A dispatched sub-agent is waited on, not handed off.** Step 3's `sge-implement` agent is blocked on until it completes ([loops §B](../loops/SKILL.md#b-wait-for-condition-loop) — a `Monitor` until-condition on its completion, or the harness's own task-completion signal). The driver never ends a turn with an implementation agent still running.
+- **A single point-in-time status check is not a wait.** One `gh pr view` / `gh pr checks` (no poll, no `--watch`) followed by returning control is precisely the violated pattern — it reads the condition instead of blocking on it.
+
+A genuine blocker that is none of the stop conditions — an unrecoverable environment fault, a bound hit — is reported by **stopping properly** with `systemic` (or the matching bound), not by trailing off mid-cycle.
+
 ## The cycle
 
-Repeat until a stop condition fires. One issue in flight at any moment, ever.
+Repeat until a stop condition fires. One issue in flight at any moment, ever. Every turn ends per the [turn-ending contract](#turn-ending-contract-mandatory--issue-2198) above.
 
 ### 1. Pick
 
@@ -150,6 +166,8 @@ Release the claim (`--remove-label agent-lock`) whenever a cycle ends with no su
 
 Before every dispatch: the Governor's `/sge:env-health --preflight` gate (above). `REFUSE` → no dispatch.
 
+**Then block on that agent until it completes** — a `Monitor` until-condition on its completion, or the harness's task-completion signal ([loops §B](../loops/SKILL.md#b-wait-for-condition-loop)). Dispatching and then ending the turn with the agent still running is the #2198 violation: the driver is the only thing that advances the loop, so a driver that stops mid-cycle strands the run whether or not the sub-agent finishes.
+
 ### 4. Verify independently (confirm, don't double-review)
 
 The dispatched pipeline **chains its own `/sge:pr-review`** — do not run a second full review from the driver (sge#699: check for an in-flight/complete review first; a duplicate review burns cost and can race the label mutex). The driver's job is to **confirm the gate actually ran and passed**:
@@ -164,13 +182,22 @@ gh pr view <PR> --json labels,autoMergeRequest,state \
 
 ### 5. Land, then advance (`--merge-wait`, the default)
 
-Block on the condition, never the clock ([loops §B](../loops/SKILL.md#b-wait-for-condition-loop)):
+Block on the condition, never the clock ([loops §B](../loops/SKILL.md#b-wait-for-condition-loop)). Run the wait as the **bounded synchronous poll, in ONE tool call** — §B option 1, the only form that is reliable whether this driver is a top-level session or itself a dispatched sub-agent:
 
 ```bash
-gh pr checks <PR> --watch        # returns when checks settle
+# ONE tool call. Returns when checks settle; capped so it can never hang.
+i=0
+until ! gh pr checks <PR> | grep -qE 'pending|in_progress'; do
+  i=$((i+1)); [ "$i" -ge 60 ] && break; sleep 20
+done
+gh pr checks <PR>                       # terminal states — or still pending at the cap
 gh pr view <PR> --json state,mergedAt   # confirm MERGED (auto-merge armed by pr-review)
-git pull --ff-only origin main   # fast-forward local main before the next pick
+git pull --ff-only origin main          # fast-forward local main before the next pick
 ```
+
+> **Do not use `gh pr checks --watch` here unless this run is a genuinely top-level session** (§B option 2). A dispatched driver — the common case, e.g. `/sge:issue-loop` invoked from a control session — must use the poll above: a background watch does not hold a sub-agent's turn open, so the agent ends its turn and is silently re-woken reporting "still waiting" (#1681, #2198). The instruction to block was never the problem; the primitive was.
+
+If the cap is reached with checks still pending, that is a **result, not a retry**: record the timeout in the ledger and treat the cycle as failed (step 6). Never blindly restart the poll.
 
 Because main advances between cycles, the serial loop **can drain `serialGroups`** — mutually-conflicting issues `available-issues` would force the swarm to skip. The second member of a group is picked only after the first's merge is already on main, so it never conflicts. This is the one job only a serial loop can do; it is why `--merge-wait` is the default.
 
@@ -217,7 +244,7 @@ Resumable   : yes — queue re-derives live; durable state = labels/branches/PRs
 ==============================================
 ```
 
-Always state the stop reason — a drain that quietly stopped early must never read as "done".
+Always state the stop reason — a drain that quietly stopped early must never read as "done". And per the [turn-ending contract](#turn-ending-contract-mandatory--issue-2198), a turn that ends with no stop reason at all is a defect, not a pause: there is deliberately no `stopReason` meaning "still waiting".
 
 ### Machine-readable exit report
 

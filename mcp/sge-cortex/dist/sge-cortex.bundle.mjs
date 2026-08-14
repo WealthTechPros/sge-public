@@ -24680,6 +24680,7 @@ function baseSalienceForType(type) {
   return DURABLE_ENTITY_TYPES.has(type) ? DURABLE_BASE_SALIENCE : EPISODIC_BASE_SALIENCE;
 }
 var DEDUP_SIMILARITY_THRESHOLD = 0.65;
+var VECTOR_ABSTENTION_FLOOR = 0.2;
 var DEFAULT_SUPPORT_FLOOR = 0.25;
 function resolveSupportFloor(value) {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) {
@@ -25598,18 +25599,20 @@ var CortexStore = class {
       const salienceScore = salienceRecencyScore(r.salience, r.type, r.age);
       const connectionScore = connectionStrengthScore(connById.get(r.id) ?? 0);
       const combined = FTS_WEIGHT * ftsScore(r.rank) + VEC_WEIGHT * vecScore + SALIENCE_WEIGHT * salienceScore + CONNECTION_WEIGHT * connectionScore;
-      return { row: r, score: combined };
+      return { row: r, score: combined, vecScore, hasStoredVec: stored !== void 0 };
     });
     scored.sort((a, b) => b.score - a.score || a.row.rank - b.row.rank);
     const floor = resolveSupportFloor(opts.supportFloor ?? this.supportFloor);
     if ((scored[0]?.score ?? 0) < floor) {
       return auditSearch({ entities: [], relations: [], abstained: true });
     }
+    if (queryVec !== null && scored[0]?.hasStoredVec) {
+      if (scored[0].vecScore < VECTOR_ABSTENTION_FLOOR) {
+        return auditSearch({ entities: [], relations: [], abstained: true });
+      }
+    }
     const top = scored.slice(0, cap).map((s) => s.row);
     const hydrated = this.hydrate(top, asOf, opts.includeCitations === true);
-    if (asOf === void 0) {
-      return auditSearch({ entities: hydrated, relations: this.relationsFor(top) });
-    }
     const keptRows = top.filter((_, i) => (hydrated[i]?.observations.length ?? 0) > 0);
     const entities = hydrated.filter((e) => e.observations.length > 0);
     return auditSearch({ entities, relations: this.relationsFor(keptRows) });
