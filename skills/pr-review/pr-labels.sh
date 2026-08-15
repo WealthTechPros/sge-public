@@ -616,7 +616,12 @@ await_head_convergence() {
 # #1166). It is excluded from the green guard because it is definitionally red
 # pre-swap and is OWNED by the transition being performed; every other check
 # keeps its full fail-closed weight.
-SELF_LABEL_CHECK_NAME="Require pr-reviewed label"
+# Overridable per-repo via SGE_SELF_LABEL_CHECK_NAME (issue #2185): the literal
+# job name varies by repo (e.g. ppp's gate job is "PR reviewed merge gate", not
+# the historical default) — a hardcoded name never matches there, so the
+# self-exclusion silently fails to apply and the gate's own expected-red
+# pre-swap state permanently blocks `pass --auto-merge`.
+SELF_LABEL_CHECK_NAME="${SGE_SELF_LABEL_CHECK_NAME:-Require pr-reviewed label}"
 
 assert_required_checks_green() {
   local raw rc err errfile
