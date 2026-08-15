@@ -124,3 +124,80 @@ for that lane's verdict** rather than re-deriving the same thing in parallel (e.
 grepping BDD step-def coverage while a reviewer was dispatched to check exactly that). Duplicated
 verification burns tokens and wall-clock for zero added signal; block on the lane, then act on
 its structured findings.
+
+## Findings provenance — did the reply come from THIS diff? (issue #2200)
+
+A dispatched review lane twice returned findings about a **completely different
+diff** than the PR under review:
+
+- reviewing `coherence-review#34`, a lane returned findings about
+  `infra/cloudflare/__main__.py` — a `wtp-org` file, from the hub/control
+  session that dispatched the review;
+- reviewing `project-management#50`, the first lane returned DNS/Cloudflare
+  Pages content matching nothing in that PR.
+
+Both were caught only because the reviewing agent happened to cross-check the
+findings against the diff it expected, then discarded and re-dispatched. That is
+a lucky catch, not a gate. Uncaught, the failure is severe in both directions: a
+PR approved on the strength of a review of **someone else's code** (a false-clean
+verdict against the merge gate's core promise), or another repo's findings posted
+onto this PR.
+
+Both occurrences were in sessions where a hub repo was active alongside the
+target — the documented Tier-0 dispatch model.
+
+### Prevention, then detection
+
+**Prevention: pin the target literally.** Every dispatch prompt — native Layer 1
+and specialist alike — names `owner/repo` and the PR number as **constants**, and
+makes `gh pr diff <N> --repo <owner/repo>` the lane's **first action**. A lane
+must never infer "the PR under review" from ambient cwd or inherited context.
+
+**Detection: verify the reply.** SPEC-057 fixes this class by resolving repo
+context before the first `gh`/`git` call — but a dispatched sub-agent has its own
+context, and no `cd` in the dispatching shell reaches inside it. Prevention does
+not cross the sub-agent boundary, so detection has to:
+
+```bash
+PROV=$(rl_findings_provenance "$PR" "$REPLY_FINDINGS" "$REPO")
+case "$PROV" in
+  ok)           rl_findings_foreign_paths "$PR" "$REPLY_FINDINGS" "$REPO" ;;
+                                          # fold in; report any foreign paths
+  bleed)        ;;                        # dispatch FAILURE — discard, re-dispatch
+  unverifiable) ;;                        # blocks identically; never treat as ok
+esac
+```
+
+**Pass `$REPO` explicitly.** The detector must not resolve its own repo from
+ambient cwd: a wrong-repo detector that itself resolves the wrong repo is this
+bug class reproducing inside its own fix, and PR numbers collide across an org's
+repos routinely, so it would compare against a real-but-wrong diff rather than
+erroring.
+
+**The exit status is part of the contract: `0 = ok, 2 = bleed, 1 = unverifiable`.**
+Both non-zero results mean *do not fold*, so the natural
+`if rl_findings_provenance …; then fold; fi` is safe rather than a trap.
+
+**On `ok`, surface the foreign paths.** A mixed reply is accepted, but its
+outside-the-diff entries are the residue of a partial bleed and belong in the
+Phase 5 output — otherwise they are folded in with no signal at all.
+
+### Why the test is not "every path must be in the diff"
+
+The issue's literal ask was to reject any finding whose path is absent from the
+diff. That is too strict, and would train the gate to discard real work: a
+reviewer noting *"this signature change breaks `src/consumer.ts`"* is citing an
+affected caller outside the diff and is doing its job.
+
+The bleed signature is narrower and unambiguous: **at least one file-anchored
+finding, and every one of them outside the diff** — a reply about a different
+changeset entirely. That is `bleed`. A mix returns `ok`; the foreign paths are
+still available via `rl_findings_foreign_paths` for the reviewer's judgement. A
+genuine `[]` is a clean pass with nothing to place, never a bleed.
+
+Renames are folded in via `previous_filename`, since a finding may legitimately
+cite a path the diff carries only under its old name.
+
+**Fails closed.** An unreadable findings file, an unfetchable diff, or an
+unparseable array all return `unverifiable`, which blocks exactly as `bleed`
+does. Unverified provenance is precisely the state that shipped both incidents.

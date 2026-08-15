@@ -101,8 +101,12 @@ Prompt:
   After each action, append one JSON line to /tmp/team-pipeline-prmonitor.log:
     {"ts":"<ISO>","pr":<N>,"action":"pr-fix|pr-review|rerun|merged","outcome":"success|failed"}
 
-  /sge:pr-monitor is itself event-driven (it waits on `gh pr checks --watch`,
-  not the clock). At the end of each cycle, read /tmp/team-pipeline-state.json.
+  You are a DISPATCHED subagent, not a top-level session — `gh pr checks
+  --watch` does not hold your turn open here (loops §B; #1681, #2225). Use
+  /sge:pr-monitor's own subagent fallback instead: an adaptive bounded
+  synchronous poll in ONE tool call (~30s interval while any lane is active,
+  ~90s once every lane is merely queued — see pr-monitor SKILL.md's "the
+  clock" section). At the end of each cycle, read /tmp/team-pipeline-state.json.
   If prMonitorStatus == "stop", finish your current cycle then exit.
 
   Do NOT implement issues. Only monitor and fix PRs.
