@@ -245,6 +245,28 @@ E1=$(JIRA_ADAPTER_ALLOW_CREATE=1 "$IW" create "Enabler: <parent title> — found
 gh issue edit "$E1" --add-label "enabler" --milestone "<parent milestone>"
 ```
 
+**Label the parent `tracking` — same step, not a follow-up (#2241).** Once a
+parent has children, no single PR closes it, and a child's PR carrying
+`Closes #parent` would shut the umbrella with most of its slices unbuilt. The
+label is the mechanical signal `/sge:sge-implement` Phase 6 reads (see
+[close-keyword](../sge-implement/references/close-keyword.md)):
+
+`--add-label` does **not** create a missing label — it fails with
+`'tracking' not found`, and `tracking` exists in no repo by default. Without the
+create step the parent is silently never labelled, the umbrella check returns
+`false`, and the next child's PR carries `Closes #parent`. Same ensure-exists
+convention as `/sge:build-ready-audit`'s verdict labels:
+
+```bash
+gh label create "tracking" --color "5319E7" \
+  --description "Umbrella issue: no single PR closes it (#2241)" 2>/dev/null || true
+gh issue edit "$PARENT" --add-label "tracking"
+```
+
+Children carry `Closes #child`; the parent only ever `Part of #parent`. When
+the last child merges, the parent is closed **by hand**, after its label is
+removed deliberately.
+
 **Metadata fields, every child:**
 
 | Field | Purpose |

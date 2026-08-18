@@ -93,14 +93,15 @@ SGE alignment — <repo> @ <audited SHA>
   },
   "gateCoverage": {
     "score": 100,
-    "installed": 3,
+    "installed": 4,
     "partial": 0,
     "missing": 0,
-    "totalGates": 3,
+    "totalGates": 4,
     "gates": [
       { "id": "G1", "workflow": "require-pr-reviewed-label", "status": "pass", "evidence": ".github/workflows/require-pr-reviewed-label.yml installed and pull_request-triggered" },
       { "id": "G2", "workflow": "require-commit-trailer", "status": "pass", "evidence": ".github/workflows/require-commit-trailer.yml installed and pull_request-triggered" },
-      { "id": "G3", "workflow": "ai-supply-chain", "status": "pass", "evidence": ".github/workflows/ai-supply-chain.yml installed and pull_request-triggered" }
+      { "id": "G3", "workflow": "ai-supply-chain", "status": "pass", "evidence": ".github/workflows/ai-supply-chain.yml installed and pull_request-triggered" },
+      { "id": "G4", "workflow": "check-tracking-close-keyword", "status": "pass", "evidence": ".github/workflows/check-tracking-close-keyword.yml installed and pull_request-triggered" }
     ]
   },
   "issues": { "opened": 5, "closed": 1, "unchanged": 4, "deferred": 0 },
@@ -116,7 +117,7 @@ One `checks[]` entry per C1–C14, C19 and C20 (`applicable: false` with a `reas
 
 ## Gate coverage
 
-The **`gateCoverage`** key is the governance-posture fleet metric (parent #740, spec SGD-048): per repo, which of the three standard enforcement workflows (`require-pr-reviewed-label` / `require-commit-trailer` / `ai-supply-chain`) are **installed and PR-blocking**. Its single source of truth is `bash ${CLAUDE_PLUGIN_ROOT}/skills/sge-align/assets/check-gate-coverage.sh` (read-only; JSON on stdout; exit `0` = all three installed & PR-blocking, `1` = ≥1 missing/not-blocking, `2` = harness error; optional trusted repo-root as `$1`) — never scored by hand. Each gate is `pass` (workflow present **and** `pull_request`-triggered), `partial` (present but push/schedule-only — installed but incapable of blocking a merge, 0.5 credit), or `fail` (absent); `score = round(100 × (pass + 0.5 × partial) / 3)`. **Unlike C20, gate-coverage does not enter the composite Audit Score** — it is a posture metric that downstream consumers (#838 dashboard, #840 hub tab) render on the one-page fleet view but must not block on. **Honesty note:** the file-only script proves a gate is installed and *capable* of blocking; whether GitHub has it wired as a **required** status check in branch protection is a separate dimension only observable via `gh api repos/:o/:r/branches/main/protection`, owned by SGD-048's live posture scan — the script never fabricates a required-check verdict it cannot see. It runs in default, `--apply`, and fleet per-repo agents alike; in fleet mode the orchestrator aggregates each repo's `gateCoverage` into the org roll-up so gate coverage is part of the fleet one-page view (parent #740 AC).
+The **`gateCoverage`** key is the governance-posture fleet metric (parent #740, spec SGD-048): per repo, which of the four standard enforcement workflows (`require-pr-reviewed-label` / `require-commit-trailer` / `ai-supply-chain` / `check-tracking-close-keyword`) are **installed and PR-blocking**. Its single source of truth is `bash ${CLAUDE_PLUGIN_ROOT}/skills/sge-align/assets/check-gate-coverage.sh` (read-only; JSON on stdout; exit `0` = all four installed & PR-blocking, `1` = ≥1 missing/not-blocking, `2` = harness error; optional trusted repo-root as `$1`) — never scored by hand. Each gate is `pass` (workflow present **and** `pull_request`-triggered), `partial` (present but push/schedule-only — installed but incapable of blocking a merge, 0.5 credit), or `fail` (absent); `score = round(100 × (pass + 0.5 × partial) / 4)`. **Unlike C20, gate-coverage does not enter the composite Audit Score** — it is a posture metric that downstream consumers (#838 dashboard, #840 hub tab) render on the one-page fleet view but must not block on. **Honesty note:** the file-only script proves a gate is installed and *capable* of blocking; whether GitHub has it wired as a **required** status check in branch protection is a separate dimension only observable via `gh api repos/:o/:r/branches/main/protection`, owned by SGD-048's live posture scan — the script never fabricates a required-check verdict it cannot see. It runs in default, `--apply`, and fleet per-repo agents alike; in fleet mode the orchestrator aggregates each repo's `gateCoverage` into the org roll-up so gate coverage is part of the fleet one-page view (parent #740 AC).
 
 ## Trend persistence — append the scorecard to `docs/sge/drift-trend.jsonl`
 

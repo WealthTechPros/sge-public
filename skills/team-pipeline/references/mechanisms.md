@@ -96,7 +96,7 @@ printf '%s' "$report" \
       [ -z "$issue" ] && continue
       commit_msg=$(git -C "$path" log -1 --format="%s" 2>/dev/null)
       gh pr create --head "$branch" --base main --draft \
-        --title "$commit_msg" --body "Fixes #${issue}" 2>/dev/null \
+        --title "$commit_msg" --body "Part of #${issue}" 2>/dev/null \
         && echo "[Flush] PR created for #$issue"
     done
 ```

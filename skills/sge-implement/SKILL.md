@@ -275,13 +275,13 @@ The inner loop is owned by `/sge:tdd-workflow` — follow it for every acceptanc
 
 ```bash
 git push -u origin <branch>
-gh pr create --draft --title "<conventional title>" --body "Closes #<issue-number>"
+gh pr create --draft --title "<conventional title>" --body "Part of #<issue-number>"
 # then, per green cycle:  /sge:commit ... && git push
 ```
 
-> Non-GitHub tracker: [close-on-merge](references/alm-close-on-merge.md).
+> `Part of`, not `Closes`. Non-GitHub tracker: [close-on-merge](references/alm-close-on-merge.md).
 
-The early PR **stays a draft**, carries **no `pr-reviewed` label**, and is **never undraft**ed here (issue #699; full rule in Phase 6). Phase 6 **reuses this PR**; a "PR already exists" from `gh pr create` is expected.
+The early PR **stays a draft** and is **never undraft**ed or labelled here (issue #699; full rule in Phase 6). Phase 6 **reuses this PR**; a "PR already exists" from `gh pr create` is expected.
 
 Repeat per acceptance criterion.
 
@@ -309,10 +309,10 @@ Run plain **`/sge:commit`** (no `--no-push`) — it quality-gates, commits anyth
 
 > **Label & merge-gate rule.** `pr-reviewed` and auto-merge are owned **exclusively** by `/sge:pr-review` — only it, after a clean review, applies `pr-reviewed` and arms auto-merge. Never `gh pr edit --add-label pr-reviewed`, `gh pr merge --auto`, or `gh pr ready` from this skill — a draft PR structurally cannot be auto-merged, and `/sge:pr-review` Phase 8 owns undrafting on a clean pass (issue #699), so never undraft from this skill.
 
-Ensure the PR body carries a closing keyword (`Closes #N`/`Fixes #N` — auto-closes the issue on merge) and the two tracking comments (via `gh pr edit --body`):
+Ensure the PR body carries the issue link ([close-keyword](references/close-keyword.md) — `Part of #N` stands unless earned) and the two tracking comments (via `gh pr edit --body`):
 
 ```
-Closes #<issue-number> ...
+<Closes|Part of> #<issue-number> ...
 <!-- sge-cortex-stats: {"cortexHits": N, "cortexMisses": N} -->
 <!-- sge-phase5-verdict: {"sha": "<reviewer.sha>", "verdict": "<reviewer.verdict>", "blockers": <reviewer.blockers>, "verification": "<verification_mode>"} -->
 ```

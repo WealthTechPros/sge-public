@@ -339,6 +339,14 @@ The gate requires a PR touching a `regulated_paths` file to carry a human sign-o
 
 Skip and note it in the Review Package for repos that render no regulated numbers.
 
+## Step 7e — Point to the branch-protection-as-code reference (solo-dev posture)
+
+Branch protection rulesets are typically GitHub-side only — no PR, no diff, no review trail when an admin changes what gates a merge. If the new repo's team is solo-dev (the common WTP case), propose adopting the documented Pulumi GitHub-provider pattern rather than configuring protection by hand:
+
+- Reference: [`docs/branch-protection-solo-dev.md`](../../docs/branch-protection-solo-dev.md) — a `github.BranchProtection` snippet adapted from `WealthTechPros/wtp-org`'s live `infra/github/__main__.py`, encoding PR-required / `required_approving_review_count=0` / no-force-push / no-delete / linear-history.
+- This is a solo-dev posture specifically — a multi-reviewer team should raise `required_approving_review_count` above 0 instead of adopting the snippet verbatim.
+- Skip this step and note it in the Review Package if the repo already has protection-as-code in place, or if the team isn't solo-dev.
+
 ## Step 8 — Record the artefact map in CLAUDE.md
 
 Propose adding (or merging into) the repo's `CLAUDE.md` a short **SGE artefact map**

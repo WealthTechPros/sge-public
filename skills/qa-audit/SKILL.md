@@ -49,7 +49,7 @@ Runs as `context: fork`: the audit is self-contained (own worktree, own server, 
 
 ## Step 1: Derive the QA criteria
 
-1. Extract the linked issue number from the PR body (patterns: `Closes #N`, `Fixes #N`, `Resolves #N`, bare `#N`):
+1. Extract the linked issue number from the PR body (patterns: `Closes #N`, `Fixes #N`, `Resolves #N`, `Part of #N`, bare `#N`):
 
    ```bash
    gh issue view "$ISSUE_NUMBER" --json title,body,labels
