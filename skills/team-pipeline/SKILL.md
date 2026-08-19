@@ -116,7 +116,7 @@ file-map, read ≤ 5 files to locate the surface, then build.
 
 **Rule 2 — Draft PR on first commit.** After the **first commit** (even if
 partial), immediately `git push origin "${SGE_BRANCH_PREFIX:-fix/issue-}<N>"` and
-`gh pr create --draft --title "<title>" --body "Fixes #<N>"` — do NOT wait for
+`gh pr create --draft --title "<title>" --body "Part of #<N>"` — do NOT wait for
 completion (the draft is the progress signal; no-draft-after-first-commit is the
 stall signal). Keep working; push each commit. Commit via `/sge:commit --no-push` — it derives the mandatory `Spec:`/`SGE-Override:` trailer itself (its step 5). The branch prefix is
 `SGE_BRANCH_PREFIX` (default `fix/issue-`); set it to `claude/issue-` for Routine
@@ -431,7 +431,7 @@ budget target, the full **Lean Agent Contract** (Rules 1–3), and these Steps
    adoption the fork is skipped, so `create_entities` the adopted front-loaded
    verdict, `path: front-loaded` (fire-and-forget).
 3. Implement the change (TDD per AC) per the Lean Agent Contract — draft PR on
-   first commit (`Fixes #<N>`; cross-repo `Fixes owner/repo#<N>`), cheap inline
+   first commit (`Part of #<N>`; cross-repo `Part of owner/repo#<N>` — #2241), cheap inline
    gates, write the completion file (no self-reported token count, #857), no
    `/sge:pr-review`.
 

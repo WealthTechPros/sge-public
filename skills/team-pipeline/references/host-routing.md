@@ -48,7 +48,7 @@ extend the standard Lean Agent Contract prompt with:
 >     ${CLAUDE_PLUGIN_ROOT}/scripts/forgejo-adapter.sh create-pull \
 >     "$ORIGIN" "$(git rev-parse --abbrev-ref HEAD)" main \
 >     "<title>" --draft <<'BODY'
->   Fixes owner/repo#<N>
+>   Part of owner/repo#<N>
 >   BODY
 > (Never use `gh pr create` — `gh` cannot see the Forgejo remote.)
 > ```

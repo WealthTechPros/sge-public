@@ -1,0 +1,52 @@
+# DESIGN.md — design contract (single source of truth)
+
+Dev URL: http://localhost:3000
+
+## Direction
+One sentence naming the aesthetic and why it fits this product and its
+users. (e.g. "Instrument-panel editorial: dense, engineered, quietly
+confident — because compliance officers trust precision, not delight.")
+
+## Tokens
+
+### Color (4-6 named values — these are the ONLY colors allowed)
+- --ink:        #______   (primary text)
+- --surface:    #______   (page background)
+- --surface-2:  #______   (raised/card background)
+- --accent:     #______   (interactive + signature moments only)
+- --line:       #______   (borders, dividers)
+- --warn:       #______   (destructive/error only)
+
+### Type
+- Display: ______ — used for: page titles, the signature element. Nowhere else.
+- Body:    ______ — weights: ___/___
+- Utility: ______ — captions, data, labels
+- Scale: 12 / 14 / 16 / 20 / 28 / 40 (adjust, then never deviate)
+
+### Space
+- Scale: 4 / 8 / 12 / 16 / 24 / 32 / 48 / 64 — no off-scale values.
+
+### Shape & depth
+- Radius: ___px (one value; exceptions listed here or they don't exist)
+- Shadow: define 1-2 elevations max, as exact CSS values.
+
+## Motion
+- What animates, when, and why. Durations and easing named here.
+- prefers-reduced-motion: everything above becomes opacity-only or none.
+
+## Signature element
+The one memorable thing this product's UI is recognized by. Describe it
+concretely enough to build and to review against.
+
+## Banned
+- Fonts: Inter, Roboto, Arial, Space Grotesk (unless named above)
+- Purple/blue gradient heroes; big-stat-with-gradient-accent template
+- Hardcoded hex anywhere outside this file / the token layer
+- Decorative animation with no information role
+- Any color, font, spacing, or radius not defined above
+
+## Quality floor (non-negotiable, never announced)
+- Responsive to 375px, no overflow; touch targets >= 44px
+- Visible keyboard focus on every interactive element
+- Body contrast >= 4.5:1; reduced motion respected
+- Console clean

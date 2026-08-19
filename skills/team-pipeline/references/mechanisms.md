@@ -95,8 +95,11 @@ printf '%s' "$report" \
       [ -n "$existing" ] && continue
       [ -z "$issue" ] && continue
       commit_msg=$(git -C "$path" log -1 --format="%s" 2>/dev/null)
+      # `Part of`, never `Fixes` (#2241): this flush opens PRs for stranded
+      # branches with NO knowledge of whether the work is complete, so it must
+      # never emit a keyword that auto-closes the issue on merge.
       gh pr create --head "$branch" --base main --draft \
-        --title "$commit_msg" --body "Fixes #${issue}" 2>/dev/null \
+        --title "$commit_msg" --body "Part of #${issue}" 2>/dev/null \
         && echo "[Flush] PR created for #$issue"
     done
 ```

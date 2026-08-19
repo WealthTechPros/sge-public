@@ -29,11 +29,17 @@ read everything the change's blast radius touches.
    implemented.
 3. **`standard` tier — resolve the path-scoped deep-read set.** (Skip this for
    the `trivial` tier — the digest is enough. For the `critical` tier, ignore
-   scoping and read the full stack instead.) Deep-read only the returned
-   `artefacts[]` (each entry carries its file path and the reason it was
-   selected); everything in `excluded[]` is governance noise for these paths — do
-   not load it. An ADR about the payments adapter is never read for a docs-site
-   change.
+   scoping and read the full stack instead.)
+
+   ```bash
+   node "$SGE_ROOT/scripts/resolve-context-scope.mjs" \
+     --dag docs/sge-dag.json --paths "<comma-separated planned paths>"
+   ```
+
+   Deep-read only the returned `artefacts[]` (each entry carries its file path
+   and the reason it was selected); everything in `excluded[]` is governance
+   noise for these paths — do not load it. An ADR about the payments adapter is
+   never read for a docs-site change. No manifest → stay digest-first.
 4. **Fail-safe, not fail-open.** `scoped: false` (the manifest carries no scope
    globs, or the path set is empty) means the resolver cannot narrow: stay
    digest-first and follow digest links on demand. It is never a reason to read

@@ -6,6 +6,11 @@ table** — every verdict, its default (proceed/block), the option outcomes, and
 headless behaviour — stays in `SKILL.md` Phase 0.5; this file carries the exact
 prompt wording. Every gate remains a real AskUserQuestion, never a dead-end stop.
 
+> **`$SGE_ROOT` convention.** Snippets below assume `$SGE_ROOT` is resolved in
+> the current shell via the bootstrap function in `scripts/resolve-sge-root.sh`'s
+> header comment — never a bare `${CLAUDE_PLUGIN_ROOT}` / `${CLAUDE_PLUGIN_ROOT:-.}`
+> (#1567/#1963).
+
 ## Size pre-score — the outermost gate (#1265, #1342)
 
 Before *any* governance work (tier, reuse, or fork), cheaply pre-score the issue
@@ -14,7 +19,7 @@ inline work — via the bundled scorer:
 
 ```bash
 gh issue view <N> --json body --jq .body | \
-  node "${CLAUDE_PLUGIN_ROOT:-.}/skills/lib/issue-prescorer.mjs"
+  node "$SGE_ROOT/skills/lib/issue-prescorer.mjs"
 # → { "tier": "SMALL"|"MEDIUM"|"LARGE"|"AMBIGUOUS", "score": N, "signals": {...}, "reason": "..." }
 ```
 
@@ -48,7 +53,7 @@ already runs; it invents no new tier logic.
 2. **Run the classifier** (the same one Phase 2.5 Step A uses):
 
    ```bash
-   node "${CLAUDE_PLUGIN_ROOT:-.}/scripts/resolve-context-depth.mjs" \
+   node "$SGE_ROOT/scripts/resolve-context-depth.mjs" \
      --paths "<comma-separated predicted paths>" --score <Phase 2 complexity score, or 5 if not yet computed>
    ```
 
