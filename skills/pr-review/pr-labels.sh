@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 # pr-labels.sh — the single state machine for the SGE review-gate labels.
 #
-#   pr-reviewing  (amber)  review in progress
-#   pr-reviewed   (green)  merge-gate label required by branch protection
-#   pr-fixing     (amber)  CI-fix in progress — a fix-in-flight mutex (#1174)
+#   pr-reviewing       (amber)   review in progress
+#   pr-reviewed        (green)   merge-gate label required by branch protection
+#   pr-fixing          (amber)   CI-fix in progress — a fix-in-flight mutex (#1174)
+#   changes-requested  (D93F0B)  a review FAILED and left findings the author must
+#                                address (issue #2238) — see below
 #
 # pr-reviewing / pr-reviewed are MUTUALLY EXCLUSIVE — a PR must never carry both.
+# changes-requested / pr-reviewed are likewise MUTUALLY EXCLUSIVE — a PR must
+# never carry both (issue #2238): `pass` always removes changes-requested when
+# it applies pr-reviewed. changes-requested is ORTHOGONAL to `hold` — a PR can
+# legitimately carry both (a failed review that also needs human sign-off once
+# fixed), so neither label's presence implies anything about the other.
 # This script is the only place that transition logic lives; /sge:pr-review owns
 # the review transitions, /sge:pr-monitor verifies them, /sge:pr-fix marks
 # staleness AND owns the pr-fixing claim (claim-fix / release-fix below).
@@ -63,8 +70,17 @@
 #                                             cannot open while a human sign-off is pending.
 #                                             Remove the `hold` label to release the block;
 #                                             the next review cycle then promotes normally.
-#   pr-labels.sh fail <pr>                    gate failed    (remove BOTH labels; the
-#                                             posted findings carry the state)
+#   pr-labels.sh heartbeat <pr>                post an sge-claim-heartbeat comment proving
+#                                             the review claim is still in flight (issue
+#                                             #2229). Call at phase boundaries on any review
+#                                             expected to outrun SGE_REVIEW_CLAIM_TTL (default
+#                                             900s) — a heartbeat within SGE_REVIEW_HEARTBEAT_
+#                                             WINDOW seconds of now keeps claim_comment_live()
+#                                             true past claimedAt+ttl, so a genuinely active
+#                                             review is not taken over mid-flight. Mirrors the
+#                                             review daemon's own heartbeat (#1312 AC2).
+#   pr-labels.sh fail <pr>                    gate failed    (+changes-requested,
+#                                             -pr-reviewing, -pr-reviewed — #2238)
 #   pr-labels.sh held <pr>                    review passed but a `hold` label is
 #                                             present — release pr-reviewing without
 #                                             applying pr-reviewed; the gate stays
@@ -98,7 +114,41 @@
 #                                             a comment naming the superseded SHA.
 #                                             No-op when pr-reviewed is absent or
 #                                             when the verdict covers the new head.
-#   pr-labels.sh status <pr>                  print "reviewing=<bool> reviewed=<bool> hold=<bool>"
+#   pr-labels.sh excluded-reviewer <pr>       independence check structurally excludes
+#                                             the available reviewer identity — release
+#                                             pr-reviewing (so future cycles can run),
+#                                             do NOT apply pr-reviewed (gate stays
+#                                             closed), apply the 'excluded-reviewer'
+#                                             label (distinct from 'hold') so the state
+#                                             is never silent. Idempotent. A subsequent
+#                                             review by a properly-provisioned non-
+#                                             excluded identity transitions out via
+#                                             'pass', which also removes this label.
+#                                             Works whether or not .sge/posture.yaml
+#                                             exists (issue #2293).
+#   pr-labels.sh review-coverage <pr>         read-only report: does the latest
+#                                             sge-verdict still cover HEAD? (issue
+#                                             #2294). Unlike sync-check (push-
+#                                             webhook-triggered, mutates the label),
+#                                             this makes no label changes and can be
+#                                             called any time from /sge:pr-review or
+#                                             /sge:pr-monitor. Prints one of:
+#                                               covered=true                  verdict SHA matches head
+#                                               covered=false scope=delta     small/bounded post-review
+#                                                                             delta (< SGE_REVIEW_COVERAGE_
+#                                                                             DELTA_MAX commits, default 3)
+#                                                                             — a delta review scoped to
+#                                                                             just those commits is enough
+#                                               covered=false scope=substantial  post-review change is large
+#                                                                             enough that the prior review
+#                                                                             no longer applies at all
+#                                               covered=unknown                no sge-verdict found, or head
+#                                                                             unreadable (fail closed — never
+#                                                                             asserts coverage without proof)
+#                                             Also lists the intervening commits by
+#                                             SHA + message.
+#   pr-labels.sh status <pr>                  print "reviewing=<bool> reviewed=<bool> hold=<bool>
+#                                             changes-requested=<bool> excluded-reviewer=<bool>" (#2238)
 #                                             (Forgejo keeps the two-field form — #1419)
 #                                             (issue #1147: falls back to a
 #                                             GraphQL read — a separate quota
@@ -157,6 +207,8 @@ REVIEWING="pr-reviewing"
 REVIEWED="pr-reviewed"
 FIXING="pr-fixing"
 HOLD="hold"
+CHANGES_REQUESTED="changes-requested"
+EXCLUDED_REVIEWER="excluded-reviewer"
 
 usage() {
   # awk, not sed: BSD/macOS sed rejects the `{ /re/d; p }` one-liner address
@@ -179,6 +231,22 @@ CLAIM_COMMENT_FENCE="sge-claim-metadata"
 # Default TTL for a claim comment in seconds. Heartbeat comments (fence
 # sge-claim-heartbeat) posted by the review daemon extend the effective window.
 CLAIM_COMMENT_TTL="${SGE_REVIEW_CLAIM_TTL:-900}"
+
+# Heartbeat fence + interval (issue #2229): a heartbeat posted at a review's
+# phase boundaries (dispatch, post-fix, post-CI-poll) proves the claim is
+# genuinely in flight, so a claim's effective lifetime is claimedAt + ttl,
+# extended by any heartbeat seen within the last CLAIM_HEARTBEAT_WINDOW
+# seconds of "now" — not just claimedAt + ttl on its own. Mirrors the review
+# daemon's github_adapter.py (_has_heartbeat_in_window, issue #1312 AC2); this
+# is the same mechanism made available to an interactive /sge:pr-review run,
+# which previously had no way to prove liveness past the fixed TTL (#2229).
+HEARTBEAT_COMMENT_FENCE="sge-claim-heartbeat"
+CLAIM_HEARTBEAT_WINDOW="${SGE_REVIEW_HEARTBEAT_WINDOW:-900}"
+# Absolute ceiling on a heartbeat-extended claim (security review, #2229): a
+# claim heartbeated in a loop must still self-expire eventually, or a wedged
+# (or malicious) claimant with comment access could hold the merge-gate mutex
+# forever. 4h comfortably covers the 30-50 min reviews this was built for.
+CLAIM_MAX_LIFETIME="${SGE_REVIEW_CLAIM_MAX_LIFETIME:-14400}"
 
 # _claim_repo_full: canonical owner/repo for API calls. Prefers GH_REPO;
 # falls back to gh detection. Prints nothing on failure.
@@ -214,20 +282,88 @@ parse_claim_metadata() {
   printf '%s' "${meta:-}"
 }
 
+# _iso_to_epoch <timestamp>: convert an ISO-8601 UTC timestamp to epoch
+# seconds, or print nothing on failure. Validates the shape first (security
+# review, #2229) — GNU `date -u -d ""` silently succeeds and returns
+# midnight-today instead of failing, so an empty/malformed timestamp would
+# otherwise produce a plausible-looking epoch instead of a parse error. GNU
+# date first (Linux/Git-Bash), BSD date fallback (macOS) — shared by claim
+# and heartbeat staleness checks.
+_iso_to_epoch() {
+  [[ "${1:-}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || return 1
+  date -u -d "${1:-}" +%s 2>/dev/null \
+    || date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "${1:-}" +%s 2>/dev/null
+}
+
+# heartbeat_in_window <claim-owner> <claimed-epoch>: return 0 (true) if a
+# sge-claim-heartbeat comment proves THIS SPECIFIC claim is still live.
+# Mirrors the review daemon's _has_heartbeat_in_window (github_adapter.py,
+# #1312 AC2), with two hardenings from security review (#2229):
+#   - owner-bound: only a heartbeat whose fenced {owner} matches the claim's
+#     owner counts. Un-bound, any PR commenter's heartbeat (this PR's own
+#     fence is public) could keep ANY claim alive indefinitely — a DoS on the
+#     merge gate, since branch protection requires pr-reviewed and start-review
+#     refuses (exit 3) while a claim looks live.
+#   - claim-ordered: only a heartbeat at or after the claim's claimedAt counts,
+#     so a stale heartbeat from a PRIOR claim can't resurrect a later one.
+# created_at is GitHub's server-side timestamp (never the attacker-supplied
+# body {at} field), so a forged future timestamp can't extend the window.
+heartbeat_in_window() {
+  local claim_owner="${1:-}" claimed_epoch="${2:-0}"
+  local _rf now_epoch
+  _rf="$(_claim_repo_full)"
+  [[ -n "$_rf" ]] || return 1
+  now_epoch=$(date -u +%s)
+  # Fetch all comments, keep heartbeat-fenced ones, print "<created_at>\t<owner>".
+  local rows row ts owner epoch
+  rows=$(gh api "repos/$_rf/issues/$PR/comments" --paginate \
+    --jq "[.[] | select(.body | ltrimstr(\"\n\") | startswith(\"\`\`\`${HEARTBEAT_COMMENT_FENCE}\"))
+           | {created_at, body} ]
+          | map(.owner = (.body | capture(\"\\\"owner\\\"\\\\s*:\\\\s*\\\"(?<o>[^\\\"]*)\\\"\"; \"\") .o // \"\"))
+          | .[] | [.created_at, .owner] | @tsv" \
+    2>/dev/null) || return 1
+  [[ -n "$rows" ]] || return 1
+  while IFS=$'\t' read -r ts owner; do
+    [[ -n "$ts" ]] || continue
+    [[ -n "$claim_owner" && "$owner" == "$claim_owner" ]] || continue
+    epoch=$(_iso_to_epoch "$ts") || continue
+    [[ -n "$epoch" ]] || continue
+    [[ "$epoch" -ge "$claimed_epoch" ]] || continue
+    if [[ $((now_epoch - epoch)) -le "$CLAIM_HEARTBEAT_WINDOW" ]]; then
+      return 0
+    fi
+  done <<< "$rows"
+  return 1
+}
+
 # claim_comment_live <comment-json>: return 0 (true) if the comment represents
-# a live (non-stale) claim. A claim is live when claimedAt + ttl > now.
+# a live claim. A claim is live when claimedAt + ttl > now, OR when an
+# owner-matched sge-claim-heartbeat comment landed within
+# CLAIM_HEARTBEAT_WINDOW seconds of now (issue #2229) — a heartbeat proves
+# the claimant is still actively working, which the fixed TTL alone cannot
+# distinguish from a dead claimant. CLAIM_MAX_LIFETIME is a hard ceiling
+# (security review, #2229): past it, no heartbeat can keep the claim alive —
+# a wedged or malicious heartbeat loop cannot hold the mutex forever.
 claim_comment_live() {
-  local meta claimed_at ttl_val claimed_epoch now_epoch
+  local meta owner claimed_at ttl_val claimed_epoch now_epoch
   meta=$(parse_claim_metadata "${1:-}")
   [[ -n "$meta" ]] || return 1
+  owner=$(printf '%s' "$meta" | jq -r '.owner // empty' 2>/dev/null) || return 1
   claimed_at=$(printf '%s' "$meta" | jq -r '.claimedAt // empty' 2>/dev/null) || return 1
   ttl_val=$(printf '%s' "$meta" | jq -r '.ttl // 900' 2>/dev/null) || ttl_val=900
   [[ -n "$claimed_at" ]] || return 1
-  # GNU date first (Linux/Git-Bash), BSD date fallback (macOS).
-  claimed_epoch=$(date -u -d "$claimed_at" +%s 2>/dev/null \
-    || date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$claimed_at" +%s 2>/dev/null) || return 1
+  claimed_epoch=$(_iso_to_epoch "$claimed_at") || return 1
+  [[ -n "$claimed_epoch" ]] || return 1
   now_epoch=$(date -u +%s)
-  [[ $((claimed_epoch + ttl_val)) -gt "$now_epoch" ]]
+  if [[ $((claimed_epoch + ttl_val)) -gt "$now_epoch" ]]; then
+    return 0
+  fi
+  # claimedAt + ttl has elapsed — not live UNLESS BOTH: a recent, owner-matched
+  # heartbeat proves the work is still genuinely in flight (#2229), AND the
+  # absolute ceiling hasn't been exceeded (no infinite extension via looping
+  # heartbeats — security review, #2229).
+  [[ $((now_epoch - claimed_epoch)) -le "$CLAIM_MAX_LIFETIME" ]] || return 1
+  heartbeat_in_window "$owner" "$claimed_epoch"
 }
 
 # post_claim_comment: post the JSON claim comment alongside the pr-reviewing
@@ -251,6 +387,38 @@ post_claim_comment() {
     echo "PR #$PR: claim comment posted (id=$comment_id, owner=$owner, ttl=${CLAIM_COMMENT_TTL}s)" >&2
   else
     echo "warning: PR #$PR could not post claim comment — continuing (issue #1312)" >&2
+  fi
+}
+
+# post_claim_heartbeat: post an sge-claim-heartbeat comment proving the
+# current review claim is still actively worked. Call at phase boundaries
+# (post-dispatch, post-fix, post-CI-poll) on a review expected to outrun
+# CLAIM_COMMENT_TTL (issue #2229) — same fence and shape as the review
+# daemon's heartbeat (github_adapter.py, #1312 AC2), read by
+# heartbeat_in_window above. Best-effort — a failure is logged but never
+# aborts the review; the claim label remains the real mutex.
+post_claim_heartbeat() {
+  local owner at body _rf comment_id
+  owner="${SGE_AGENT_ID:-$(hostname 2>/dev/null || echo "unknown")}"
+  at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  # jq -n --arg, not printf (security review, #2229): heartbeat_in_window now
+  # trusts the fenced {owner} field to bind a heartbeat to its claim, so an
+  # owner containing a literal '"' (SGE_AGENT_ID / hostname is not sanitized)
+  # must not be able to inject a second "owner" key via naive string
+  # formatting — jq's --arg encodes it as a safe JSON string value.
+  body="$(printf '```%s\n%s\n```' "$HEARTBEAT_COMMENT_FENCE" \
+    "$(jq -n --arg owner "$owner" --arg at "$at" '{owner:$owner, at:$at}')")"
+  _rf="$(_claim_repo_full)"
+  if [[ -z "$_rf" ]]; then
+    echo "warning: PR #$PR could not determine repo for heartbeat comment — skipping (issue #2229)" >&2
+    return 0
+  fi
+  comment_id=$(gh api "repos/$_rf/issues/$PR/comments" \
+    -f body="$body" --jq '.id' 2>/dev/null) || comment_id=""
+  if [[ -n "$comment_id" ]]; then
+    echo "PR #$PR: heartbeat posted (id=$comment_id, owner=$owner)" >&2
+  else
+    echo "warning: PR #$PR could not post heartbeat comment — continuing (issue #2229)" >&2
   fi
 }
 
@@ -305,6 +473,7 @@ ensure_labels() {
   # Idempotent — creates if missing, updates colour/description if present.
   gh label create "$REVIEWING" --color FBCA04 --description "PR review in progress (SGE)"     --force >/dev/null
   gh label create "$REVIEWED"  --color 0E8A16 --description "Reviewed via SGE PR-review gate" --force >/dev/null
+  gh label create "$CHANGES_REQUESTED" --color D93F0B --description "Review failed — findings need addressing (SGE)" --force >/dev/null
 }
 
 # The pr-fixing claim label is only created by the fix path (claim-fix), so the
@@ -319,12 +488,40 @@ ensure_hold_label() {
   gh label create "$HOLD" --color B60205 --description "Held for human sign-off (SGE)" --force >/dev/null
 }
 
+# The excluded-reviewer label is only created by the excluded-reviewer subcommand
+# (issue #2293): independence check structurally excludes the reviewer identity.
+# Same idempotent shape — a distinct colour from hold to be visually distinguishable.
+ensure_excluded_reviewer_label() {
+  gh label create "$EXCLUDED_REVIEWER" --color 0075CA \
+    --description "Reviewer excluded — independence gate structurally could not satisfy (SGE #2293)" \
+    --force >/dev/null
+}
+
+# excluded_reviewer_status -- print "excluded-reviewer=<bool>" for the
+# excluded-reviewer label (issue #2293). Thin wrapper over the shared reader;
+# fails non-zero on an unreadable state so callers fail CLOSED.
+excluded_reviewer_status() {
+  _read_label_state '"excluded-reviewer=\(index("excluded-reviewer")!=null)"' \
+    excluded_reviewer_status 'excluded-reviewer label' 2293
+}
+
 # hold_status -- print "hold=<bool>" for the hold label (issue #1393). Thin
 # wrapper over the shared REST→GraphQL→fail-loud reader (_read_label_state);
 # fails non-zero on an unreadable state so callers fail CLOSED (hold absent must
 # be proven, not assumed).
 hold_status() {
   _read_label_state '"hold=\(index("hold")!=null)"' hold_status 'hold label' 1393
+}
+
+# changes_requested_status -- print "changes-requested=<bool>" for the
+# changes-requested label (issue #2238). Thin wrapper over the shared
+# REST→GraphQL→fail-loud reader, kept deliberately separate from
+# label_status rather than folded into its output — label_status's exact
+# string "reviewing=false reviewed=true" is depended on verbatim elsewhere
+# in this script (the post-swap verification loop in `pass`) and by
+# pr-labels-forgejo-adapter.test.sh; changing its shape would break both.
+changes_requested_status() {
+  _read_label_state '"changes-requested=\(index("changes-requested")!=null)"' changes_requested_status 'changes-requested label' 2238
 }
 
 # fix_claim_status -- print "fixing=<bool>" for the pr-fixing claim (issue
@@ -616,7 +813,12 @@ await_head_convergence() {
 # #1166). It is excluded from the green guard because it is definitionally red
 # pre-swap and is OWNED by the transition being performed; every other check
 # keeps its full fail-closed weight.
-SELF_LABEL_CHECK_NAME="Require pr-reviewed label"
+# Overridable per-repo via SGE_SELF_LABEL_CHECK_NAME (issue #2185): the literal
+# job name varies by repo (e.g. ppp's gate job is "PR reviewed merge gate", not
+# the historical default) — a hardcoded name never matches there, so the
+# self-exclusion silently fails to apply and the gate's own expected-red
+# pre-swap state permanently blocks `pass --auto-merge`.
+SELF_LABEL_CHECK_NAME="${SGE_SELF_LABEL_CHECK_NAME:-Require pr-reviewed label}"
 
 assert_required_checks_green() {
   local raw rc err errfile
@@ -924,6 +1126,8 @@ if [ "$_PRL_HOST" = "forgejo" ]; then
       "pr-reviewing" "FBCA04" "PR review in progress (SGE)"
     "$_PRL_ADAPTER" pr-ensure-label "$_PRL_ORIGIN" \
       "pr-reviewed"  "0E8A16" "Reviewed via SGE PR-review gate"
+    "$_PRL_ADAPTER" pr-ensure-label "$_PRL_ORIGIN" \
+      "changes-requested" "D93F0B" "Review failed — findings need addressing (SGE)"
   }
 
   ensure_fixing_label() {
@@ -1490,6 +1694,11 @@ case "$CMD" in
     fi
     add_label "$REVIEWED"           # open the gate first…
     remove_label "$REVIEWING"       # …then drop the amber label
+    remove_label "$CHANGES_REQUESTED" # mutually exclusive with pr-reviewed (#2238)
+    # Clear any prior excluded-reviewer state (issue #2293). Not Forgejo-gated:
+    # remove_label is fail-silent and the excluded-reviewer subcommand runs on
+    # both host types — consistent with how `held` and `remove_label` work.
+    remove_label "$EXCLUDED_REVIEWER"
     # Retry the verify check: GitHub's API can lag a write by a few seconds.
     # The Forgejo adapter writes synchronously (the label mutation has already
     # committed when the POST returns), so the inter-attempt sleep is pure dead
@@ -1504,6 +1713,17 @@ case "$CMD" in
     if [[ "$STATUS" != "reviewing=false reviewed=true" ]]; then
       echo "error: label swap did not take on PR #$PR after 3 attempts ($STATUS)" >&2
       exit 1
+    fi
+    # Best-effort verification that changes-requested actually cleared (#2238,
+    # M2): remove_label tolerates failures as warnings, so unlike the
+    # reviewing/reviewed swap above this is not re-verified by the retry loop.
+    # GitHub-only (mirrors the pass/status host-scoping used elsewhere here);
+    # a leftover label is reported, not fatal — the gate already opened.
+    if [[ "${_PRL_HOST:-github}" != "forgejo" ]]; then
+      CRS="$(changes_requested_status 2>/dev/null)" || CRS=""
+      if [[ "$CRS" == *"changes-requested=true"* ]]; then
+        echo "warning: PR #$PR — '$CHANGES_REQUESTED' label did not clear after pass (#2238); remove it manually" >&2
+      fi
     fi
     echo "PR #$PR: gate passed ($STATUS)"
     if [[ "$AUTO_MERGE" == "true" ]]; then
@@ -1542,12 +1762,51 @@ case "$CMD" in
     ;;
 
   fail)
+    # Advisory-mode mechanical guard (issue #754, extended #2238 M5): a
+    # review-ONLY dispatch may post a verdict comment but must never move
+    # merge-gate labels — including the changes-requested write `fail` now
+    # performs. Mirrors the `pass` guard above; same distinct exit 4.
+    if [[ "${SGE_REVIEW_ADVISORY:-}" == "1" ]]; then
+      echo "refusing: SGE_REVIEW_ADVISORY=1 — advisory (review-only) dispatch: 'fail' cannot move the $CHANGES_REQUESTED gate (issue #754, #2238)" >&2
+      echo "Post the review verdict as a comment (mode: advisory) instead. To close the gate, re-run without SGE_REVIEW_ADVISORY set in the environment." >&2
+      exit 4
+    fi
     ensure_labels
     # Delete the claim comment before removing labels (issue #1312 AC4).
     # Clears the metadata so a subsequent start-review sees a clean slate.
     delete_claim_comment
     remove_label "$REVIEWED"        # gate stays closed
     remove_label "$REVIEWING"       # review is over; the findings carry the state
+    # Fail-closed re-check (#2238 Blocker 2): remove_label above is
+    # deliberately fail-soft (a transient API error only warns), but
+    # sge-auto-merge.yml triggers on ANY `labeled` event and gates solely on
+    # `pr-reviewed` being present (minus hold-labels.txt, which does not list
+    # changes-requested). If the pr-reviewed removal silently failed, adding
+    # changes-requested next would fire that trigger on a PR still wearing
+    # the merge-gate label — auto-merging a review that just failed. Re-read
+    # label state on GitHub before arming changes-requested; abort loudly
+    # rather than proceed if pr-reviewed is still present. Forgejo has no
+    # labeled-event auto-merge trigger to race (#1419 carve-out), so this
+    # re-check is GitHub-only, same host-scoping used elsewhere here.
+    if [[ "${_PRL_HOST:-github}" != "forgejo" ]]; then
+      REMOVAL_STATUS="$(label_status)" || {
+        echo "error: PR #$PR — could not re-verify '$REVIEWED' removal before applying '$CHANGES_REQUESTED'; refusing to risk arming auto-merge on a failed review (issue #2238 Blocker 2)" >&2
+        exit 1
+      }
+      if [[ "$REMOVAL_STATUS" == *"reviewed=true"* ]]; then
+        echo "error: PR #$PR — '$REVIEWED' is still present after removal; refusing to add '$CHANGES_REQUESTED' (would arm sge-auto-merge.yml's labeled trigger on a PR that still carries the merge-gate label — issue #2238 Blocker 2)" >&2
+        echo "Retry 'pr-labels.sh fail $PR', or remove '$REVIEWED' manually, then re-run." >&2
+        exit 1
+      fi
+    fi
+    # Best-effort (#2238, M4): pr-reviewing is already released above, so a hard
+    # failure here (transient API error) must not crash the script — the review
+    # findings are already posted and the gate is already closed either way.
+    # Calls the (possibly Forgejo-overridden) add_label in a subshell so a
+    # non-zero exit under `set -e` cannot abort this script.
+    if ! (add_label "$CHANGES_REQUESTED"); then
+      echo "warning: failed to add label '$CHANGES_REQUESTED' to PR #$PR: add_label failed" >&2
+    fi
     STATUS="$(label_status)" || STATUS="(label_status unavailable)"
     echo "PR #$PR: gate closed — findings on the PR carry the state ($STATUS)"
     ;;
@@ -1561,6 +1820,7 @@ case "$CMD" in
     # When hold is removed, the next cycle's /sge:pr-review dispatch finds a
     # clean prior sge-verdict at the current head and promotes via delta fast-path.
     remove_label "$REVIEWING"       # release the claim so future cycles can run
+    remove_label "$CHANGES_REQUESTED" # review PASSED — must not still read as failed (#2238)
     # $REVIEWED is intentionally NOT applied while hold is present.
     HOLD_ST="$(hold_status 2>/dev/null)" || HOLD_ST="(hold_status unavailable)"
     echo "PR #$PR: review passed — held for human sign-off ($HOLD_ST)"
@@ -1587,6 +1847,12 @@ case "$CMD" in
   stale)
     # New commits landed after a pass — the prior verdict no longer covers HEAD.
     remove_label "$REVIEWED"
+    # Clean up any orphaned claim comment too (issue #2193 follow-up from
+    # #2185/#2192): a claim posted by a review still in flight when this
+    # reversal fires would otherwise survive with the label gone, blocking
+    # the next legitimate reviewer's start-review for the rest of its TTL
+    # window. Best-effort, same as pass/fail's cleanup — never fatal here.
+    delete_claim_comment
     echo "PR #$PR: $REVIEWED dropped (stale — new commits since last verdict)"
     ;;
 
@@ -1697,6 +1963,13 @@ case "$CMD" in
 
     # 4) Stale: strip the label and post a comment.
     remove_label "$REVIEWED"
+    # Clean up any orphaned claim comment too (issue #2193 follow-up from
+    # #2185/#2192): stripping pr-reviewed here reverses a completed review
+    # without going through pass/fail, so their claim-comment cleanup never
+    # runs. A leftover claim from a review still in flight when this fires
+    # would otherwise block the next legitimate reviewer's start-review for
+    # the rest of its TTL window. Best-effort — never fatal here.
+    delete_claim_comment
     echo "PR #$PR: $REVIEWED stripped — verdict was pinned to ${VERDICT_SHA:0:12}, new head is ${NEW_HEAD:0:12} (issue #1941)"
 
     # Best-effort comment so the author sees WHY the gate reopened.
@@ -1706,6 +1979,113 @@ case "$CMD" in
       gh api "repos/$REPO_FULL/issues/$PR/comments" -f body="$COMMENT_BODY" >/dev/null 2>&1 \
         || echo "warning: could not post staleness comment on PR #$PR (best-effort)" >&2
     fi
+    ;;
+
+  review-coverage)
+    # Issue #2294: read-only report of whether the PR's latest sge-verdict
+    # still covers HEAD, for /sge:pr-review and /sge:pr-monitor to consult
+    # before treating a PR as reviewed/covered mid-session. Unlike sync-check
+    # (which only fires on a GitHub push webhook and mutates pr-reviewed),
+    # this makes no label changes and can be called any time. Reuses the same
+    # verdict-SHA extraction (reviews first, then issue comments, trusted-
+    # author filter) as sync-check.
+    REPO_FULL="${GH_REPO:-$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || true)}"
+    HEAD_SHA=$(gh pr view "$PR" --json headRefOid --jq .headRefOid 2>/dev/null) || HEAD_SHA=""
+    if [[ -z "$HEAD_SHA" ]]; then
+      echo "PR #$PR: review-coverage — could not read head SHA; covered=unknown"
+      exit 0
+    fi
+
+    VERDICT_SHA=""
+    if [[ -n "$REPO_FULL" ]]; then
+      TRUST_FILTER='.user.login == "wtp-sge[bot]" or .user.login == "github-actions[bot]"
+           or (((.author_association // "") | ascii_upcase) as $assoc
+               | $assoc == "OWNER" or $assoc == "MEMBER" or $assoc == "COLLABORATOR")'
+      VERDICT_SHA=$(gh api "repos/$REPO_FULL/pulls/$PR/reviews" --paginate \
+        --jq '
+          [.[] | select(.body != null)
+           | select('"$TRUST_FILTER"')
+           | select(.body | test("```sge-verdict"))
+           | .body | split("\n")[] | select(test("^\\s*(commit|sha|head)\\s*:"))
+           | capture(":\\s*(?<val>\\S+)") | .val
+          ] | last // empty' \
+        2>/dev/null) || VERDICT_SHA=""
+
+      if [[ -z "$VERDICT_SHA" ]]; then
+        VERDICT_SHA=$(gh api "repos/$REPO_FULL/issues/$PR/comments" --paginate \
+          --jq '
+            [.[] | select(.body != null)
+             | select('"$TRUST_FILTER"')
+             | select(.body | test("```sge-verdict"))
+             | .body | split("\n")[] | select(test("^\\s*(commit|sha|head)\\s*:"))
+             | capture(":\\s*(?<val>\\S+)") | .val
+            ] | last // empty' \
+          2>/dev/null) || VERDICT_SHA=""
+      fi
+    fi
+
+    if [[ -z "$VERDICT_SHA" ]]; then
+      # No verdict found — cannot prove coverage either way. Fail closed:
+      # never report covered=true without a verdict to compare against.
+      echo "PR #$PR: review-coverage — no sge-verdict found; covered=unknown"
+      exit 0
+    fi
+
+    VERDICT_NORM=$(printf '%s' "$VERDICT_SHA" | tr '[:upper:]' '[:lower:]')
+    HEAD_NORM=$(printf '%s' "$HEAD_SHA" | tr '[:upper:]' '[:lower:]')
+    V_LEN=${#VERDICT_NORM}
+    H_LEN=${#HEAD_NORM}
+    # Malformed verdict SHA (too short or non-hex): cannot prove coverage
+    # either way. Fail closed rather than falling through into the
+    # not-covered branch below, which would classify a bogus ref against a
+    # compare call that is certain to fail (mirrors sync-check's same guard).
+    if [[ "$V_LEN" -lt 7 || "$H_LEN" -lt 7 || ! "$VERDICT_NORM" =~ ^[0-9a-f]+$ ]]; then
+      echo "PR #$PR: review-coverage — malformed verdict SHA '$VERDICT_SHA'; covered=unknown"
+      exit 0
+    fi
+    PREFIX_LEN=$(( V_LEN < H_LEN ? V_LEN : H_LEN ))
+    if [[ "${VERDICT_NORM:0:$PREFIX_LEN}" == "${HEAD_NORM:0:$PREFIX_LEN}" ]]; then
+      echo "PR #$PR: review-coverage — verdict covers head (${VERDICT_SHA:0:12}); covered=true"
+      exit 0
+    fi
+
+    # Verdict SHA does not match head: list the intervening commits and
+    # classify the delta. SGE_REVIEW_COVERAGE_DELTA_MAX (default 3) is the
+    # threshold below which a delta review scoped to just those commits is
+    # appropriate (AC4); at or above it, the change is substantial enough
+    # that the prior review no longer applies at all (AC5).
+    DELTA_MAX="${SGE_REVIEW_COVERAGE_DELTA_MAX:-3}"
+    if [[ -z "$REPO_FULL" ]]; then
+      echo "PR #$PR: review-coverage — could not resolve repo; covered=unknown"
+      exit 0
+    fi
+    if ! COMMITS_JSON=$(gh api "repos/$REPO_FULL/compare/${VERDICT_SHA}...${HEAD_SHA}" \
+        --jq '[.commits[] | {sha: .sha, message: (.commit.message | split("\n")[0])}]' \
+        2>/dev/null); then
+      # The compare call failing is NOT the same as zero intervening commits
+      # (rate limit, a rewritten/force-pushed verdict SHA no longer reachable,
+      # a permission hiccup). Reporting scope=delta here would fabricate a
+      # confident "safe to delta-review" verdict from an unanswered question —
+      # fail closed instead.
+      echo "PR #$PR: review-coverage — could not fetch commit range ${VERDICT_SHA:0:12}...${HEAD_SHA:0:12}; covered=unknown"
+      exit 0
+    fi
+    [[ -n "$COMMITS_JSON" ]] || COMMITS_JSON='[]'
+
+    COMMIT_COUNT=$(printf '%s' "$COMMITS_JSON" | jq 'length' 2>/dev/null) || COMMIT_COUNT=0
+    if [[ "$COMMIT_COUNT" -ge "$DELTA_MAX" ]]; then
+      SCOPE="substantial"
+    else
+      SCOPE="delta"
+    fi
+
+    echo "PR #$PR: review-coverage — verdict pinned to ${VERDICT_SHA:0:12}, head is ${HEAD_SHA:0:12}; covered=false scope=$SCOPE commits=$COMMIT_COUNT"
+    if [[ "$SCOPE" == "delta" ]]; then
+      echo "  post-review commits (delta review scoped to these is appropriate):"
+    else
+      echo "  post-review commits (substantial — the prior review no longer applies; a full re-review is needed):"
+    fi
+    printf '%s\n' "$COMMITS_JSON" | jq -r '.[] | "    " + .sha[0:7] + " " + .message' 2>/dev/null
     ;;
 
   claim-fix)
@@ -1775,19 +2155,63 @@ case "$CMD" in
     echo "PR #$PR: $FIXING released"
     ;;
 
+  heartbeat)
+    # Prove a review claim is still genuinely in flight (issue #2229). Call at
+    # phase boundaries (post-dispatch, post-fix, post-CI-poll) on any review
+    # expected to outrun CLAIM_COMMENT_TTL — a heartbeat within
+    # CLAIM_HEARTBEAT_WINDOW seconds of "now" keeps claim_comment_live()
+    # returning true even after claimedAt + ttl has elapsed, so the mutex does
+    # not release out from under active work. Advisory/best-effort: never
+    # fails the review just because the comment post failed.
+    post_claim_heartbeat
+    ;;
+
   status)
-    # Print gate label states. On GitHub: "reviewing=<bool> reviewed=<bool> hold=<bool>"
-    # (issue #1393 extends the original reviewing/reviewed pair). On Forgejo the hold
-    # mechanism is not wired (issue #1419), so keep the original two-field output
-    # ("reviewing=<bool> reviewed=<bool>") — exact-match consumers on that host and
+    # Print gate label states. On GitHub: "reviewing=<bool> reviewed=<bool>
+    # hold=<bool> changes-requested=<bool> excluded-reviewer=<bool>" (issue
+    # #1393 extends the original reviewing/reviewed pair with hold; issue
+    # #2238 extends it again with changes-requested; issue #2293 adds
+    # excluded-reviewer). On Forgejo none of hold, changes-requested, or
+    # excluded-reviewer is wired (issue #1419's carve-out extends to both),
+    # so keep the original two-field output ("reviewing=<bool>
+    # reviewed=<bool>") — exact-match consumers on that host and
     # pr-labels-forgejo-adapter.test.sh depend on it.
     LS="$(label_status)" || { echo "error: could not read label state for PR #$PR" >&2; exit 1; }
     if [[ "${_PRL_HOST:-github}" == "forgejo" ]]; then
       printf '%s\n' "$LS"
     else
       HS="$(hold_status 2>/dev/null)" || HS="hold=unknown"
-      printf '%s %s\n' "$LS" "$HS"
+      CRS="$(changes_requested_status 2>/dev/null)" || CRS="changes-requested=unknown"
+      EXCL_ST="$(excluded_reviewer_status 2>/dev/null)" || EXCL_ST="excluded-reviewer=unknown"
+      printf '%s %s %s %s\n' "$LS" "$HS" "$CRS" "$EXCL_ST"
     fi
+    ;;
+
+  excluded-reviewer)
+    # Independence-exclusion termination path (issue #2293): the independence check
+    # structurally excludes the only available reviewer identity — a different failure
+    # mode from `held` (review passed but a human hold blocks promotion) and from
+    # `fail` (review completed with findings). Here the gate CANNOT be satisfied by
+    # this reviewer at all, independent of the review's content.
+    #
+    # Distinct from `held`:
+    #   `held`              — review ran cleanly; a human `hold` label blocks promotion
+    #   `excluded-reviewer` — reviewer identity is excluded; gate cannot satisfy at all
+    #
+    # Three actions (mirrors `held`'s structure, uses a different label):
+    #   1. release pr-reviewing  — future cycles can claim the gate without obstruction
+    #   2. do NOT apply pr-reviewed — the gate stays closed; auto-merge never arms
+    #   3. apply excluded-reviewer — explicit, auditable, never silent (issue #2219)
+    #
+    # Idempotent: add_label and remove_label both tolerate the label already being
+    # in the desired state. Works without .sge/posture.yaml — no dependency on #2284.
+    ensure_excluded_reviewer_label
+    remove_label "$REVIEWING"         # release claim so future cycles can run
+    # $REVIEWED is intentionally NOT applied: the gate is structurally blocked.
+    add_label "$EXCLUDED_REVIEWER"    # explicit, never silent (issue #2219)
+    EXCL_ST="$(excluded_reviewer_status 2>/dev/null)" || EXCL_ST="(excluded_reviewer_status unavailable)"
+    echo "PR #$PR: reviewer identity excluded — gate structurally cannot satisfy; $REVIEWING released, $EXCLUDED_REVIEWER applied ($EXCL_ST)"
+    echo "Once a properly-provisioned non-excluded reviewer identity is available, a new review cycle will promote normally via pass."
     ;;
 
   *)

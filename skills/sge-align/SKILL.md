@@ -106,6 +106,8 @@ gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null \
 
 `IR` (`scripts/issue-read.sh`) routes issue list/view calls through `scripts/forgejo-adapter.sh` when the repo host is Forgejo/Gitea, and delegates to `gh` unchanged for GitHub. Re-define `IR` at the top of every subsequent Bash call (same SPEC-057 shell-state rule as `WRC`).
 
+**Self-hosted Forgejo/Gitea:** the host is classified by hostname substring (`*forgejo*`/`*gitea*`); a self-hosted instance on a vanity domain (e.g. `git.example.com`) needs `SGE_FORGEJO_HOSTS` (`;`-separated bare hosts) declared before sweeping it — otherwise `IR` fails loud naming the unrecognised host (ADR-0010).
+
 ## Sweep scope (governance layers L0–L8)
 
 L0 Vision, L1 Capability Model, L2 Design System, L3 Feature Specs, L4 ADRs, L5 DAG Manifest, L6 Change Protocol, L7 SGE Alerts, L8 Cortex.
@@ -154,10 +156,10 @@ A subagent returning malformed records gets one retry, then its check is reporte
 | **C2** | Vision → Capability | a capability with no MVP-vs-post-MVP classification |
 | **C3** | Capability → Spec | a `status != design` capability with no active feature spec (orphan capability) |
 | **C4** | Spec → Acceptance criteria | a `built` spec with no Gherkin — plus a `## Validation` invariants sub-check, mechanism: `references/check-mechanisms.md` |
-| **C5** | Acceptance criteria → Tests | a Gherkin scenario with no test — mechanism: `references/check-mechanisms.md` |
+| **C5** | Acceptance criteria → Tests | a Gherkin scenario with no test, **or** a stub that exists but is seeded-but-unverified (not runner-discoverable, or TODO-only with no real assertion) — mechanism: `references/check-mechanisms.md` |
 | **C6** | Spec ↔ Code | an `approved`/`implemented` spec with no code, or a route with no spec |
 | **C7** | Spec/ADR → Vision citation | no `success_measure_moved` / `vision_element_protected` |
-| **C8** | Stakeholder questions | an open `## Open Questions` with no `QD-NN`, or an unanswered `QD-NN` past threshold |
+| **C8** | Stakeholder questions | an open `## Open Questions` with no `QD-NN`, an unanswered `QD-NN` past threshold, **or** a structural/referential-integrity defect in the QD registry (duplicate id, undocumented closure, silently reverted closed-decision text, dangling/stale `questions[]` ref) — mechanism: `skills/sge-align/assets/check-qd-registry.sh` (issue #2313) |
 | **C9** | Cross-repo contract | a contract ref that no longer matches upstream — mechanism: `references/check-mechanisms.md` |
 | **C10** | Design System (L2) | `/sge:atomic-audit` reports maturity tier L0/L1 — mechanism: `references/check-mechanisms.md` |
 | **C11** | Agent Security (Zero-Trust) | one of five ZT controls fails — full mechanism: `references/agent-security-c11.md` |
@@ -175,6 +177,8 @@ A subagent returning malformed records gets one retry, then its check is reporte
 **Composite coherence (0–100) and per-check weights** (C3/C4/C6 ×3, C1/C5/C13 ×2, rest ×1): `references/check-mechanisms.md`. This composite is the repo's **Audit Score (AS)** sample (`audit_score`) — an operational fleet-audit rollup of per-check pass-rates. **It is NOT SM-2.** The single canonical SM-2 is the platform's 7-weighted-metric `coherence_score` composite (`platform/app/backend/src/services/drift-metrics/coherence-score.ts`, governed by SGD-032-S8 / #883; see `platform/docs/sgd-build/vision.md`). Per C16 / SGD-051 no surface other than that platform composite may call itself SM-2 — this rollup carries the distinct Audit Score name (decision #834).
 
 > **Auxiliary (advisory, unscored): plugin-skill shadowing (issue #1066).** A repo-local `.claude/commands/<name>.md` whose basename matches a bundled SGE skill silently shadows `/sge:<name>` (a bare `/<name>` resolves to the stale local copy). Run `scripts/detect-shadowed-commands.sh <target-repo>` (from a plugin checkout, or `--skills-dir <plugin>/skills`) to list collisions; reconcile each by deleting the stale command or converting it to a thin `/sge:<name>` wrapper. This is a hygiene warning, not a scored cascade gap.
+>
+> **Auxiliary (advisory, unscored): optimistic closures (issue #2221).** An issue closed as `COMPLETED` whose acceptance criteria remain visibly unmet is the same "artefact asserting a state that is not true" failure this whole sweep exists to catch — it happened twice in one seeded repo, once with a PR body that said outright the issue should stay open. Sweep recently-closed issues (`gh issue list --state closed --search "reason:completed" --limit 100`, or the ALM-neutral `$IR` equivalent) for a parseable `- [ ]`/`- [x]` acceptance-criteria checklist with any box still unchecked; for each, check the closing PR's body for closing-keyword + stay-open contradiction language too (same two checks as `.github/scripts/check-issue-closure-integrity.sh`, sge#2221 — reuse its detection logic rather than re-deriving it). Report as a drift finding (not a scored gap — no repo has fully agreed a weight for this yet) with the closing PR link and the unmet rows, so a human can decide whether to reopen. This is intentionally lighter than a full weighted `Cn` catalogue check: unlike C1–C39's structural artefact-graph gaps, "was this issue actually done" needs the same judgement call `/sge:pr-review` 4.1.1 already makes at merge time, and a fully scored/weighted C-check for it is future work, not this sweep's scope.
 
 ## Step 2 — Reconcile with existing issues (idempotent — do this BEFORE creating anything)
 

@@ -111,6 +111,10 @@ Two further legs over `fetch_claimed_prs`, both mechanised in [`monitor-lib.sh`]
 
 A **fourth leg** over drafts: `is_stale_draft <pr>` returns 0 (no claim label, head older than `STALE_DRAFT_MINUTES` (default **45**), no check in flight) means presumed abandoned. `stale_draft_lane <pr>` then readies a **green** draft (logged + audited) or posts an idempotent abandonment comment on a **red** one â€” **never** auto-ready over red CI; an active draft is a no-op. **Run it here** â€” full rules and rationale: [`stale-draft-lane.md`](references/stale-draft-lane.md).
 
+### Stacked-PR detection & merge-order recommendation (#2296)
+
+**At lane-assignment and each backfill,** scan the candidate set for stacked PRs — where one PR's `baseRefName` equals another open PR's `headRefName`. Before acting on any lane in a stack, emit a merge-order recommendation with reasoning (which PR must land first and why). Flag **partial-merge hazards** (merging PR A alone leaves a governance artefact inconsistent with PR B's correction); for any PR in the queue that carries a merge commit, check for silent reversions per AC3. Full detection rules and the merge-order algorithm: [`../lib/stacked-pr-hazards.md`](../lib/stacked-pr-hazards.md).
+
 ---
 
 ## Merge readiness â€” three gates
@@ -224,8 +228,8 @@ Follow through by gate:
 
   ```bash
   ${CLAUDE_PLUGIN_ROOT}/skills/pr-review/pr-labels.sh status "$pr"
-  # clean pass  â†’ reviewing=false reviewed=true hold=false
-  # failed gate â†’ reviewing=false reviewed=false hold=false  (findings on the PR carry the state)
+  # clean pass  â†’ reviewing=false reviewed=true hold=false changes-requested=false
+  # failed gate â†’ reviewing=false reviewed=false hold=false changes-requested=true  (findings on the PR carry the detail, the label carries the visible state — issue #2238)
   ```
 
   If the review passed but `status` doesn't show `reviewed=true`, re-run the review rather than patching labels by hand.

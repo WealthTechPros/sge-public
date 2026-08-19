@@ -2,7 +2,8 @@
 
 Progressive-disclosure reference for Phase 3's "push early, draft early" step and
 Phase 6's PR-body rule. Loaded only when the repo tracks work outside GitHub
-Issues; on a plain GitHub repo the default `Closes #N` flow is unchanged.
+Issues; on a plain GitHub repo the default is `Part of #N`, upgraded to a closing
+keyword only when earned (close-keyword.md).
 
 ## The problem
 
@@ -14,11 +15,19 @@ shows the item still open after the change merged.
 
 ## The seam
 
+> **`$SGE_ROOT` convention.** The snippet below assumes `$SGE_ROOT` is already
+> resolved in the current shell via the copy-verbatim `_sge_root()` bootstrap
+> function (`scripts/resolve-sge-root.sh`'s header comment) — never a bare
+> `${CLAUDE_PLUGIN_ROOT:-.}`, which is empty whenever the variable is unset
+> and silently breaks this call from any cwd other than the plugin root
+> itself (#1567/#1963). Do not copy this snippet standalone without first
+> resolving `$SGE_ROOT`.
+
 Route close-on-merge through the ALM write seam, `scripts/issue-write.sh`
 (`$IW`), which is backend-aware:
 
 ```bash
-IW="${CLAUDE_PLUGIN_ROOT:-.}/scripts/issue-write.sh"
+IW="$SGE_ROOT/scripts/issue-write.sh"
 
 # AFTER the PR exists — the change URL is the correlation key, so this cannot
 # run before `gh pr create`.
@@ -27,7 +36,7 @@ IW="${CLAUDE_PLUGIN_ROOT:-.}/scripts/issue-write.sh"
 
 | Backend | What `close-link` does |
 |---|---|
-| **github** (unset/empty) | **Declarative** — prints the `Closes #N` token for the PR body and makes **no API call**. Skip it when the body already carries the keyword; it edits nothing. |
+| **github** (unset/empty) | **Declarative** — prints the `Closes #N` token for the PR body and makes **no API call**. Skip it when the body already carries the keyword; it edits nothing. **Only use the printed token when the PR has earned it** — [close-keyword](close-keyword.md); otherwise the body keeps `Part of #N`. |
 | **jira** | Records the merge as a development-panel **remote link** on the item (`globalId` = the change URL, so a re-run upserts rather than duplicating), plus the close transition when `SGE_JIRA_CLOSE_TRANSITION_ID` is configured. A non-2xx write **fails loud** — never silently swallowed. |
 | *unrecognised* | **Fails loud** naming the value (DR1) — no `gh` call, no Jira REST call. |
 

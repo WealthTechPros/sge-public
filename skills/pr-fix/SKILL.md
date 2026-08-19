@@ -198,19 +198,31 @@ ${CLAUDE_PLUGIN_ROOT}/skills/pr-review/pr-labels.sh claim-fix $1 || exit 3
 - **Exit 3** — another run holds a *fresh* `pr-fixing` claim (< `SGE_FIX_CLAIM_TTL_MIN`, default 30 min). **Back off; do not race.** Someone else owns this PR's fix.
 - **Proceeds** — no claim, or a *stale* one (crashed session) you take over. `--force-claim` overrides deliberately.
 
+**Lane manifest (issue #2214, ask 3).** Also post an advisory lane-manifest claim — `source .../pr-review/review-lib.sh; rl_post_lane_manifest $1 fix` — so a reviewer landing on this PR while you are force-pushing fix commits sees `role: fix` is live and defers, rather than reviewing content mid-rewrite. Fire-and-forget; never blocks the fix.
+
 `pr-fixing` is a self-expiring **lease**, honoured by `/sge:pr-monitor`'s `CLAIM_LABELS_RE` so its lanes skip a PR you are fixing. You **must** release it on exit (see [When to exit](#when-to-exit)) — a crashed session's claim frees itself within the lease window, but an explicit release frees the lane immediately.
 
 ---
 
 ## Step 1: Check the PR branch out into an isolated worktree
 
-Do **not** assume the branch exists locally, and never fix it in the shared main checkout. Fetch and check it out in its own worktree — the canonical `../<repo>-worktrees/pr-fix-<pr>` layout (placement, lifecycle, and the "branch already checked out elsewhere" rule are defined once in [`worktrees`](../worktrees/SKILL.md); don't restate them):
+Do **not** assume the branch exists locally, and never fix it in the shared main checkout. Fetch and check it out in its own worktree — the canonical `../<repo>-worktrees/pr-fix-<pr>` layout (placement, lifecycle, and the "branch already checked out elsewhere" rule are defined once in [`worktrees`](../worktrees/SKILL.md); don't restate them).
+
+**Claim before create (issue #2214) — a `pr-review` lane fixing this same PR concurrently must not collide with `pr-fix`'s worktree.** Export an agent-unique `SGE_AGENT_ID` (never a bare session/temp path) and route through `resume-or-create.sh` with purpose `pr-fix`; on `backoff` another live agent already holds this PR's `pr-fix` worktree — do not steal it:
 
 ```bash
 REPO_ROOT=$(git rev-parse --show-toplevel)
-WT="$REPO_ROOT/../$(basename "$REPO_ROOT")-worktrees/pr-fix-$1"   # see ../worktrees/SKILL.md
+export SGE_AGENT_ID="${SGE_AGENT_ID:-fix-$1}"
 git fetch origin
-git worktree add "$WT" --detach
+# Purpose-scoped claim decision — full mechanics: ../worktrees/SKILL.md#pr-scoped-lanes-pr-review--pr-fix--qa---same-helper-purpose-param-issue-2214
+while IFS= read -r _line; do case "$_line" in
+  verdict:*)  roc_verdict="${_line#verdict:}" ;;
+  worktree:*) roc_worktree="${_line#worktree:}" ;;
+esac; done < <(bash "${CLAUDE_PLUGIN_ROOT}/skills/worktrees/resume-or-create.sh" decide "$1" "$REPO_ROOT" "" pr-fix)
+[ "$roc_verdict" = "backoff" ] && { echo "PR #$1: pr-fix worktree claimed by a live agent — back off"; exit 3; }
+WT="${roc_worktree:-$REPO_ROOT/../$(basename "$REPO_ROOT")-worktrees/pr-fix-$1}"
+[ -d "$WT" ] || git worktree add "$WT" --detach
+bash "${CLAUDE_PLUGIN_ROOT}/skills/worktrees/resume-or-create.sh" claim "$WT"
 cd "$WT" && gh pr checkout $1
 ```
 

@@ -29,6 +29,13 @@
 #   rl_test_doc_glob_regex          print the canonical test/BDD/doc-path ERE
 #                                   used by rl_diff_weighted_lines (#984)
 #   rl_diff_trivial <pr>            print 1|0 — issue #973 `trivial` tier
+#   rl_findings_provenance <pr> <file>
+#                                   ok|bleed|unverifiable — did this reply come
+#                                   from THIS PR's diff? (#2200)
+#   rl_findings_foreign_paths <pr> <file>
+#                                   finding paths absent from the PR's diff
+#   rl_diff_prose <pr>              print 1|0 — issue #2215 `prose` tier
+#                                   (docs-only; Phase 2 dispatches nothing)
 #                                   gate: 1 only for a whitespace-only diff
 #                                   (git diff -w/-b leaves nothing) OR a
 #                                   single-file dependency-lockfile diff with
@@ -36,6 +43,21 @@
 #                                   CLOSED to 0 (never-trivial) on any
 #                                   fetch/parse failure — a false "trivial"
 #                                   would skip specialist dispatch entirely.
+#   rl_diff_control_bearing <pr>    print 1|0 — issue #2211 behavioural-tier
+#                                   trigger: 1 when at least one changed file
+#                                   (MIXED-diff, unlike prose's all-files rule)
+#                                   matches rl_control_bearing_glob_regex — a
+#                                   CI gate script, static audit/scanner, or
+#                                   policy/allowlist file. Escalates dispatch
+#                                   to /sge:qa-audit --adversarial regardless
+#                                   of DIFF_RISK's own tier. Fails closed to 0.
+#   rl_diff_oracle_bearing <pr>     print 1|0 — issue #2222 oracle-derivation
+#                                   review trigger: 1 when at least one changed
+#                                   file (MIXED-diff) matches
+#                                   rl_oracle_bearing_glob_regex — a snapshot,
+#                                   fixture, or oracle/invariant-named file.
+#                                   Applies three-question oracle-derivation
+#                                   lens in Phase 4.3b. Fails closed to 0.
 #   rl_phase5_verdict <pr>          sets PHASE5_SHA / PHASE5_VERDICT /
 #                                   PHASE5_BLOCKERS in the caller's shell
 #   rl_unresolved_threads <pr>      JSON array of unresolved threads; non-zero
@@ -56,12 +78,16 @@
 #   rl_pr_state <pr>                one-line {state,draft,head,labels} JSON
 #                                   for the #699 idempotency short-circuit
 #   rl_ensure_closing_link <pr> <n> append "Fixes #n" to the PR body unless a
-#                                   closing keyword for #n is already present
+#                                   closing keyword for #n is already present,
+#                                   a deliberate non-closing ref (`Part of #n`)
+#                                   is present, or #n is a tracking/umbrella
+#                                   issue (#2241). Fails toward NOT appending.
 #   rl_qa_evidence <pr>             sets QA_COMMENT / QA_HEAD_SHA from the
 #                                   latest qa-audit-report comment (#732)
 #   rl_changes_requested <pr>       count of CHANGES_REQUESTED reviews across
 #                                   the whole PR (must be 0 to arm auto-merge)
-#   rl_failing_checks <pr>          count of FAILURE/TIMED_OUT checks
+#   rl_failing_checks <pr>          count of checks in a terminal FAILURE state
+#                                   (incl. CANCELLED/STALE — #2212)
 #   rl_reviewer_ran <tool_uses> [reply_file]
 #                                   verify a dispatched review subagent ACTUALLY
 #                                   RAN before its verdict is folded into the
@@ -106,6 +132,16 @@
 #                                   Refuses (exit 6) a verdict declaring
 #                                   findings whose findings_comment is not
 #                                   `inline` or a verified URL (#1858)
+#   rl_verify_verdict_posted <pr> <review_id_or_url>
+#                                   CONFIRM (re-fetch, never assume) that a
+#                                   posted verdict review exists at the
+#                                   current head SHA with a parseable
+#                                   sge-verdict fence (#2292). Prints the
+#                                   review id and exits 0 when verified; exits
+#                                   non-zero with a diagnostic distinguishing
+#                                   "no review at all" from "a review exists
+#                                   but carries no verdict fence" (#2209) or
+#                                   "the head moved since posting" otherwise.
 #   rl_post_findings_comment <pr> [file|-]
 #                                   post the findings comment and read it back
 #                                   by id before printing its URL; non-zero +
@@ -251,29 +287,40 @@ rl_bot_refusal_regex() {
   printf '%s\n' "quota limit|rate limit|unable to review|(was ?n'?t|were ?n'?t|could ?n'?t|did ?n'?t|was not|were not|could not|did not|not) able to review"
 }
 
+# Shared bot-shaped-login regex (issue #2188, PR #2195 review). Single source
+# of truth for "does this GitHub login look like a bot account" — word-
+# boundary anchored so a human login like `abbott` never matches on its own
+# (always paired with `.user.type == "Bot"` by every caller; the type can't be
+# faked, the login string can). Was previously hand-copied into rl_hold_check
+# with an extra "wtp-sge" alternative rl_bot_signal's copy lacked — the two
+# had already drifted out of sync. One function now, both callers reuse it.
+rl_bot_login_regex() {
+  printf '%s\n' '\[bot\]$|\b(copilot|codeql|dependabot|semgrep|bot|wtp-sge)\b'
+}
+
 # Bot-reviewer signal (#688, #884). A match requires ALL of: a bot-shaped login
-# — word-boundary anchored so a human login like `abbott` never matches — AND
-# .user.type == "Bot" (the login string is attacker-controlled: a human
-# account named e.g. `totally-copilot` could otherwise fake a clean bot
-# review to suppress specialist dispatch; the account type cannot be faked) AND
-# a body that is NOT a quota-limit/refusal stub (#884 — a refusal is zero
-# opinions, never a clean pass). Emits one JSON object per hit: reviews as
-# {kind:"review",author,state,body}, inline comments as
+# (rl_bot_login_regex) AND .user.type == "Bot" (the login string is attacker-
+# controlled: a human account named e.g. `totally-copilot` could otherwise
+# fake a clean bot review to suppress specialist dispatch; the account type
+# cannot be faked) AND a body that is NOT a quota-limit/refusal stub (#884 —
+# a refusal is zero opinions, never a clean pass). Emits one JSON object per
+# hit: reviews as {kind:"review",author,state,body}, inline comments as
 # {kind:"comment",author,path,line,body}.
 # No output = no bot signal (a normal, common case — blocks nothing).
 rl_bot_signal() {
-  local pr="$1" repo refusal
+  local pr="$1" repo refusal bot_re
   repo=$(rl__repo) || return 1
-  # Injected via the environment (env.REFUSAL_RE): `gh api --jq` has no --arg
-  # passthrough, so the regex is read from a per-command env var. Both gh's
-  # embedded gojq and standalone jq expose `env`. The var is our own constant,
-  # not untrusted data.
+  # Injected via the environment (env.REFUSAL_RE / env.BOT_RE): `gh api --jq`
+  # has no --arg passthrough, so both regexes are read from per-command env
+  # vars. Both gh's embedded gojq and standalone jq expose `env`. Both vars
+  # are our own constants, not untrusted data.
   refusal=$(rl_bot_refusal_regex)
-  REFUSAL_RE="$refusal" gh api "repos/$repo/pulls/$pr/reviews" --jq \
-    '.[] | select(.user.type == "Bot" and (.user.login | test("\\[bot\\]$|\\b(copilot|codeql|dependabot|semgrep|bot)\\b"; "i")) and (((.body // "") | test(env.REFUSAL_RE; "i")) | not)) | {kind: "review", author: .user.login, state: .state, body: .body}' \
+  bot_re=$(rl_bot_login_regex)
+  REFUSAL_RE="$refusal" BOT_RE="$bot_re" gh api "repos/$repo/pulls/$pr/reviews" --jq \
+    '.[] | select(.user.type == "Bot" and (.user.login | test(env.BOT_RE; "i")) and (((.body // "") | test(env.REFUSAL_RE; "i")) | not)) | {kind: "review", author: .user.login, state: .state, body: .body}' \
     || return 1
-  REFUSAL_RE="$refusal" gh api "repos/$repo/pulls/$pr/comments" --jq \
-    '.[] | select(.user.type == "Bot" and (.user.login | test("\\[bot\\]$|\\b(copilot|codeql|dependabot|semgrep|bot)\\b"; "i")) and (((.body // "") | test(env.REFUSAL_RE; "i")) | not)) | {kind: "comment", author: .user.login, path: .path, line: .line, body: .body}' \
+  REFUSAL_RE="$refusal" BOT_RE="$bot_re" gh api "repos/$repo/pulls/$pr/comments" --jq \
+    '.[] | select(.user.type == "Bot" and (.user.login | test(env.BOT_RE; "i")) and (((.body // "") | test(env.REFUSAL_RE; "i")) | not)) | {kind: "comment", author: .user.login, path: .path, line: .line, body: .body}' \
     || return 1
 }
 
@@ -515,6 +562,369 @@ EOF
   echo 1
 }
 
+# rl_prose_allow_regex / rl_prose_deny_regex — the `prose` tier's two lists
+# (issue #2215). Extensions that CAN be prose, and paths that never are.
+#
+# The denylist is the whole point. A naive ".md => skip the review" rule is
+# wrong in this repo and dangerously so: a large share of tracked .md files are
+# under skills/, where SKILL.md IS the executable artefact — prose-as-behaviour.
+# Auto-passing those would blind the merge gate to exactly the class of change
+# that issues #2210-#2214 are about. Same for agent definitions, harness config
+# that steers agents, and the governance artefacts feeding the C4/C7 coherence
+# checks.
+#
+# ANCHORING (#2227 review blocker): every directory alternative is anchored
+# `(^|/)`, NOT a bare `^`. A repo can host more than one Claude Code root — this
+# one does: `platform/` carries its own `platform/.claude/agents/*.md`,
+# `platform/.claude/skills/*/SKILL.md` (59 tracked files) and
+# `platform/AGENTS.md`. Root-anchoring matched only the top-level copies, so a
+# PR editing `platform/.claude/agents/security-auditor.md` — the security
+# reviewer's own instructions — classified as prose and would have merged with
+# no review at all. `(^|/)` still refuses false positives: `myskills/x.md` and
+# `docs/specs-old/x.md` need a `/` or string start immediately before the
+# segment, so neither is caught.
+#
+# AGENTS.md is denylisted beside CLAUDE.md for the same reason: both are
+# repo-level instruction files that steer every agent operating in that subtree.
+#
+# NO `.txt` (#2227 review blocker). `.txt` was on the allowlist and is NOT a
+# prose signal in a software repo — it is this repo's format for CI control
+# lists, none of which read as documentation:
+#   * `.github/scripts/hold-labels.txt` calls itself the "SINGLE SOURCE OF
+#     TRUTH … blocks EVERY merge path", read by both `hold-gate.yml` and
+#     `sge-auto-merge.yml`. A zero-dispatch PR deleting `do-not-merge` /
+#     `needs-human` / `blocked` disarms the human-hold gate repo-wide — the
+#     merge gate's own kill-switch, edited through the gate that guards it.
+#   * `publish-redact-list.txt` is the rsync `--exclude-from` for the public
+#     mirror; dropping a line leaks whatever it redacted.
+#   * `requirements.txt` files are `pip install -r`'d in CI — a swapped pin is
+#     code execution on a runner holding repo credentials.
+# A `.txt` extension carries no evidence that the content is prose rather than
+# a manifest or a policy list, so it cannot earn the zero-dispatch tier.
+# `.github/` is denylisted outright for the same reason: nothing CI consumes
+# should ever reach a tier that dispatches no reviewer.
+rl_prose_allow_regex() { printf '%s' '\.(md|mdx)$'; }
+rl_prose_deny_regex()  {
+  printf '%s' '(^|/)(skills|agents|\.claude|\.github)/|(^|/)docs/(specs|decisions)/|(^|/)(CLAUDE|AGENTS)\.md$'
+}
+
+# rl_diff_prose <pr> -> 1|0. The `prose` risk tier (issue #2215): a diff that is
+# provably documentation-only, for which Phase 2 dispatches NOTHING — no Layer 1
+# native review, no bundled specialists, no repo specialists.
+#
+# This is a change to review DEPTH, not to the merge gate. The lane still claims
+# `pr-reviewing`, still runs Phase 3 CI gates and Phase 5.5 thread resolution,
+# and still posts an sge-verdict and promotes `pr-reviewed` exactly as today.
+#
+# Returns 1 only when EVERY changed file matches the allowlist AND NO changed
+# file matches the denylist. One non-prose file in the diff sinks the whole PR
+# back to normal tiering — a mixed docs+code PR is a code PR.
+#
+# FAIL CLOSED to 0 on any error, matching rl_diff_trivial's rationale and for a
+# stronger reason: this tier skips dispatch ENTIRELY, so a wrong 1 costs far
+# more than a missed 1 (which merely falls back to normal `low` scaling — never
+# a correctness gap).
+#
+# SECURITY (high-risk always wins): also fails closed when ANY changed file
+# matches rl_security_glob_regex, the same guard rl_diff_generated applies. A
+# doc under a security path keeps its normal tier rather than skipping review.
+#
+# Shell portability (issue #1492): the file list is read into an ARRAY split on
+# NEWLINES only, never left to the caller's shell to word-split — this file is
+# sourced, and zsh does not split unquoted parameters, which is exactly how the
+# #1492 misclassification silently skipped @security-auditor dispatch.
+rl_diff_prose() {
+  local pr="$1" repo files prev f sec
+  repo=$(rl__repo) || { echo 0; return 0; }
+
+  files=$(gh pr diff "$pr" --repo "$repo" --name-only 2>/dev/null) || { echo 0; return 0; }
+  [ -n "$files" ] || { echo 0; return 0; }
+
+  # RENAMES (#2227 review). A name-only diff with rename detection on lists only
+  # the NEW path: `git mv skills/x/SKILL.md README.md` shows `README.md` alone,
+  # and the `skills/` path — the only thing the denylist could have caught —
+  # disappears. Verified locally against a real `git mv`. Deleting a skill (or
+  # an agent definition, or a spec) by renaming it to a doc would otherwise be
+  # a pure-prose diff and skip review entirely. So fold every `previous_filename`
+  # into the set and judge it by the same allow/deny rules: a rename is a change
+  # to BOTH paths. Fail closed if the lookup fails.
+  prev=$(gh api "repos/$repo/pulls/$pr/files" --paginate \
+           --jq '.[].previous_filename // empty' 2>/dev/null) || { echo 0; return 0; }
+  [ -z "$prev" ] || files=$(printf '%s\n%s' "$files" "$prev")
+
+  # Security guard evaluated against the list ALREADY fetched, not a second
+  # `rl_security_files` call (#2227 review). One `gh` call instead of two on a
+  # rate-limited path, and — the actual reason — one consistent snapshot: two
+  # fetches straddling a push would decide allow/deny on one file set and the
+  # security guard on another.
+  sec=$(printf '%s\n' "$files" | grep -E "$(rl_security_glob_regex)") || sec=""
+  [ -z "$sec" ] || { echo 0; return 0; }
+
+  local -a filesarr=()
+  while IFS= read -r f; do
+    [ -n "$f" ] && filesarr+=("$f")
+  done <<EOF
+$files
+EOF
+  [ "${#filesarr[@]}" -gt 0 ] || { echo 0; return 0; }
+
+  local allow deny
+  allow=$(rl_prose_allow_regex)
+  deny=$(rl_prose_deny_regex)
+  for f in "${filesarr[@]}"; do
+    # Allowlist matched case-SENSITIVELY so an odd-cased extension (`.MD`) fails
+    # closed; denylist matched case-INSENSITIVELY (#2227 review) because on a
+    # case-insensitive filesystem — macOS, Windows — a file committed as
+    # `claude.md` IS `CLAUDE.md` to every tool that opens it, and would
+    # otherwise have slipped past `(^|/)CLAUDE\.md$` into the zero-dispatch tier.
+    if ! printf '%s' "$f" | grep -qE "$allow"; then echo 0; return 0; fi
+    if printf '%s' "$f" | grep -qiE "$deny"; then echo 0; return 0; fi
+  done
+
+  echo 1
+}
+
+# rl_control_bearing_glob_regex — the canonical enforcement-mechanism-path ERE
+# (issue #2211 ask 1). Deliberately NARROWER and DIFFERENT from
+# rl_security_glob_regex: that regex flags paths whose CONTENT is
+# security-sensitive (auth/secrets/config/migrations); this one flags paths
+# that ARE the enforcement mechanism itself — a check, gate, or audit script
+# whose own correctness is what stands between a violation and a merge. A
+# file can be one, the other, both, or neither (e.g. `middleware/auth.ts` is
+# security-sensitive content but not itself a gate script; `.github/scripts/
+# skillspector-check.sh` is exactly the reverse).
+rl_control_bearing_glob_regex() {
+  printf '%s\n' \
+    '(^|/)\.github/scripts/|(^|/)\.github/workflows/.*\.ya?ml$|(^|/)hold-labels\.txt$|(^|/)skillspector|(^|/)pr-labels\.sh$|(^|/)[a-zA-Z0-9._-]*(audit|scan|scanner|checker|gate|allowlist|denylist|policy)[a-zA-Z0-9._-]*\.(sh|py|ts|js|mjs|cjs)$|(^|/)require-commit-trailer|publish-redact-list\.txt$'
+}
+
+# rl_diff_control_bearing <pr> -- print 1|0. 1 only when at least one changed
+# file (including rename sources, same fold-in as rl_diff_prose) matches
+# rl_control_bearing_glob_regex. This is a MIXED-diff trigger, unlike
+# rl_diff_prose's all-files rule (#2211): one control-bearing file among ten
+# unrelated ones still escalates, because the risk this classifies is
+# entirely local to that one file — a clean review of the other nine says
+# nothing about whether the tenth's enforcement logic actually enforces
+# anything. Fails closed to 0 on any error (a missed escalation degrades to
+# the diff's normal risk tier, never a false full-suite trigger, mirroring
+# rl_diff_prose/rl_diff_trivial's fail-closed direction for the SAME reason
+# those use: an unverifiable diff must never be silently downgraded away from
+# the review it would otherwise get at its normal tier — the difference here
+# is which one of two fail-closed directions applies, since escalating
+# UNCONDITIONALLY on error would be the wrong kind of "safe": a caller with a
+# broken gh/network can't reliably run the (expensive) behavioural tier
+# either, so failing to "not detected" and falling back to normal-tier
+# review is the only direction that is actually safe under an error).
+rl_diff_control_bearing() {
+  local pr="$1" repo files prev f
+  repo=$(rl__repo) || { echo 0; return 0; }
+
+  files=$(gh pr diff "$pr" --repo "$repo" --name-only 2>/dev/null) || { echo 0; return 0; }
+  [ -n "$files" ] || { echo 0; return 0; }
+
+  # Renames count as a touch to both paths — same rationale as rl_diff_prose:
+  # a control script renamed to something innocuous-looking must not lose its
+  # classification.
+  prev=$(gh api "repos/$repo/pulls/$pr/files" --paginate \
+           --jq '.[].previous_filename // empty' 2>/dev/null) || { echo 0; return 0; }
+  [ -z "$prev" ] || files=$(printf '%s\n%s' "$files" "$prev")
+
+  local re
+  re=$(rl_control_bearing_glob_regex)
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    if printf '%s' "$f" | grep -qiE "$re"; then echo 1; return 0; fi
+  done <<EOF
+$files
+EOF
+
+  echo 0
+}
+
+# rl_oracle_bearing_glob_regex — the canonical oracle/fixture-path ERE (issue
+# #2222). Targets paths that DEFINE a test oracle, domain invariant, or
+# fixture-generation rule — not paths that merely consume one. NARROWER than
+# rl_security_glob_regex (which flags security-sensitive content) and different
+# from rl_control_bearing_glob_regex (which flags enforcement mechanisms): a
+# fixture file is an oracle definition, not a gate script, and vice versa.
+# Mixed-diff trigger: one oracle-bearing file among many still fires.
+# Known false-positive: the oracle/invariant filename sub-expression is
+# matched case-insensitively (grep -qiE), so files like OracleDB-config.ts
+# or InvariantCulture.ts trigger the lens. Phase 4.3b is advisory (Q1 answers
+# "does not apply" for unrelated oracles), so the cost is one extra review
+# question rather than a blocked PR.
+rl_oracle_bearing_glob_regex() {
+  printf '%s\n' \
+    '(^|/)__fixtures__/|(^|/)__snapshots__/|(^|/)snapshots/|(^|/)fixtures/.*\.(json|ya?ml|ts|js|mjs|cjs)$|\.fixture\.(ts|js|mjs|json|ya?ml)$|\.snap$|(^|/)[a-zA-Z0-9._-]*(oracle|invariant)[a-zA-Z0-9._-]*\.(ts|js|mjs|json|ya?ml|md)$'
+}
+
+# rl_diff_oracle_bearing <pr> -- print 1|0. 1 only when at least one changed
+# file (including rename sources) matches rl_oracle_bearing_glob_regex. MIXED-
+# diff trigger mirroring rl_diff_control_bearing: one oracle-bearing file among
+# ten unrelated ones still escalates, because the oracle-derivation risk is
+# entirely local to that file — clean review of the others says nothing about
+# whether the oracle itself was correctly derived. Fails closed to 0 on any
+# error (same direction as rl_diff_control_bearing: a broken gh/network means
+# fall back to the diff's normal risk tier rather than force an expensive lens
+# that cannot be run reliably anyway).
+rl_diff_oracle_bearing() {
+  local pr="$1" repo files prev f
+  repo=$(rl__repo) || { echo 0; return 0; }
+
+  files=$(gh pr diff "$pr" --repo "$repo" --name-only 2>/dev/null) || { echo 0; return 0; }
+  [ -n "$files" ] || { echo 0; return 0; }
+
+  # Renames count — an oracle file renamed to something innocuous must not
+  # lose its classification (same rationale as rl_diff_control_bearing).
+  prev=$(gh api "repos/$repo/pulls/$pr/files" --paginate \
+           --jq '.[].previous_filename // empty' 2>/dev/null) || { echo 0; return 0; }
+  [ -z "$prev" ] || files=$(printf '%s\n%s' "$files" "$prev")
+
+  local re
+  re=$(rl_oracle_bearing_glob_regex)
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    if printf '%s' "$f" | grep -qiE "$re"; then echo 1; return 0; fi
+  done <<EOF
+$files
+EOF
+
+  echo 0
+}
+
+# Findings-provenance helpers (issue #2200) — verify a dispatched review lane's
+# reply actually came from the PR under review, since prevention (SPEC-057 repo
+# resolution) cannot cross the sub-agent boundary.
+#
+#   rl_findings_provenance <pr> <file> [repo]
+#     -> ok | bleed | unverifiable   (exit 0 | 2 | 1)
+#   rl_findings_foreign_paths <pr> <file> [repo]
+#     -> the finding paths not present in the PR's diff
+#
+# Incidents, the deliberately-narrow `bleed` rule, fail-closed behaviour and the
+# call shape: pr-review/references/reviewer-lanes.md
+rl__findings_diff_paths() {   # <pr> [repo] -> the PR's changed-file set (incl. renames)
+  # PIN THE REPO, don't inherit it (#2228 review). `rl__repo` falls back to
+  # `gh repo view` against the ambient cwd — the exact silent-wrong-repo
+  # resolution SPEC-057 exists to eliminate. A detector for wrong-repo replies
+  # that resolves its OWN repo from ambient state can verify a reply against the
+  # wrong diff, which is this bug class reproducing inside its own fix; and PR
+  # numbers collide across an org's repos routinely, so it would not even error.
+  # Callers pass the target explicitly; the ambient fallback remains only for a
+  # same-repo invocation where cwd IS the target.
+  local pr="$1" repo="${2:-}" files prev rc
+  [ -n "$repo" ] || repo=$(rl__repo) || return 1
+  files=$(gh pr diff "$pr" --repo "$repo" --name-only 2>/dev/null) || return 1
+  [ -n "$files" ] || return 1
+  # Distinguish "no renames in this PR" from "could not determine renames"
+  # (#2228 review): degrading a failed lookup to "renamed nothing" would make a
+  # finding citing a legitimately renamed-away path read foreign, producing a
+  # false bleed and a discard-and-re-dispatch of a correct review. Fail the
+  # whole lookup instead, so the caller reports `unverifiable` — the same
+  # posture the primary diff fetch already takes.
+  # Pagination is bounded by the endpoint, not merely by `--paginate` (#2228
+  # code-scanning EA4): GitHub caps `pulls/N/files` at 3000 entries, so this is
+  # at most 30 requests at the 100/page set here. Deliberately NOT truncated
+  # below that: a short rename list makes a finding citing a legitimately
+  # renamed-away path read foreign, i.e. a false `bleed` that discards a correct
+  # review. Completeness is the fail-safe direction for this lookup.
+  prev=$(gh api "repos/$repo/pulls/$pr/files?per_page=100" --paginate \
+           --jq '.[].previous_filename // empty' 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ] || return 1
+  [ -z "$prev" ] || files=$(printf '%s\n%s' "$files" "$prev")
+  printf '%s\n' "$files"
+}
+
+# rl__findings_paths_json <file> -> JSON array of the reply's file-anchored
+# paths, or non-zero if the reply is not a usable findings array.
+#
+# STRICT ON PURPOSE (#2228 review). It rejects, rather than silently counting
+# as zero: an empty/0-byte file (SKILL.md's own rule is that a 0-byte reply is
+# NOT a pass), a top level that is not an array (`null`, a JSON string, an
+# object-wrapped `{"findings":[...]}`), and unparseable input. Each of those
+# previously returned `ok` — a silent lane that merely touched its output file
+# was stamped provenance-clean.
+#
+# WHAT IS LOAD-BEARING, stated accurately rather than crediting every line:
+#   * `jq -ce` with the `type == "array"` guard is what closes the whole class.
+#     `-e` exits 4 on no output, so an empty file is caught by it too — the
+#     `[ -s ]` test above is defensive redundancy, not the fix.
+#   * The real fix for the counting bypasses (empty-string path, embedded
+#     newline, nested array) is that BOTH sides of the comparison are now
+#     derived from THIS ONE list. The earlier version counted JSON elements on
+#     one side and grep output lines on the other, so those inputs
+#     desynchronised the counts and turned a wholly-foreign reply into `ok`.
+#     `select(type == "string" and . != "")` is likewise defensive: with one
+#     list and one unit, an empty-string path counts on both sides and cannot
+#     dilute anything. Verified by mutation — removing it changes no verdict.
+# One list, one unit, one pass.
+rl__findings_paths_json() {
+  local file="${1:?}"
+  [ -s "$file" ] || return 1
+  jq -ce 'if type == "array"
+          then [ .[]? | .file? | select(type == "string" and . != "") ]
+          else error("findings reply is not an array") end' "$file" 2>/dev/null
+}
+
+# rl_findings_foreign_paths <pr> <findings-file> [repo] -> the finding paths absent
+# from the PR's changed-file set, one per line. Empty output = all accounted for.
+rl_findings_foreign_paths() {
+  local pr="${1:?rl_findings_foreign_paths: pr required}"
+  local file="${2:?rl_findings_foreign_paths: findings file required}"
+  local paths files
+  paths=$(rl__findings_paths_json "$file") || return 1
+  files=$(rl__findings_diff_paths "$pr" "${3:-}") || return 1
+  # jq is LAST in the pipeline so its exit status is the pipeline's without
+  # relying on `pipefail` — which this file deliberately does not set (see the
+  # header). Comparing via --argjson also removes any line-splitting, so a CRLF
+  # diff list or a path containing a newline cannot desynchronise anything.
+  local out
+  out=$(printf '%s\n' "$files" | tr -d '\r' | jq -R -s -r --argjson p "$paths" '
+    (split("\n") | map(select(length > 0))) as $diff
+    | $p | map(select(. as $x | ($diff | index($x)) == null)) | .[]' 2>/dev/null) || return 1
+  # Strip CR only AFTER jq's status has been checked — piping jq into `tr` would
+  # put `tr` last and swallow the failure, which is the defect this rewrite
+  # removed (#2228 review). jq -r emits CRLF on a Windows box.
+  printf '%s' "$out" | tr -d '\r'
+}
+
+# rl_findings_provenance <pr> <findings-file> [repo] -> ok | bleed | unverifiable
+#
+# EXIT STATUS IS PART OF THE CONTRACT (#2228 review): 0 = ok, 2 = bleed,
+# 1 = unverifiable. Both non-zero results mean DO NOT FOLD, so the natural
+# `if rl_findings_provenance ...; then fold; fi` is safe rather than a trap —
+# previously `bleed` exited 0 and that call shape folded in a detected
+# wrong-repo reply, the exact failure this helper exists to prevent.
+rl_findings_provenance() {
+  local pr="${1:?rl_findings_provenance: pr required}"
+  local file="${2:?rl_findings_provenance: findings file required}"
+  local paths files counts total foreign
+  paths=$(rl__findings_paths_json "$file") || { echo unverifiable; return 1; }
+  files=$(rl__findings_diff_paths "$pr" "${3:-}") || { echo unverifiable; return 1; }
+  # BOTH counts come from ONE jq pass, as array lengths — never by counting the
+  # LINES that rl_findings_foreign_paths emits. Counting lines reintroduces the
+  # unit mismatch this helper was rewritten to remove: a single finding whose
+  # path contains an embedded newline prints as two lines, so foreign(2) !=
+  # total(1) and a wholly-foreign reply classifies `ok` (#2228 review).
+  counts=$(printf '%s\n' "$files" | tr -d '\r' | jq -R -s -r --argjson p "$paths" '
+    (split("\n") | map(select(length > 0))) as $diff
+    | ($p | length) as $total
+    | ($p | map(select(. as $x | ($diff | index($x)) == null)) | length) as $foreign
+    | "\($total) \($foreign)"' 2>/dev/null) || { echo unverifiable; return 1; }
+  total=${counts%% *}
+  foreign=${counts##* }
+  case "$total$foreign" in *[!0-9]*|'') echo unverifiable; return 1 ;; esac
+  # A genuine [] — or a reply whose findings carry no file anchor — is a clean
+  # pass with nothing to place, never a bleed. Treating it otherwise would send
+  # every clean review round the re-dispatch loop forever.
+  [ "$total" -gt 0 ] || { echo ok; return 0; }
+  if [ "$foreign" -eq "$total" ]; then
+    echo bleed
+    return 2
+  fi
+  echo ok
+}
+
 # Look up the generator command + published flag for a DECLARED artefact from the
 # same TRUSTED base-ref manifest rl_diff_generated classifies against (issue
 # #1757) — so Phase 2's regenerate-and-byte-diff and the published-artefact
@@ -548,6 +958,81 @@ rl_phase5_verdict() {
   PHASE5_SHA=$(printf '%s' "$raw" | grep -o '"sha": *"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"') || true
   PHASE5_VERDICT=$(printf '%s' "$raw" | grep -o '"verdict": *"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"') || true
   PHASE5_BLOCKERS=$(printf '%s' "$raw" | grep -o '"blockers": *[0-9]*' | grep -o '[0-9]*$') || true
+}
+
+# --- Lane manifest (issue #2214, ask 3) --------------------------------------
+# Fan-out skills (team-pipeline's implementer lane, pr-fix) record which PR/
+# branch they are actively driving so a reviewer can tell whether its target
+# is under active modification and defer — the incident: a reviewer began
+# reviewing a PR another agent was actively rewriting, and its verdict would
+# have landed against content that no longer existed.
+#
+# Deliberately a SEPARATE marker from pr-labels.sh's sge-claim-metadata
+# review-claim comment (which is a mutex on the REVIEW role only, #1312) —
+# this is a lower-stakes, advisory "heads up, this branch is moving" signal
+# any lane can post, read by any lane, never gating a label transition itself.
+LANE_MANIFEST_FENCE="sge-lane-manifest"
+LANE_MANIFEST_TTL_DEFAULT=900   # seconds; mirrors CLAIM_COMMENT_TTL's default
+
+# rl_post_lane_manifest <pr> <role> — post/refresh a lane-manifest comment
+# declaring this agent is actively driving <pr>'s branch in <role>
+# (implement|fix|review|qa). Best-effort: a failure to post never blocks the
+# caller (advisory signal, not a mutex) — mirrors post_claim_comment's
+# fail-open contract in pr-labels.sh.
+rl_post_lane_manifest() {
+  local pr="${1:?rl_post_lane_manifest: pr required}" role="${2:?rl_post_lane_manifest: role required}"
+  local repo owner claimed_at body
+  repo=$(rl__repo) || { echo "warning: rl_post_lane_manifest: could not resolve repo — skipping (advisory)" >&2; return 0; }
+  owner="${SGE_AGENT_ID:-$(hostname 2>/dev/null || echo "unknown")}"
+  claimed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  body="$(printf '```%s\n{"owner":"%s","role":"%s","claimedAt":"%s","ttl":%d}\n```' \
+    "$LANE_MANIFEST_FENCE" "$owner" "$role" "$claimed_at" "${SGE_LANE_MANIFEST_TTL:-$LANE_MANIFEST_TTL_DEFAULT}")"
+  gh api "repos/$repo/issues/$pr/comments" -f body="$body" --jq '.id' >/dev/null 2>&1 \
+    && echo "PR #$pr: lane-manifest comment posted (role=$role, owner=$owner)" >&2 \
+    || echo "warning: PR #$pr could not post lane-manifest comment — continuing (advisory, issue #2214)" >&2
+  return 0
+}
+
+# rl_lane_manifest_active <pr> [exclude-role] -- print the owner/role of the
+# most recent LIVE lane-manifest claim on <pr> (age < ttl), one line
+# "owner role claimedAt", or nothing if none is live. Optionally exclude a
+# role (e.g. a reviewer excluding its own past `review` claims) so the check
+# answers "is anything ELSE actively working this branch", not "did I claim
+# it". FAIL-OPEN: any gh/jq error prints nothing (never blocks a review on an
+# unreadable advisory signal) — this is a defer hint, not a hard gate.
+rl_lane_manifest_active() {
+  local pr="${1:?rl_lane_manifest_active: pr required}" exclude_role="${2:-}"
+  local repo comments winner
+  repo=$(rl__repo) || return 0
+  comments=$(gh api "repos/$repo/issues/$pr/comments" --paginate \
+    --jq "[.[] | select(.body | ltrimstr(\"\n\") | startswith(\"\`\`\`${LANE_MANIFEST_FENCE}\"))]" \
+    2>/dev/null) || return 0
+  [ -n "$comments" ] && [ "$comments" != "null" ] || return 0
+  # Single jq call does extraction, TTL-liveness math and last-wins reduction
+  # in one process — no chained `jq | sed | while read` pipeline. A prior
+  # version piped comments through jq then sed then a per-line jq per field
+  # (4+ process pipes per candidate claim) and was observed to hang
+  # intermittently under Git Bash on Windows on the SECOND invocation within
+  # one shell session (native jq.exe pipe I/O interacting badly with MSYS
+  # pipe emulation across repeated forks) — collapsing to one jq call removes
+  # the repeated-fork pattern entirely, not just papers over the symptom.
+  # Each comment body is fenced markdown with exactly one JSON line between
+  # the opening/closing fence (rl_post_lane_manifest's own format); `split`
+  # + `.[1:-1]` takes everything between the two fence lines, `fromjson?`
+  # skips anything that fails to parse (malformed/foreign data is UNTRUSTED —
+  # never crash the check, just skip that comment).
+  winner=$(printf '%s' "$comments" | jq -r --arg excl "$exclude_role" '
+    now as $now
+    | [ .[] | .body | split("\n") as $l
+        | ($l[1:-1] | join("\n")) | fromjson? // empty ]
+    | map(select($excl == "" or .role != $excl))
+    | map(select(((.claimedAt | fromdateiso8601) + (.ttl // 900)) > $now))
+    | sort_by(.claimedAt)
+    | last // empty
+    | if . == null or . == "" then empty else "\(.owner) \(.role) \(.claimedAt)" end
+  ' 2>/dev/null) || return 0
+  [ -n "$winner" ] && printf '%s\n' "$winner"
+  return 0
 }
 
 # PR head SHA via REST — `gh pr view <n>` goes through GraphQL-by-number,
@@ -630,6 +1115,62 @@ rl_pr_state() {
 # The comment scan treats comment bodies as UNTRUSTED DATA — it only
 # pattern-matches, never executes their content; the LABEL is authoritative and
 # the comment marker is a best-effort, last-10-comment-window fallback only.
+# Issue #2188: the last-10-comments window repeatedly false-positived on the
+# review bot's OWN old finding prose (a security-Major finding whose BODY TEXT
+# discussed "human sign-off ... pending" as its subject matter, not an actual
+# pending-sign-off marker for this PR) — observed on practice-portal#124 across
+# 3 consecutive runs, forcing REVIEW_MODE=advisory even after the flagged
+# content was independently fixed. Two exclusions applied before the window
+# slice, plus one pattern narrowing (all three iterated across PR #2195 review
+# rounds — see the exact filter for the final, verified shape):
+#   (a) comments identified as the review pipeline's own output — the
+#       `## PR Review:` verdict heading / `sge-verdict` fence every
+#       verdict/findings comment carries (SKILL.md Phase 6), checked per-LINE
+#       at line-start — are excluded, but ONLY when the comment is ALSO from a
+#       trusted identity: bot-shaped login AND `user.type == "Bot"` (the exact
+#       AND-combined predicate `rl_bot_signal` uses for #688/#884), OR
+#       `author_association` in OWNER/MEMBER/COLLABORATOR (the same
+#       TRUST_FILTER pr-labels.sh sync-check uses, #1373/#1444). Two rounds of
+#       review hardened this:
+#         - round 1 caught marker-matching on body CONTENT alone with no
+#           authorship gate at all — any commenter, including an untrusted
+#           external contributor (this scan's input is UNTRUSTED DATA), could
+#           forge the markers around their own genuine pending-sign-off text
+#           to suppress a real hold. Fix: require trusted authorship before
+#           the marker check.
+#         - round 2 caught the fence leg still being an unanchored substring
+#           match even after that fix — a GitHub "Quote reply" of a real
+#           verdict comment (which line-prefixes every quoted line with `> `)
+#           still contains the literal text `sge-verdict` and was wrongly
+#           excluded even from an UNTRUSTED, non-member quoter. Fix: split the
+#           body on newlines and anchor `^` per line, so a `> ```sge-verdict`
+#           quoted line — prefixed, not literally starting with the fence —
+#           no longer matches; a real verdict comment's own (unprefixed) fence
+#           line still does.
+#       The association leg is required in the first place because this org's
+#       PAT fallback (#862, solo-dev governance profile) posts every real
+#       verdict under the operator's own MEMBER account, never a bot login
+#       (verified against PRs #1980-1994) — a login/type-only filter would
+#       never catch the bot's own comment here. A non-verdict MEMBER comment
+#       with no marker still holds normally (only the marker+trust
+#       combination excludes); an untrusted commenter's marker never exempts
+#       anything, forged or not.
+#   (b) comments authored by a bot-shaped login AND `user.type == "Bot"` (the
+#       exact same predicate as (a)'s bot leg / `rl_bot_signal`, #688/#884)
+#       are ALSO excluded unconditionally (content-independent) — defense-in-
+#       depth for repos/modes that DO post as a real bot (App-token mode,
+#       #862). Both exclusions run BEFORE the `.[-10:]` window slice (not
+#       after) so an excluded pipeline comment never consumes a slot a
+#       genuine human hold comment could otherwise occupy.
+#   (c) the "sign-off ... pending" pattern is word-boundaried only — "pending"
+#       no longer matches "impending"/"spending"/"depending". No proximity
+#       bound: an earlier `.{0,40}` same-line bound was found (PR #2195
+#       review) to false-negative on ordinary hold phrasing ("Sign-off ... is
+#       still pending.", >40 chars apart) while its stated rationale ("an
+#       unbounded match across an entire multi-paragraph finding body") was
+#       itself incorrect — jq/Oniguruma's `.` never matches a newline under
+#       the default flags, so the original `.*` was already same-line-only;
+#       (a) and (b) are what actually fix #2188, not a proximity bound.
 rl_hold_check() {
   local pr="$1" state="$2" repo draft hold sign
   repo="${GH_REPO:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"
@@ -642,23 +1183,102 @@ rl_hold_check() {
     '[.labels[] | select(. == "hold" or . == "do-not-merge" or . == "needs-human" or . == "blocked")] | join(",")' 2>/dev/null) \
     || { echo "hold:state-parse-failed"; return 0; }
   [ -n "$hold" ] && { echo "hold:$hold"; return 0; }
-  # Comment scan — a gh error (rate-limit/403/network) is unverifiable: fail closed.
-  sign=$(gh api "repos/$repo/issues/$pr/comments" \
-    --jq '[.[-10:][].body | select(test("pending.*sign.?off|sign.?off.*pending|approve.*pending"; "i"))] | first // ""' 2>/dev/null) \
+  # Comment scan — a gh error (rate-limit/403/network) is unverifiable: fail
+  # closed. See the doc block above rl_hold_check for the full #2188 history;
+  # this is the final, jq-and-gojq-verified filter. BOT_RE/PR_NUM injected via
+  # env.* (gh api --jq has no --arg passthrough): BOT_RE is the exact
+  # bot-shaped login regex rl_bot_signal uses, so the two never diverge (PR
+  # #2195 review caught a hand-copied duplicate already drifting out of
+  # sync); PR_NUM anchors the verdict heading to THIS PR's number so a
+  # human's own ad-hoc hold comment that happens to start with the words
+  # "## PR Review:" (but not naming this PR) is never mistaken for the
+  # pipeline's own verdict (PR #2195 review, round 3).
+  local bot_re; bot_re=$(rl_bot_login_regex)
+  sign=$(BOT_RE="$bot_re" PR_NUM="$pr" gh api "repos/$repo/issues/$pr/comments" \
+    --jq '[( [.[]
+           | select(
+               ((.user.type == "Bot") and ((.user.login // "") | test(env.BOT_RE; "i")))
+               or ((((.author_association // "") | ascii_upcase) as $assoc | ($assoc == "OWNER" or $assoc == "MEMBER" or $assoc == "COLLABORATOR"))
+                   and ((.body // "") | split("\n") | any(test("^## *PR Review: *#" + env.PR_NUM + "\\b|^```+sge-verdict"; "i"))))
+               | not
+             )
+          ] | .[-10:][])
+           | (.body // "")
+           | select(test("\\bpending\\b.*\\bsign.?off\\b|\\bsign.?off\\b.*\\bpending\\b|\\bapprov\\w*\\b.*\\bpending\\b"; "i"))
+          ] | first // ""' 2>/dev/null) \
     || { echo "hold:signoff-check-failed"; return 0; }
   [ -n "$sign" ] && { echo "hold:sign-off-pending-comment"; return 0; }
   echo "ok"
 }
 
-# Ensure the PR body auto-closes issue <n> on merge — appends "Fixes #n"
-# unless a closing keyword (close/fix/resolve forms) for #n is already there.
+# rl_ensure_closing_link <pr> <n> -- append `Fixes #n` to the PR body unless
+# the link is already there or a closing keyword would be WRONG (issue #2241).
+#
+# THE #2241 DEFEAT PATH. This function used to append `Fixes #n` whenever its
+# regex found no closing keyword. `Part of #n` does not match that regex, so a
+# slice PR that sge-implement Phase 3/6 had deliberately marked `Part of #n`
+# got `Fixes #n` appended here — silently re-introducing the exact auto-close
+# this repo now fixes upstream. Any partial-delivery convention in the
+# implementing skill is void unless this function honours it, because pr-review
+# runs after sge-implement and writes last.
+#
+# No cross-repo prefix on any alternation below: a body reference to an ISSUE
+# IN ANOTHER REPO (e.g. `Part of otherorg/otherrepo#$n`) is not a link to this
+# repo's issue #$n and must not satisfy this same-repo linkage check.
+#
+# Three reasons to skip the append:
+#   1. a CLOSING keyword for #n is already present  (original behaviour);
+#   2. a deliberate NON-CLOSING reference to #n is present (`Part of #n`,
+#      `Refs #n`, `Relates to #n`, ...) — the implementer has asserted this PR
+#      is one slice of #n, and that assertion outranks this convenience;
+#   3. #n carries a tracking/umbrella label — a mechanical check that does not
+#      depend on anyone correctly self-assessing completeness, which is
+#      precisely what failed in the incident.
+#
+# Fails toward NOT appending. If the label read fails we warn and skip, because
+# the harm is asymmetric: a missing `Fixes #n` costs a human one manual close,
+# whereas a wrong one closes an umbrella issue asserting capability that was
+# never delivered.
+#
+# See sge-implement/references/close-keyword.md for the full rule.
 rl_ensure_closing_link() {
-  local pr="$1" n="$2" repo body
+  local pr="$1" n="$2" repo body labels tracking_raw label want
   repo=$(rl__repo) || return 1
   body=$(gh api "repos/$repo/pulls/$pr" --jq .body) || return 1
-  if ! printf '%s' "$body" | grep -qiE "(clos(e|es|ed)|fix(es|ed)?|resolv(e|es|ed))[[:space:]]+#$n([^0-9]|$)"; then
-    gh pr edit "$pr" --repo "$repo" --body "$(printf '%s\n\nFixes #%s' "$body" "$n")"
+
+  # (1) Already closes #n — nothing to do.
+  if printf '%s' "$body" | grep -qiE "(clos(e|es|ed)|fix(es|ed)?|resolv(e|es|ed))[[:space:]]+#$n([^0-9]|$)"; then
+    return 0
   fi
+
+  # (2) Deliberate non-closing reference — respect it, do not overwrite intent.
+  if printf '%s' "$body" | grep -qiE "(part of|refs?|references|relate[sd]? to|related to|contributes to|towards?)[[:space:]]+#$n([^0-9]|$)"; then
+    return 0
+  fi
+
+  # (3) Tracking/umbrella issue — never auto-close, whatever the body says.
+  # `-` not `:-` so an explicitly-empty override disables the check instead of
+  # silently restoring the default.
+  tracking_raw="${SGE_TRACKING_LABELS-tracking,epic}"
+  if [ -n "$tracking_raw" ]; then
+    if ! labels=$(gh api "repos/$repo/issues/$n" --jq '[.labels[].name] | join("\t")'); then
+      echo "rl_ensure_closing_link: cannot read labels for #$n; skipping closing-link append (fail-safe, #2241)" >&2
+      return 0
+    fi
+    while IFS= read -r want || [ -n "$want" ]; do
+      [ -n "$want" ] || continue
+      # Exact match per label, never substring: a repo label named
+      # `tracking-only` or `not-tracking` must not suppress a legitimate link.
+      while IFS= read -r label || [ -n "$label" ]; do
+        if [ "$label" = "$want" ]; then
+          echo "rl_ensure_closing_link: #$n is labelled '$label' (tracking/umbrella); not adding a closing keyword (#2241)" >&2
+          return 0
+        fi
+      done < <(printf '%s' "$labels" | tr '\t' '\n')
+    done < <(printf '%s' "$tracking_raw" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+  fi
+
+  gh pr edit "$pr" --repo "$repo" --body "$(printf '%s\n\nFixes #%s' "$body" "$n")"
 }
 
 # QA evidence (#732): sets QA_COMMENT (latest qa-audit-report comment body,
@@ -683,12 +1303,25 @@ rl_changes_requested() {
     '[.[] | select(.state == "CHANGES_REQUESTED")] | length'
 }
 
-# Count of failing (FAILURE / TIMED_OUT) checks on the PR head.
+# Count of failing checks on the PR head.
+#
+# Counts the FULL terminal-failure set, not a hand-rolled FAILURE/TIMED_OUT
+# pair (issue #2212). A required check that ends CANCELLED / ACTION_REQUIRED /
+# STARTUP_FAILURE / STALE is red to branch protection but was invisible to the
+# old two-state allowlist, so Phase 7's `rl_failing_checks "$PR" > 0` read a
+# cancelled gate as green CI and skipped the pr-fix handoff — fail-OPEN through
+# correct-looking code. `skills/pr-monitor/monitor-lib.sh` already carries this
+# same set as FAILING_CHECK_JQ (and warns against the two-state pair in its
+# `named_failing_checks` comment); pr-review simply never inherited the fix.
+# Kept in lockstep with it deliberately: both describe "what gh reports as a
+# terminal non-success", which is a property of `gh`, not of either skill.
 rl_failing_checks() {
   local pr="$1" repo
   repo=$(rl__repo) || return 1
   gh pr checks "$pr" --repo "$repo" --json state \
-    --jq '[.[] | select(.state == "FAILURE" or .state == "TIMED_OUT")] | length' 2>/dev/null
+    --jq '[.[] | select(.state == "FAILURE" or .state == "TIMED_OUT"
+                        or .state == "CANCELLED" or .state == "ACTION_REQUIRED"
+                        or .state == "STARTUP_FAILURE" or .state == "STALE")] | length' 2>/dev/null
 }
 
 # Unresolved review threads, cursor-paginated to exhaustion (#717 — a single
@@ -1291,17 +1924,26 @@ rl_verdict_findings_unverified() {
 # App mode (rl_review_identity == app): posts a REAL review authored by the
 # wtp-sge App via POST repos/{repo}/pulls/{pr}/reviews using the installation
 # token (GH_TOKEN). On any App-side failure it falls back -- logged -- to the PAT
-# path. PAT mode: `gh pr review`, retrying as --comment (with the recommendation
-# stated in-body) when GitHub rejects --approve/--request-changes on a
-# self-authored PR (the existing behaviour). Returns non-zero if the verdict
-# could not be posted by any route.
+# path. PAT mode: POSTs the same REST endpoint (`gh api ... /reviews`) rather
+# than `gh pr review`, retrying as --comment (with the recommendation stated
+# in-body) when GitHub rejects approve/request_changes on a self-authored PR
+# (the existing behaviour). Returns non-zero if the verdict could not be
+# posted by any route.
+#
+# On success (return 0), PRINTS the posted review's numeric id to stdout --
+# every route (App, PAT approve/request_changes/comment, and the self-approval
+# --comment fallback) resolves its id from the POST response JSON, never from
+# a re-read. This id is the caller's required argument to
+# rl_verify_verdict_posted (issue #2292): "posted" (this function's exit code)
+# and "verified-posted" (a fresh re-fetch) are two separate facts, and the
+# caller needs this id to check the second one at all.
 rl_post_verdict() {
   local pr="${1:?rl_post_verdict: pr required}" event="${2:?rl_post_verdict: event required}" body="${3:-}"
   case "$event" in
     APPROVE|REQUEST_CHANGES|COMMENT) ;;
     *) echo "rl_post_verdict: event must be APPROVE|REQUEST_CHANGES|COMMENT, got '$event'" >&2; return 2 ;;
   esac
-  local repo mode flag tok
+  local repo mode flag tok resp rid
   repo=$(rl__repo) || return 1
   [ -n "$body" ] || body="$(cat)"
   # Pre-post draft-vs-PR guard (issue #1667). The load-bearing fix: BEFORE any
@@ -1330,33 +1972,160 @@ rl_post_verdict() {
   mode=$(rl_review_identity)
   if [ "$mode" = "app" ]; then
     if tok=$(rl_app_installation_token); then
-      if GH_TOKEN="$tok" gh api --method POST "repos/${repo}/pulls/${pr}/reviews" \
-           -f "event=${event}" -f "body=${body}" >/dev/null 2>&1; then
+      if resp=$(GH_TOKEN="$tok" gh api --method POST "repos/${repo}/pulls/${pr}/reviews" \
+           -f "event=${event}" -f "body=${body}" 2>/dev/null); then
+        rid=$(printf '%s' "$resp" | jq -r '.id // empty' 2>/dev/null)
         echo "rl_post_verdict: posted ${event} review on PR #${pr} as the wtp-sge App -- real approval, builder != reviewer (issue #862)" >&2
-        return 0
+        if [[ "$rid" =~ ^[0-9]+$ ]]; then
+          printf '%s\n' "$rid"
+          return 0
+        fi
+        echo "rl_post_verdict: App POST succeeded but returned no numeric review id -- cannot be self-verified (issue #2292)" >&2
+        return 1
       fi
       echo "rl_post_verdict: App-authored review POST failed -- falling back to PAT identity (issue #862)" >&2
     else
       echo "rl_post_verdict: could not obtain an App installation token -- falling back to PAT identity (issue #862)" >&2
     fi
   fi
-  # PAT / bot fallback -- the current behaviour (self-approval blocked).
+  # PAT / bot fallback -- the current behaviour (self-approval blocked). Uses
+  # the same REST endpoint as App mode (`gh api ... /reviews`), not
+  # `gh pr review`, so the response JSON yields a review id here too (#2292)
+  # -- `gh pr review` prints nothing structured a caller could capture.
   case "$event" in
-    APPROVE)         flag="--approve" ;;
-    REQUEST_CHANGES) flag="--request-changes" ;;
-    COMMENT)         flag="--comment" ;;
+    APPROVE)         flag="APPROVE" ;;
+    REQUEST_CHANGES) flag="REQUEST_CHANGES" ;;
+    COMMENT)         flag="COMMENT" ;;
   esac
-  if gh pr review "$pr" --repo "$repo" "$flag" --body "$body" >/dev/null 2>&1; then
+  if resp=$(gh api --method POST "repos/${repo}/pulls/${pr}/reviews" \
+       -f "event=${flag}" -f "body=${body}" 2>/dev/null); then
+    rid=$(printf '%s' "$resp" | jq -r '.id // empty' 2>/dev/null)
     echo "rl_post_verdict: posted ${event} review on PR #${pr} via PAT/bot identity" >&2
-    return 0
+    if [[ "$rid" =~ ^[0-9]+$ ]]; then
+      printf '%s\n' "$rid"
+      return 0
+    fi
+    echo "rl_post_verdict: PAT POST succeeded but returned no numeric review id -- cannot be self-verified (issue #2292)" >&2
+    return 1
   fi
   if [ "$event" != "COMMENT" ]; then
-    echo "rl_post_verdict: ${flag} rejected (self-authored PR?) -- posting as --comment with the recommendation stated in-body" >&2
-    gh pr review "$pr" --repo "$repo" --comment --body "Recommendation: ${event}"$'\n\n'"${body}"
-    return $?
+    # Self-approval degradation (issue #2261): GitHub rejected APPROVE/
+    # REQUEST_CHANGES under PAT identity -- almost always because the PAT
+    # identity IS the PR author (self-authored PR, PAT-mode fallback, #862).
+    # The comment fallback below still records the recommendation, but the
+    # caller must NOT treat this the same as a real approve/request-changes:
+    # distinct return 3 so Phase 6 can refuse to apply pr-reviewed instead of
+    # silently proceeding to label the PR as reviewed when no approval was
+    # actually granted (the review-independence gate would then reject it
+    # anyway, but only AFTER the label already claimed otherwise).
+    echo "rl_post_verdict: ${flag} rejected (self-authored PR?) -- posting as COMMENT with the recommendation stated in-body" >&2
+    if resp=$(gh api --method POST "repos/${repo}/pulls/${pr}/reviews" \
+         -f "event=COMMENT" -f "body=Recommendation: ${event}"$'\n\n'"${body}" 2>/dev/null); then
+      rid=$(printf '%s' "$resp" | jq -r '.id // empty' 2>/dev/null)
+      echo "rl_post_verdict: verdict recorded as COMMENT only (PAT self-approval rejected) -- pr-reviewed must not be applied from this verdict (issue #2261)" >&2
+      if [[ "$rid" =~ ^[0-9]+$ ]]; then
+        printf '%s\n' "$rid"
+      fi
+      return 3
+    fi
+    echo "rl_post_verdict: could not post the verdict on PR #${pr} by any route" >&2
+    return 1
   fi
   echo "rl_post_verdict: could not post the verdict on PR #${pr} by any route" >&2
   return 1
+}
+
+# rl_verify_verdict_posted <pr> <review_id_or_url> -- CONFIRM a posted verdict
+# review actually exists, rather than trusting that rl_post_verdict returning
+# 0 means it landed (issue #2292, slice 1 of #2210). Incident: twice in one
+# night /sge:pr-review produced a full verdict, reported it in the agent's
+# summary, and never wrote anything to the PR -- `reviews: []` afterwards, one
+# reported to a human as "APPROVE" with nothing actually posted. "Posted" and
+# "verified-posted" are two separate facts; this is the terminal, self-
+# verified check for the second one.
+#
+# Re-fetches repos/{repo}/pulls/{pr}/reviews (a fresh network read -- never
+# trusts a cached response from the post) and looks for the TARGETED review
+# (by id, or by id extracted from a `#pullrequestreview-<id>` URL fragment)
+# such that ALL of:
+#   1. it exists at all (else: loud "no review" failure);
+#   2. its commit_id matches the CURRENT PR head SHA (else: loud "stale head"
+#      failure -- the PR moved between post and verify; never confirm
+#      coverage of an old commit as if it covered the new one);
+#   3. its body contains a parseable sge-verdict fence (rl__verdict_block,
+#      the SAME fence grammar rl_post_verdict's own guards use -- issue #2291
+#      is the canonical doc for that grammar, not reimplemented here).
+#
+# Reviews-vs-comments (#2209): a review OBJECT that exists but carries no
+# sge-verdict fence (a plain COMMENTED review, or a body that never got the
+# verdict block appended) is a DIFFERENT failure from no review existing at
+# all -- #2209's specific ask is that this distinction be surfaced, not
+# collapsed into one generic "not posted". The diagnostic text differs
+# accordingly ("no review found" vs "... has no sge-verdict fence").
+#
+# Prints the review id and exits 0 on success. Exits 1 and prints a
+# diagnostic to stderr on any failure -- FAILS CLOSED throughout: an
+# unreachable API, an absent review, a stale head, or a fenceless body are
+# ALL "not verified", never "probably fine". The caller (SKILL.md Phase 6)
+# must treat 0 vs non-zero as the sole signal for whether the summary may
+# state a verdict was posted -- never re-derive that fact by re-reading its
+# own POST's exit code.
+rl_verify_verdict_posted() {
+  local pr="${1:?rl_verify_verdict_posted: pr required}"
+  local target="${2:?rl_verify_verdict_posted: review_id_or_url required}"
+  local repo head reviews id review commit_id body
+
+  repo=$(rl__repo) || { echo "rl_verify_verdict_posted: cannot resolve repo" >&2; return 1; }
+
+  # Accept either a bare numeric id or a review URL carrying the
+  # #pullrequestreview-<id> fragment -- callers may only have the URL handy
+  # (e.g. rl_post_verdict's PAT-mode `gh pr review` does not return an id).
+  case "$target" in
+    *[!0-9]*)
+      id=$(printf '%s' "$target" | grep -oE '#pullrequestreview-[0-9]+$' | grep -oE '[0-9]+')
+      [ -n "$id" ] || { echo "rl_verify_verdict_posted: '$target' is not a numeric review id or a #pullrequestreview-<id> URL" >&2; return 1; }
+      ;;
+    *) id="$target" ;;
+  esac
+
+  head=$(rl_head_sha "$pr") || { echo "rl_verify_verdict_posted: cannot read PR #${pr}'s current head SHA -- unverifiable" >&2; return 1; }
+  [ -n "$head" ] || { echo "rl_verify_verdict_posted: PR #${pr}'s head SHA read back empty -- unverifiable" >&2; return 1; }
+
+  # --paginate (+ --slurp to keep the multi-page output valid JSON, wrapping
+  # each page's array into an outer array) -- a PR with >30 reviews would
+  # otherwise put the targeted review on page 2+ and this would read back a
+  # false "no review found" purely from truncation, not absence. No
+  # `pipefail` in this file (see top-of-file note), so `gh api`'s own exit
+  # status is captured BEFORE piping to jq -- a failed fetch must never be
+  # masked by jq successfully parsing empty/partial output as "[]".
+  local raw
+  raw=$(gh api --paginate --slurp "repos/${repo}/pulls/${pr}/reviews" 2>/dev/null) \
+    || { echo "rl_verify_verdict_posted: could not re-fetch reviews for PR #${pr} -- unverifiable (network/permissions/rate limit)" >&2; return 1; }
+  # `add` on a zero-page outer array ([]) yields the JSON literal `null`, not `[]` --
+  # guard explicitly so that shape reads back as "did not parse", not a false "no review found".
+  reviews=$(printf '%s' "$raw" | jq -c 'if type=="array" then (add // []) else empty end' 2>/dev/null)
+  [ -n "$reviews" ] || { echo "rl_verify_verdict_posted: re-fetched reviews for PR #${pr} did not parse -- unverifiable" >&2; return 1; }
+
+  review=$(printf '%s' "$reviews" | jq -c --argjson id "$id" '.[] | select(.id == $id)' 2>/dev/null | head -n1)
+  if [ -z "$review" ]; then
+    echo "rl_verify_verdict_posted: no review found with id ${id} on PR #${pr} -- the post did not land (issue #2292)" >&2
+    return 1
+  fi
+
+  commit_id=$(printf '%s' "$review" | jq -r '.commit_id // empty' 2>/dev/null)
+  if [ "$commit_id" != "$head" ]; then
+    echo "rl_verify_verdict_posted: review ${id} on PR #${pr} is pinned to commit ${commit_id:-<none>}, but the PR head is now ${head} -- the PR moved between post and verify; refusing to confirm stale coverage" >&2
+    return 1
+  fi
+
+  body=$(printf '%s' "$review" | jq -r '.body // empty' 2>/dev/null)
+  if [ -z "$(rl__verdict_block "$body")" ]; then
+    echo "rl_verify_verdict_posted: review ${id} on PR #${pr} exists at the current head but has no sge-verdict fence in its body -- a review landed, but not a recorded verdict (issue #2209: reviews vs. comments)" >&2
+    return 1
+  fi
+
+  printf '%s\n' "$id"
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -1524,20 +2293,41 @@ rl_pr_state_gql() {
 # (CANCELLED, ACTION_REQUIRED, STARTUP_FAILURE, STALE, TIMED_OUT, FAILURE)
 # maps to "fail" so a cancelled/errored required check can never be mistaken
 # for a clean one and arm auto-merge (issue #1147).
+#
+# LATEST RUN PER CHECK (issue #2212). `statusCheckRollup.contexts` returns EVERY
+# run recorded against the head commit, not one row per check: re-running a
+# workflow adds a new CheckRun beside the old one. Measured on three merged
+# PRs in this repo, `Require pr-reviewed label` carried FAILURE, FAILURE,
+# CANCELLED and SUCCESS entries **on the same head commit** (#2202) — the
+# earlier rows are simply the gate's expected pre-swap red. Emitting all of
+# them made every one of those green, merged PRs read as failing, which is the
+# "correctly-working gate looks permanently broken" misreading #2212 was
+# raised for. `gh pr checks` does NOT have this problem — it already collapses
+# to the latest run per name — so this helper, whose whole contract is to be
+# its GraphQL equivalent, must collapse identically or it is not a drop-in.
+# Reduction rules, both fail-SAFE:
+#   * newest wins, keyed on completedAt ?? startedAt ?? createdAt;
+#   * a run with NO timestamp (queued, not yet started) sorts NEWEST, so a
+#     fresh queued re-run reports `pending` rather than letting a stale
+#     completed SUCCESS stand in for it;
+#   * on a timestamp tie, the WORST bucket wins (fail > pending > skipping >
+#     pass) so a tie can never resolve in favour of green.
 rl_checks_status_gql() {
-  local pr="${1:?rl_checks_status_gql: pr required}" repo
+  local pr="${1:?rl_checks_status_gql: pr required}" repo raw total got
   repo=$(rl__repo) || return 1
-  gh api graphql -f query='
+  raw=$(gh api graphql -f query='
     query($owner:String!,$repo:String!,$pr:Int!){
       repository(owner:$owner,name:$repo){ pullRequest(number:$pr){
         commits(last:1){ nodes{ commit{ statusCheckRollup{ contexts(first:100){
+          totalCount
           nodes{
             __typename
-            ... on CheckRun { name conclusion status isRequired(pullRequestNumber:$pr) }
-            ... on StatusContext { context state isRequired(pullRequestNumber:$pr) }
+            ... on CheckRun { name conclusion status startedAt completedAt isRequired(pullRequestNumber:$pr) }
+            ... on StatusContext { context state createdAt isRequired(pullRequestNumber:$pr) }
           } } } } } } } } }' \
     -f owner="${repo%/*}" -f repo="${repo#*/}" -F pr="$pr" \
-    --jq '[.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[] |
+    --jq '.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts
+      | { total: .totalCount, nodes: [ .nodes[] |
       if .__typename == "CheckRun" then
         { name: .name,
           state: (.conclusion // .status // "PENDING" | ascii_upcase),
@@ -1546,7 +2336,8 @@ rl_checks_status_gql() {
                    elif $c == "" then "pending"
                    elif $c == "NEUTRAL" or $c == "SKIPPED" then "skipping"
                    else "fail" end),
-          isRequired: (.isRequired // false) }
+          isRequired: (.isRequired // false),
+          _t: (.completedAt // .startedAt // "9999") }
       else
         { name: .context,
           state: (.state | ascii_upcase),
@@ -1554,6 +2345,33 @@ rl_checks_status_gql() {
                    if $s == "SUCCESS" then "pass"
                    elif $s == "PENDING" or $s == "EXPECTED" then "pending"
                    else "fail" end),
-          isRequired: (.isRequired // false) }
-      end]'
+          isRequired: (.isRequired // false),
+          _t: (.createdAt // "9999") }
+      end ] }') || return 1
+
+  # FAIL CLOSED on a truncated rollup (#2212, same discipline as #717's
+  # rl_unresolved_threads). The reduction below is only correct over the
+  # COMPLETE run list: contexts come back in creation order, so a truncated
+  # page drops the NEWEST runs — and reporting a stale SUCCESS in place of a
+  # newer FAILURE is fail-OPEN. Duplicates make this closer than the distinct
+  # check count suggests (measured 40-52 contexts on this repo's PRs for
+  # 35-45 distinct checks). An incomplete answer is unverifiable, so refuse
+  # rather than reduce over it.
+  total=$(jq -r '.total // 0' <<<"$raw" 2>/dev/null) || return 1
+  got=$(jq -r '.nodes | length' <<<"$raw" 2>/dev/null) || return 1
+  if [ "${total:-0}" -gt "${got:-0}" ]; then
+    echo "rl_checks_status_gql: rollup truncated ($got of $total contexts) — refusing to reduce over an incomplete run list (issue #2212)" >&2
+    return 1
+  fi
+
+  jq -c '.nodes
+      | group_by(.name)
+      | map( (map(._t) | max) as $newest
+             | map(select(._t == $newest))
+             | sort_by(if   .bucket == "fail"     then 0
+                       elif .bucket == "pending"  then 1
+                       elif .bucket == "skipping" then 2
+                       else 3 end)
+             | first
+             | del(._t) )' <<<"$raw"
 }

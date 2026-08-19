@@ -479,7 +479,14 @@ pr_ready_for_merge() {
 
   # Gate 1 â€” issue linked
   body=$(gh pr view "$pr" --json body --jq '.body' 2>/dev/null)
-  if ! printf '%s' "$body" | grep -iqE '(clos(e|es|ed)|fix(es|ed)?|resolv(e|es|ed))[[:space:]]+#[0-9]+'; then
+  # This gate asserts the PR is LINKED to an issue, not that it closes one.
+  # `Part of #N` (#2241) is the deliberate non-closing link written when a PR
+  # lands part of a multi-AC issue or the issue is a `tracking`/`epic` umbrella.
+  # Rejecting it made every correctly-formed partial PR unmergeable, and the
+  # documented remedy was to append `Fixes #N` — reintroducing the defect.
+  # No cross-repo prefix: a reference to an issue in ANOTHER repo is not a
+  # link to this PR's own tracked issue and must not satisfy this gate.
+  if ! printf '%s' "$body" | grep -iqE '(clos(e|es|ed)|fix(es|ed)?|resolv(e|es|ed)|(^|[^[:alnum:]])part[[:space:]]+of)[[:space:]]+#[0-9]+'; then
     echo "GATE_FAIL:not_linked"; return 1
   fi
 

@@ -13,6 +13,16 @@ opened it hasn't reported back, its Phase 7 already drives this loop — never r
 (racing reviewers lose fix commits and post conflicting verdicts). Dispatch independently only
 when no owner is in flight or it reported completion/blocked.
 
+## Lane manifest — defer to an actively-modified target (issue #2214, ask 3)
+
+Before claiming the review gate, check `rl_lane_manifest_active "$PR" review` — a live
+(TTL-unexpired) claim from a role **other than** `review` (e.g. `implement`, `fix`) means another
+lane is actively driving this branch right now. This is advisory, not a hard gate (the label mutex
+above is): report the owner/role/age and **defer one cycle** rather than fan out a full review
+against content that may not exist by the time the verdict posts. A stale or absent claim proceeds
+normally. Mechanics live in `review-lib.sh`'s `rl_post_lane_manifest` / `rl_lane_manifest_active`;
+`team-pipeline`'s implementer step and `pr-fix` post the claim this checks for.
+
 ## Claiming the gate is unskippable and binding
 
 **The claim is unskippable, not just documented (issue #981).** Applying `pr-reviewing` is the
@@ -29,6 +39,21 @@ inline review.
 applies `pr-reviewing`, this run owes the state machine a resolution: it **may not return, stop,
 or terminate while the PR still holds `pr-reviewing`** — no "post analysis, arm a watchdog, stand
 by" path, no completion deferred to a later re-invocation. See the termination contract below.
+
+**Call shape and mode interaction (issue #754).** `pr-reviewed` is a **branch-protection merge
+gate** (`.github/workflows/require-pr-reviewed-label.yml`); this skill solely owns its
+transitions — never hand-roll `gh pr edit` on these labels. Advisory mode never claims:
+
+```bash
+[ "$REVIEW_MODE" = "advisory" ] || ${CLAUDE_PLUGIN_ROOT}/skills/pr-review/pr-labels.sh start-review $PR
+```
+
+`start-review` creates all three labels if absent (`pr-reviewing`, `pr-reviewed`,
+`changes-requested` — issue #2238), adds `pr-reviewing`, and removes a stale
+`pr-reviewed`. `--no-fix` claims normally (only Phase 6.5 direct fixes are skipped).
+`SGE_REVIEW_ADVISORY=1` backstops advisory mode — `pass` refuses with exit 4 if it is unset on an
+advisory run. **Concurrency guard (issue #699):** a fresh claim (< `SGE_REVIEW_CLAIM_TTL_MIN`)
+already held by another run exits 3 — back off and report, never bypass with a raw label edit.
 
 ## Rescued/resumed-worktree environment distrust (issue #951)
 
@@ -74,22 +99,103 @@ branch-protection rule and the builder≠reviewer separation is enforceable in G
 model. `rl_review_identity` prints the active mode (`app`/`pat`) and **logs the fallback** when no
 complete App credential set is present.
 
-**PAT/bot fallback (no App creds):** the helper posts via `gh pr review` exactly as before.
-**Self-authored PRs:** GitHub rejects `--approve`/`--request-changes` on your own PR, so it
-retries — post the review with `--comment` and state the recommendation (APPROVE /
-REQUEST_CHANGES / COMMENT) in the body instead. This is the current comment+label behaviour,
-unchanged. The equivalent raw commands (for reference / manual use):
+**PAT/bot fallback (no App creds):** the helper posts via the same REST endpoint as App mode
+(`gh api --method POST repos/{repo}/pulls/{pr}/reviews`), not `gh pr review` (issue #2326) — the
+REST call returns the posted review's JSON, including its numeric `id`, which `gh pr review`
+does not expose to a caller. **Self-authored PRs:** GitHub rejects `event=APPROVE`/
+`REQUEST_CHANGES` on your own PR, so it retries — post the review with `event=COMMENT` and state
+the recommendation (APPROVE / REQUEST_CHANGES / COMMENT) in the body instead. This is the current
+comment+label behaviour, unchanged; only the transport (REST vs `gh pr review`) and the captured
+id are new. The equivalent raw commands (for reference / manual use):
 
 ```bash
-gh pr review $PR --repo "$REPO" --approve         --body "..."   # APPROVE
-gh pr review $PR --repo "$REPO" --request-changes --body "..."   # REQUEST_CHANGES
-gh pr review $PR --repo "$REPO" --comment         --body "..."   # COMMENT
+gh api --method POST "repos/$REPO/pulls/$PR/reviews" -f event=APPROVE         -f body="..."
+gh api --method POST "repos/$REPO/pulls/$PR/reviews" -f event=REQUEST_CHANGES -f body="..."
+gh api --method POST "repos/$REPO/pulls/$PR/reviews" -f event=COMMENT         -f body="..."
 ```
 
 **Admin prerequisites for a live App identity (NOT doable from a skill diff):** the wtp-sge App
 must be registered/installed on the repo with **`pull_requests: write`** permission, and branch
 protection must allow the App as a review author. Until those admin steps land the code path is a
 safe no-op that falls back to PAT.
+
+## PAT self-approval degradation gate (issue #2261)
+
+`rl_review_identity` falls back to the `pat` review identity whenever no complete wtp-sge App
+credential set is present (see "App-token review mode" above). Under that fallback,
+`rl_post_verdict` attempts `event=APPROVE`/`REQUEST_CHANGES` (via the same REST endpoint as App
+mode) as the PAT identity; GitHub rejects self-approval on a self-authored PR, and the helper
+retries as `event=COMMENT` — but both paths returned exit 0, so Phase 6 could not distinguish a
+real approving/requesting review from a degraded comment-only fallback and proceeded straight to
+`pr-labels.sh pass`, applying
+`pr-reviewed`. The label then asserted an approval that `check-review-independence.sh`'s required
+check provably never saw (it checks for an actual GitHub review object, not a comment), leaving
+the PR silently stuck: label says reviewed, required check says not-reviewed, and no path forward
+without manual intervention.
+
+`rl_post_verdict` now returns a distinct **exit 3** specifically for this self-authored-PAT-
+degradation case (it still posts the `--comment` fallback first, so the recommendation is
+recorded — exit 3 only changes what the caller does next, never what gets posted). SKILL.md
+Phase 6 captures `VERDICT_POST_STATUS` from the `rl_post_verdict` call and checks it **before any
+label transition**:
+
+```bash
+if [ "${VERDICT_POST_STATUS:-0}" = "3" ]; then
+  echo "PR #$PR: verdict posted as COMMENT only -- PAT-mode self-approval rejected, cannot promote (issue #2261)."
+  echo "labelState: none"
+  echo "stopReason: review-identity-unavailable"
+  echo "Missing: SGE_REVIEW_APP_TOKEN, or SGE_REVIEW_APP_ID + SGE_REVIEW_APP_PRIVATE_KEY/_FILE + SGE_REVIEW_APP_INSTALLATION_ID"
+  exit 0
+fi
+```
+
+On exit 3 the skill refuses to reach `pr-labels.sh pass`, reports `labelState: none` and
+`stopReason: review-identity-unavailable`, and names the missing credential — the same
+`SGE_REVIEW_APP_TOKEN` / `SGE_REVIEW_APP_ID`+`SGE_REVIEW_APP_PRIVATE_KEY`(`_FILE`)+
+`SGE_REVIEW_APP_INSTALLATION_ID` set documented above. This lets an orchestrator (e.g.
+`/sge:team-pipeline`) recognise the stop reason and re-dispatch the PR's review under proper App
+credentials, rather than leave the PR waiting on a required check that can never go green from
+this state, or worse, have a future run misinterpret the stale comment as a completed review.
+
+Only this specific self-authored/PAT-fallback/comment-degradation combination returns exit 3.
+Normal App-mode reviews and normal (non-self-authored) PAT-mode reviews are unaffected — they
+still return 0 on a successful `--approve`/`--request-changes` and proceed to `pass` as before.
+
+## Self-verify the posted verdict (issue #2292)
+
+Incident: twice in one night `/sge:pr-review` produced a full verdict, reported it in the agent's
+summary as posted, and never actually wrote anything to the PR — `reviews: []` on GitHub
+afterwards, one reported to a human as "APPROVE" with nothing there. `rl_post_verdict` returning
+0 only means the POST request did not error; it is not proof the review object exists. "Posted"
+and "verified-posted" are two separate facts, and Phase 6 must check the second one with an
+independent, fresh re-fetch — never by re-reading `rl_post_verdict`'s own exit code a second time.
+
+`rl_post_verdict` now prints the posted review's numeric id to stdout on every success path (App,
+PAT approve/request-changes/comment, and the self-authored-PAT `--comment` fallback) — captured
+by the caller as `REVIEW_ID=$(rl_post_verdict ...)`. `rl_verify_verdict_posted "$PR" "$REVIEW_ID"`
+re-fetches `repos/{repo}/pulls/{pr}/reviews` fresh (never a cached response from the POST) and
+confirms the targeted review exists, is pinned to the PR's *current* head SHA, and carries a
+parseable `sge-verdict` fence — see `rl_verify_verdict_posted`'s own doc-comment in
+`review-lib.sh` for the full three-check contract (existence / head-match / fence-parseable) and
+the #2209 reviews-vs-comments distinction.
+
+**Where this runs:** SKILL.md Phase 6, immediately after `rl_post_verdict` and BEFORE
+`pr-labels.sh pass` — genuine-success path only (`VERDICT_POST_STATUS = 0`). The exit-3
+self-approval/no-identity path (previous section) already refuses to reach `pass` on its own, so
+it does not need a second verification call layered on top. A verify failure on the genuine-
+success path is treated exactly like a posting failure: loud, non-zero exit, no `pr-reviewed`
+label — never a silent continue, and never re-derived from `rl_post_verdict`'s exit code a second
+time (that was the entire anti-pattern this closes).
+
+```bash
+REVIEW_ID=$(rl_post_verdict "$PR" APPROVE "$VERDICT_BODY"); VERDICT_POST_STATUS=$?
+if [ "$VERDICT_POST_STATUS" = 0 ]; then
+  rl_verify_verdict_posted "$PR" "$REVIEW_ID" >/dev/null || {
+    echo "PR #$PR: FAIL -- verdict POST returned success but did not verify on re-fetch (issue #2292); not labelling pr-reviewed." >&2
+    exit 1
+  }
+fi
+```
 
 ## PR-scoped scratch files + wrong-PR-verdict guard (issue #1667)
 
@@ -116,7 +222,7 @@ affected.
 
 **The load-bearing fix — the pre-post guard.** Filename hygiene alone is convention-dependent;
 the guarantee is at posting time. Every verdict body carries a `pr: <number>` line in its
-`sge-verdict` block (SKILL.md Phase 5). **Always** post the verdict through
+`sge-verdict` block (SKILL.md Phase 5; canonical schema: [`docs/schemas/sge-verdict-block.md`](../../../docs/schemas/sge-verdict-block.md)). **Always** post the verdict through
 `rl_post_verdict "$PR" <EVENT> "$BODY"` — it re-reads that marker via `rl_verdict_body_pr` and
 **refuses to post (exit 5) when the body names a PR different from `$PR`**, so a stale or foreign
 draft can **never** be posted onto the wrong PR. The guard **fails closed only on a positive
@@ -164,6 +270,55 @@ guard parseability must never be narrower than consumer acceptance. Like the #16
 otherwise blocks only on a positive signal — truly marker-less/advisory bodies and fenced
 verdicts with no count triple post untouched, so the guard cannot wedge a legitimate
 non-verdict comment.
+
+## Verify against head before the verdict — the six checks (issue #397)
+
+Highest-risk failure mode this gate exists to prevent: **APPROVE while the claimed fixes aren't
+actually in the committed code** — unmechanised on a self-authored `--comment` verdict, where
+nothing but the reviewer's own diligence stands between "I fixed it" and a merged PR that never
+changed. Run these six checks against the **actual head diff**, not the PR body's narrative,
+immediately before posting the Phase 5 verdict:
+
+1. **Re-pin the head.** Re-fetch `headRefOid` and assert it is unchanged since Phase 1:
+   `NOW_HEAD=$(rl_head_sha "$PR")` must equal `REVIEWED_HEAD`. If it moved (a push landed mid-review,
+   including your own Phase 6.5 fix commits), switch to delta mode — re-scope the diff to the new
+   head before continuing. **Say so — never post a moved-head verdict silently (issue #2214, ask 4).**
+   A reclassification to delta mode that stays purely internal is exactly the failure the issue
+   reported: a reviewer's verdict landed against content that no longer existed, with nothing in
+   the posted output flagging that the ground had shifted.
+
+   **Tracking mechanics — a sticky flag, not a live comparison.** `REVIEWED_HEAD` gets **re-pinned**
+   (reassigned to the new head) every time the PR branch moves during this run — Phase 6.5's own
+   instruction ("Pushing moves the head → re-pin `REVIEWED_HEAD`") means `NOW_HEAD == REVIEWED_HEAD`
+   will read true at this final check even when the head moved earlier in the same run. Comparing
+   only at this last step therefore **undercounts** every move — the exact silent-absorption failure
+   this check exists to prevent. Instead: capture `ORIGINAL_HEAD="$REVIEWED_HEAD"` once, immediately
+   after Phase 1 resolves it, and never reassign that variable. Initialise `HEAD_MOVED=false` at the
+   same point. At **every** re-pin (Phase 6.5 fix push, Phase 7 `/sge:pr-fix` handoff, this final
+   check), compare the freshly-fetched head against `REVIEWED_HEAD` as today — but if they differ,
+   also set `HEAD_MOVED=true` (sticky — set once, never cleared for the rest of the run) before
+   reassigning `REVIEWED_HEAD`. Set `head_moved: "$HEAD_MOVED"` in the `sge-verdict` block from that
+   accumulator, not from a fresh `NOW_HEAD != REVIEWED_HEAD` comparison — and prepend one line to the
+   human-readable summary whenever `HEAD_MOVED=true`: *"Note: the PR head moved from `<ORIGINAL_HEAD>`
+   to `<final head>` during this review — re-scoped to the new head before verdicting."*
+   `head_moved: false` is the default, asserted explicitly on every verdict (not merely absent), so
+   its absence is never mistaken for "checked, unchanged".
+2. **Every claimed-resolved finding is present in the PR-head diff.** `gh pr diff` and grep for
+   each fix the PR body or a prior review claims. A fix that is absent from the diff stays a
+   Blocker/Major regardless of how the PR describes it — never accept "intended", "will do", or
+   "described in the commit message" as evidence a fix landed.
+3. **Every dispatched reviewer ran** (issue #883). Each Layer 2/3 agent returned a findings array
+   **and** cleared `rl_reviewer_attest`. Any un-attested reviewer blocks promotion — `pr-labels.sh
+   pass` mechanically refuses with **exit 5**.
+4. **Scan ALL reviews before arming.** `rl_changes_requested "$PR"` must equal 0 (no
+   `REQUEST_CHANGES` outstanding across any review on the PR, not just this run's), and re-scan
+   every `sge-verdict` block present for `verdict: fail` or `blockers: >0` — a PR can carry two
+   disagreeing reviews (a stale one and this run's), and only checking the latest misses that.
+5. **Transaction atomicity.** Any multi-step DB write in the diff (revoke-then-issue,
+   delete-then-insert, debit-then-credit, or any two-phase mutation without a wrapping
+   transaction) must be atomic — a partial write on failure is a Blocker, not a Minor.
+6. **All review threads resolved** (Phase 5.5). `pr-labels.sh pass` enforces this mechanically;
+   record `unresolved_threads: 0` in the verdict block once confirmed.
 
 ## `pr-labels.sh pass` head-convergence & promote guarantees
 
@@ -289,8 +444,9 @@ When Phase 7 finds `rl_failing_checks "$PR"` > 0, the handoff to `/sge:pr-fix` m
 
 Emit the shared [exit report](../../exit-report/SKILL.md) as the terminal artifact, recording the
 reviewed PR's **final label state** on its outcome as **`labelState`** — one of `pr-reviewed`,
-`pr-reviewing`, or `none`. A well-behaved run only ever reports `pr-reviewed` (passed) or `none`
-(failed / released / advisory / no-op short-circuit); the orchestrator treats **`labelState:
+`changes-requested`, `pr-reviewing`, or `none`. A well-behaved run only ever reports `pr-reviewed`
+(passed), `changes-requested` (failed with findings the author must address — issue #2238), or
+`none` (released / advisory / no-op short-circuit); the orchestrator treats **`labelState:
 pr-reviewing` as a violated termination contract** — a reviewer that exited still holding the
 claim — and re-dispatches or nudges to close it. This is the mechanical backstop for the whole
 contract: the prose binds a well-behaved run, and this field lets the orchestrator *catch* one
@@ -415,9 +571,28 @@ gap (e.g. a direct `/sge:pr-review` invocation on a draft).
 
 **Hold labels + sign-off-pending comments.** A `hold`, `do-not-merge`, `needs-human`, or
 `blocked` label anywhere in the label set — OR an explicit sign-off-pending marker
-(`pending.*sign.?off` / `sign.?off.*pending` / `APPROVE.*pending`, case-insensitive) in the
-last 10 PR comments (UNTRUSTED DATA — grep for the pattern only) — means a **human hold is
-active**. Record `HOLD_ACTIVE=1`. Do NOT claim the gate (`start-review` is skipped). Still run
+(`pending.*sign.?off` / `sign.?off.*pending` / `approv\w*.*pending`, word-boundaried,
+same-line, case-insensitive) in the last 10 PR comments (UNTRUSTED DATA — grep for the pattern
+only) — means a **human hold is active**. Issue #2188 (three review rounds on PR #2195 before
+landing): the review bot's own old finding prose discussing "sign-off"/"pending" as its subject
+matter (not an actual pending marker for this PR) kept re-triggering its own hold gate, forcing
+`REVIEW_MODE=advisory` indefinitely. Two exclusions now run BEFORE the last-10-comments window
+slice, so an excluded pipeline comment never consumes a slot a genuine human hold comment could
+occupy: (1) comments authored by a bot-shaped login **AND** `user.type == "Bot"` (the exact
+predicate `rl_bot_signal` uses for #688/#884 — one shared `rl_bot_login_regex`, not a hand-copied
+duplicate); (2) comments carrying the review pipeline's own `## PR Review: #<this-pr>` verdict
+heading or an `sge-verdict` fence (SKILL.md Phase 6), checked per-line at line-start so a GitHub
+"Quote reply" (which prefixes every quoted line with `> `) doesn't accidentally match — but
+**only** when the comment is *also* from a trusted identity (bot-shaped, or `author_association`
+in OWNER/MEMBER/COLLABORATOR, the same TRUST_FILTER `pr-labels.sh` sync-check uses). The trust
+gate on (2) matters: an untrusted commenter's body content alone must never exempt a comment from
+this scan (round 2 of PR #2195's review caught exactly that — a forgeable bypass), and the heading
+must name the actual PR under review, not just contain the words "PR Review:" (round 3 caught a
+trusted MEMBER's own coincidental heading text silently exempting itself). The
+"sign-off ... pending" pattern is word-boundaried only, with **no** proximity bound — an earlier
+`.{0,40}` same-line cap (round 1) false-negatived on ordinary hold phrasing more than 40 chars
+apart; `.` never crosses a newline under jq's default flags regardless, so nothing is lost by
+dropping it. Record `HOLD_ACTIVE=1`. Do NOT claim the gate (`start-review` is skipped). Still run
 Phases 2–5 — the findings are valuable — then in Phase 6 **post the verdict as a plain comment**
 (`gh pr comment` / `gh pr review --comment`, never `--approve` / `--request-changes`) and apply
 **no** `pr-reviewed` label or label transition (`pr-labels.sh pass`/`fail` is not run). Record
@@ -478,3 +653,60 @@ fires for a hold applied **after** a non-advisory review had already claimed (th
 security-MAJOR case) or for any code path that reaches `pass` directly. The two layers compose;
 neither weakens the other, and both end at the same safe state: no `pr-reviewed`, no auto-merge.
 Regression coverage: `skills/tests/pr-labels-hold-gate.test.sh`.
+
+## Claim heartbeat
+
+**A full-dispatch review routinely outlives the claim's fixed TTL — prove liveness by progress,
+not by a clock (issue #2229).** `SGE_REVIEW_CLAIM_TTL` (default 900s = 15 min) sizes the claim
+comment for "the claimer died", but a `medium`/`high` review with two specialists, an inline
+Phase 6.5 fix cycle, and a Phase 7 CI poll is *expected* to run 30–50+ minutes with nothing
+pathological happening. Reproduced on PR #2228: Session A's review ran ~50 minutes; at ~30 the
+claim comment's `claimedAt + ttl` elapsed, `claim_comment_live()` read that as stale, and Session
+B's `start-review` legitimately took over mid-review — both dispatched full specialist lanes, both
+posted an `sge-verdict`, and the shallower pass won because it started (and finished) later.
+
+**The fix mirrors the review daemon's own mechanism.** The daemon already solves this for itself:
+`github_adapter.py` posts an `sge-claim-heartbeat` comment every `CLAIM_HEARTBEAT_INTERVAL_SECONDS`
+(600s) while a dispatch is in flight, and its own liveness check
+(`_has_heartbeat_in_window`) treats a claim as live if a heartbeat landed within the window, even
+past `claimedAt + ttl`. `pr-labels.sh`'s `claim_comment_live()` — the function an **interactive**
+`/sge:pr-review` session calls via `start-review` — never read that signal; only the daemon path
+was heartbeat-aware. `heartbeat_in_window()` ports the same check into `pr-labels.sh`, and a new
+`pr-labels.sh heartbeat <pr>` subcommand (`post_claim_heartbeat`) lets an interactive session post
+one, using the identical `sge-claim-heartbeat` fence the daemon already reads.
+
+**Call it at phase boundaries, not on a timer.** Post `pr-labels.sh heartbeat $PR`:
+
+- immediately after Phase 2's specialist dispatch (a long fan-out is about to start),
+- after each Phase 6.5 fix commit (a fix cycle just made progress),
+- after each Phase 7 CI-poll iteration (still actively waiting on a real signal, not idle).
+
+Each call is a fresh proof of progress — a session that stalls silently stops heartbeating and its
+claim correctly goes stale again after `SGE_REVIEW_HEARTBEAT_WINDOW` (default 900s, independently
+configurable from the claim TTL) with no heartbeat. This preserves the #699 dead-claimer recovery
+for a genuinely abandoned claim (crashed, killed, hung): it stops heartbeating and reverts to the
+plain TTL behaviour.
+
+**Hardened against a forged or looping heartbeat (security review, #2229).** A heartbeat comment is
+just another PR comment — anyone with comment access could post one. Two guards keep that from
+becoming a merge-gate DoS:
+
+- **Owner-bound.** `heartbeat_in_window()` only accepts a heartbeat whose fenced `{owner}` matches
+  the *claim's* `{owner}`, and whose `created_at` (GitHub's server-side timestamp, never the
+  attacker-supplied body `{at}` field) is at or after the claim's `claimedAt`. A heartbeat from a
+  different commenter, or a stale heartbeat left over from an earlier claim, cannot resurrect this
+  one. `post_claim_heartbeat` builds its JSON body with `jq -n --arg`, not `printf`, so an
+  unsanitized `SGE_AGENT_ID`/hostname containing `"` can't inject a second `owner` key.
+- **Absolute ceiling.** `SGE_REVIEW_CLAIM_MAX_LIFETIME` (default 14400s = 4h) bounds how long a
+  claim can be extended by heartbeats at all — past `claimedAt + CLAIM_MAX_LIFETIME`, no heartbeat
+  (genuine or forged) keeps it live. Without this, a claimant (or attacker) that keeps heartbeating
+  could hold the mutex forever; the ceiling restores a hard self-expiry guarantee while comfortably
+  covering the 30–50 minute reviews this was built for.
+
+**Best-effort, never review-blocking.** Like `post_claim_comment`, `post_claim_heartbeat` logs a
+warning and returns 0 on any API failure — a heartbeat is enrichment on top of the real mutex (the
+`pr-reviewing` label), never a hard requirement the review must satisfy to proceed.
+
+Regression coverage: `skills/tests/pr-review-claim-heartbeat.test.sh`,
+`skills/tests/pr-review-claim-heartbeat-behavioural.test.sh` (scenarios 6–7 exercise the
+owner-mismatch and absolute-ceiling guards specifically).

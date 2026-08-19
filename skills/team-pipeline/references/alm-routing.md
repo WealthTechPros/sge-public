@@ -78,7 +78,7 @@ IW="${CLAUDE_PLUGIN_ROOT:-.}/scripts/issue-write.sh"
 
 | `ALM` | Action |
 |---|---|
-| `github` (unset/empty) | `comment`/`create` delegate to `gh` byte-identically; `close-link` is DECLARATIVE — `$IW` prints the `Closes #N` token to embed in the PR body (it does not edit the PR) |
+| `github` (unset/empty) | `comment`/`create` delegate to `gh` byte-identically; `close-link` is DECLARATIVE — `$IW` prints the `Closes #N` token to embed in the PR body (it does not edit the PR) — use it only when the PR has earned a closing keyword; otherwise the body keeps `Part of #N` (sge-implement/references/close-keyword.md) |
 | `jira` | `comment`→**P5 `comment-item`**, `create`→**P6 `create-item`** (needs `SGE_JIRA_PROJECT` + the caller's `JIRA_ADAPTER_ALLOW_CREATE=1`), `close-link`→**P8 `link-close-on-merge`** (records a remote link on the item — Jira has no native PR link, #1150 — plus a close transition when `SGE_JIRA_CLOSE_TRANSITION_ID` is set; a failed write is surfaced loud, never swallowed) |
 | *unrecognised* | **fail loud** naming the value (DR1); no `gh` and no Jira REST write |
 
@@ -86,7 +86,7 @@ IW="${CLAUDE_PLUGIN_ROOT:-.}/scripts/issue-write.sh"
 |---|---|---|
 | **Phase 1/2** — claim notice, triage, exit report | P5 `comment-item` | `"$IW" comment "$n" "$body"` |
 | **Decomposition** — child work items | P6 `create-item` | `JIRA_ADAPTER_ALLOW_CREATE=1 "$IW" create "$title" "$body"` |
-| **PR handoff** — close-on-merge linkage | P8 `link-close-on-merge` | `"$IW" close-link "$n" "$pr_url"` (github: embed the printed `Closes #N`) |
+| **PR handoff** — close-on-merge linkage | P8 `link-close-on-merge` | `"$IW" close-link "$n" "$pr_url"` (github: embed the printed token — only when the PR has earned a closing keyword; else `Part of #N`, see sge-implement/references/close-keyword.md) |
 
 ### PR comments are NOT tracker writes — they stay on `gh`
 

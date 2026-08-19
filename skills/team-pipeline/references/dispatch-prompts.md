@@ -101,8 +101,12 @@ Prompt:
   After each action, append one JSON line to /tmp/team-pipeline-prmonitor.log:
     {"ts":"<ISO>","pr":<N>,"action":"pr-fix|pr-review|rerun|merged","outcome":"success|failed"}
 
-  /sge:pr-monitor is itself event-driven (it waits on `gh pr checks --watch`,
-  not the clock). At the end of each cycle, read /tmp/team-pipeline-state.json.
+  You are a DISPATCHED subagent, not a top-level session — `gh pr checks
+  --watch` does not hold your turn open here (loops §B; #1681, #2225). Use
+  /sge:pr-monitor's own subagent fallback instead: an adaptive bounded
+  synchronous poll in ONE tool call (~30s interval while any lane is active,
+  ~90s once every lane is merely queued — see pr-monitor SKILL.md's "the
+  clock" section). At the end of each cycle, read /tmp/team-pipeline-state.json.
   If prMonitorStatus == "stop", finish your current cycle then exit.
 
   Do NOT implement issues. Only monitor and fix PRs.
@@ -163,15 +167,19 @@ Prompt:
   ### Rule 2 — Draft PR on first commit
   After your FIRST commit (even if partial), immediately push and open a DRAFT
   PR IN THE EXECUTION REPO. Your cwd is the execution repo's worktree, so `gh`
-  targets it automatically. The closing reference must reach the TRACKING issue:
-  same-repo -> `Fixes #<N>`; cross-repo (execution repo != tracking repo) ->
-  the fully-qualified `Fixes <TRACKING_REPO>#<N>` so the PR still closes the
-  tracking issue when it merges in another repo:
+  targets it automatically. The reference must reach the TRACKING issue:
+  same-repo -> `Part of #<N>`; cross-repo (execution repo != tracking repo) ->
+  the fully-qualified `Part of <TRACKING_REPO>#<N>` so the PR still links to the
+  tracking issue when it merges in another repo.
+  Use `Part of`, NEVER `Fixes`/`Closes` (issue #2241): this PR is opened on your
+  FIRST commit and is incomplete by construction, so a closing keyword would
+  auto-close the tracking issue on merge while ACs remain. The closing keyword is
+  decided at completion, not here:
     git push origin "${SGE_BRANCH_PREFIX:-fix/issue-}<N>"
     # same-repo:
-    gh pr create --draft --title "<conventional title>" --body "Fixes #<N>"
-    # cross-repo (execution repo != tracking repo), e.g. Fixes owner/repo#<N>:
-    gh pr create --draft --title "<conventional title>" --body "Fixes <TRACKING_REPO>#<N>"
+    gh pr create --draft --title "<conventional title>" --body "Part of #<N>"
+    # cross-repo (execution repo != tracking repo), e.g. Part of owner/repo#<N>:
+    gh pr create --draft --title "<conventional title>" --body "Part of <TRACKING_REPO>#<N>"
   Do NOT wait until all work is done to open the PR. Opening it early surfaces
   the branch to CI and lets the orchestrator detect you are making progress.
 
