@@ -8,18 +8,19 @@
 #   0 = every gate installed AND PR-blocking   1 = >=1 gate missing/not-blocking
 #   2 = harness error
 #
-# Reports, per repo, which of the THREE standard enforcement workflows are
+# Reports, per repo, which of the FOUR standard enforcement workflows are
 # installed and would actually block a pull request:
 #   G1 require-pr-reviewed-label  (.github/workflows/require-pr-reviewed-label.yml)
 #   G2 require-commit-trailer     (.github/workflows/require-commit-trailer.yml)
 #   G3 ai-supply-chain            (.github/workflows/ai-supply-chain.yml)
+#   G4 check-tracking-close-keyword (.github/workflows/check-tracking-close-keyword.yml)
 #
 # Per-gate status (0.5 credit for partial, same formula as the ZT dimension):
 #   pass    — workflow file present AND triggers on `pull_request` (can gate a PR)
 #   partial — workflow file present but NOT pull_request-triggered (push/schedule
 #             only): installed, running, but incapable of blocking a merge
 #   fail    — workflow file absent
-#   score = round(100 × (pass + 0.5 × partial) / 3)
+#   score = round(100 × (pass + 0.5 × partial) / 4)
 #
 # HONESTY / scope: this reads the repo's workflow FILES only — it proves a gate
 # is installed and PR-triggered, i.e. *capable* of blocking. Whether GitHub has
@@ -109,10 +110,11 @@ check_gate() { # id workflow-basename
 check_gate G1 require-pr-reviewed-label
 check_gate G2 require-commit-trailer
 check_gate G3 ai-supply-chain
+check_gate G4 check-tracking-close-keyword
 
 # --- score + emit --------------------------------------------------------------
-total_gates=3
-# round(100 × (pass + 0.5×partial) / 3) in integer arithmetic
+total_gates=4
+# round(100 × (pass + 0.5×partial) / 4) in integer arithmetic
 score=$(( (200*pass_n + 100*partial_n + total_gates) / (2*total_gates) ))
 status=pass
 [ "$partial_n" -gt 0 ] && status=warn

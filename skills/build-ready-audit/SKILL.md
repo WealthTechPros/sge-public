@@ -75,11 +75,14 @@ who only want the acceptance/scope/dependency gate.
 
 The full audit runs during a triage sweep — long after an issue is written. To
 score an issue's four build-ready gates **the moment it is authored** (not only
-during a sweep), run the dependency-free pre-check over its body:
+during a sweep), run the dependency-free pre-check over its body. `$SGE_ROOT`
+below is resolved via the bootstrap `_sge_root()` function — the copy-verbatim
+source of truth is `scripts/resolve-sge-root.sh`'s header comment; never a bare
+`${CLAUDE_PLUGIN_ROOT}`, which is empty whenever unset:
 
 ```bash
-gh issue view 256 --json body --jq .body | node "${CLAUDE_PLUGIN_ROOT:-.}/skills/lib/build-ready-prescorer.mjs"
-node "${CLAUDE_PLUGIN_ROOT:-.}/skills/lib/build-ready-prescorer.mjs" --body "<draft body>" --json   # structured
+gh issue view 256 --json body --jq .body | node "$SGE_ROOT/skills/lib/build-ready-prescorer.mjs"
+node "$SGE_ROOT/skills/lib/build-ready-prescorer.mjs" --body "<draft body>" --json   # structured
 ```
 
 It names **which** gate failed and why — `criteria` (2A), `scope` (2B, the
@@ -165,7 +168,7 @@ issue body with the **canonical Phase 2 sizing rubric** — the same rubric
 
 ```bash
 gh issue view <N> --json body --jq .body | \
-  node "${CLAUDE_PLUGIN_ROOT:-.}/skills/lib/issue-prescorer.mjs"
+  node "$SGE_ROOT/skills/lib/issue-prescorer.mjs"
 # → { "tier": "SMALL"|"MEDIUM"|"LARGE"|"AMBIGUOUS", "score": N, "signals": {...}, "reason": "..." }
 ```
 
@@ -230,8 +233,10 @@ and unchanged: this audit is a caller of that skill, not a fork of its logic.
 **State the target repo explicitly in the dispatch prompt (SPEC-057, issue
 #1558)** — a forked subagent starts in this session's cwd and does not inherit
 shell state across its own tool calls, so instruct it to re-resolve and `cd`
-itself (`cd "$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh resolve
-owner/repo)" || exit 1`) before its own `gh`/artefact reads; otherwise, on a
+itself (`cd "$("$SGE_ROOT/scripts/with-repo-cwd.sh" resolve owner/repo)" ||
+exit 1` — `$SGE_ROOT` resolved via the bootstrap function in
+`scripts/resolve-sge-root.sh`'s header comment, never a bare
+`${CLAUDE_PLUGIN_ROOT}`, #1567/#1963) before its own `gh`/artefact reads; otherwise, on a
 hub/batch dispatch, a same-numbered issue in the hub repo is classified
 silently against the wrong repo's artefacts.
 
@@ -276,8 +281,12 @@ issue, resolve the structured execution-repo field with the SPEC-057 helper,
 passing the issue's own home repo as the tracking fallback:
 
 ```bash
+# $SGE_ROOT resolved via the bootstrap function — never a bare
+# `${CLAUDE_PLUGIN_ROOT}` (#1567/#1963). Requires CLAUDE_PLUGIN_ROOT already
+# set, OR run the copy-verbatim `_sge_root()` bootstrap function from
+# ${CLAUDE_PLUGIN_ROOT}/scripts/resolve-sge-root.sh's header comment first.
 EXEC_REPO="$(gh issue view "$N" --json body -q .body \
-  | "${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh" issue-repo "$TRACKING_REPO")"
+  | "$SGE_ROOT/scripts/with-repo-cwd.sh" issue-repo "$TRACKING_REPO")"
 ```
 
 The field grammar (`Repo: owner/name` / `execution-repo: owner/name`, absent ==

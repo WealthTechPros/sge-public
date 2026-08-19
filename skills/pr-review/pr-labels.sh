@@ -63,6 +63,15 @@
 #                                             cannot open while a human sign-off is pending.
 #                                             Remove the `hold` label to release the block;
 #                                             the next review cycle then promotes normally.
+#   pr-labels.sh heartbeat <pr>                post an sge-claim-heartbeat comment proving
+#                                             the review claim is still in flight (issue
+#                                             #2229). Call at phase boundaries on any review
+#                                             expected to outrun SGE_REVIEW_CLAIM_TTL (default
+#                                             900s) — a heartbeat within SGE_REVIEW_HEARTBEAT_
+#                                             WINDOW seconds of now keeps claim_comment_live()
+#                                             true past claimedAt+ttl, so a genuinely active
+#                                             review is not taken over mid-flight. Mirrors the
+#                                             review daemon's own heartbeat (#1312 AC2).
 #   pr-labels.sh fail <pr>                    gate failed    (remove BOTH labels; the
 #                                             posted findings carry the state)
 #   pr-labels.sh held <pr>                    review passed but a `hold` label is
@@ -180,6 +189,22 @@ CLAIM_COMMENT_FENCE="sge-claim-metadata"
 # sge-claim-heartbeat) posted by the review daemon extend the effective window.
 CLAIM_COMMENT_TTL="${SGE_REVIEW_CLAIM_TTL:-900}"
 
+# Heartbeat fence + interval (issue #2229): a heartbeat posted at a review's
+# phase boundaries (dispatch, post-fix, post-CI-poll) proves the claim is
+# genuinely in flight, so a claim's effective lifetime is claimedAt + ttl,
+# extended by any heartbeat seen within the last CLAIM_HEARTBEAT_WINDOW
+# seconds of "now" — not just claimedAt + ttl on its own. Mirrors the review
+# daemon's github_adapter.py (_has_heartbeat_in_window, issue #1312 AC2); this
+# is the same mechanism made available to an interactive /sge:pr-review run,
+# which previously had no way to prove liveness past the fixed TTL (#2229).
+HEARTBEAT_COMMENT_FENCE="sge-claim-heartbeat"
+CLAIM_HEARTBEAT_WINDOW="${SGE_REVIEW_HEARTBEAT_WINDOW:-900}"
+# Absolute ceiling on a heartbeat-extended claim (security review, #2229): a
+# claim heartbeated in a loop must still self-expire eventually, or a wedged
+# (or malicious) claimant with comment access could hold the merge-gate mutex
+# forever. 4h comfortably covers the 30-50 min reviews this was built for.
+CLAIM_MAX_LIFETIME="${SGE_REVIEW_CLAIM_MAX_LIFETIME:-14400}"
+
 # _claim_repo_full: canonical owner/repo for API calls. Prefers GH_REPO;
 # falls back to gh detection. Prints nothing on failure.
 _claim_repo_full() {
@@ -214,20 +239,88 @@ parse_claim_metadata() {
   printf '%s' "${meta:-}"
 }
 
+# _iso_to_epoch <timestamp>: convert an ISO-8601 UTC timestamp to epoch
+# seconds, or print nothing on failure. Validates the shape first (security
+# review, #2229) — GNU `date -u -d ""` silently succeeds and returns
+# midnight-today instead of failing, so an empty/malformed timestamp would
+# otherwise produce a plausible-looking epoch instead of a parse error. GNU
+# date first (Linux/Git-Bash), BSD date fallback (macOS) — shared by claim
+# and heartbeat staleness checks.
+_iso_to_epoch() {
+  [[ "${1:-}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || return 1
+  date -u -d "${1:-}" +%s 2>/dev/null \
+    || date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "${1:-}" +%s 2>/dev/null
+}
+
+# heartbeat_in_window <claim-owner> <claimed-epoch>: return 0 (true) if a
+# sge-claim-heartbeat comment proves THIS SPECIFIC claim is still live.
+# Mirrors the review daemon's _has_heartbeat_in_window (github_adapter.py,
+# #1312 AC2), with two hardenings from security review (#2229):
+#   - owner-bound: only a heartbeat whose fenced {owner} matches the claim's
+#     owner counts. Un-bound, any PR commenter's heartbeat (this PR's own
+#     fence is public) could keep ANY claim alive indefinitely — a DoS on the
+#     merge gate, since branch protection requires pr-reviewed and start-review
+#     refuses (exit 3) while a claim looks live.
+#   - claim-ordered: only a heartbeat at or after the claim's claimedAt counts,
+#     so a stale heartbeat from a PRIOR claim can't resurrect a later one.
+# created_at is GitHub's server-side timestamp (never the attacker-supplied
+# body {at} field), so a forged future timestamp can't extend the window.
+heartbeat_in_window() {
+  local claim_owner="${1:-}" claimed_epoch="${2:-0}"
+  local _rf now_epoch
+  _rf="$(_claim_repo_full)"
+  [[ -n "$_rf" ]] || return 1
+  now_epoch=$(date -u +%s)
+  # Fetch all comments, keep heartbeat-fenced ones, print "<created_at>\t<owner>".
+  local rows row ts owner epoch
+  rows=$(gh api "repos/$_rf/issues/$PR/comments" --paginate \
+    --jq "[.[] | select(.body | ltrimstr(\"\n\") | startswith(\"\`\`\`${HEARTBEAT_COMMENT_FENCE}\"))
+           | {created_at, body} ]
+          | map(.owner = (.body | capture(\"\\\"owner\\\"\\\\s*:\\\\s*\\\"(?<o>[^\\\"]*)\\\"\"; \"\") .o // \"\"))
+          | .[] | [.created_at, .owner] | @tsv" \
+    2>/dev/null) || return 1
+  [[ -n "$rows" ]] || return 1
+  while IFS=$'\t' read -r ts owner; do
+    [[ -n "$ts" ]] || continue
+    [[ -n "$claim_owner" && "$owner" == "$claim_owner" ]] || continue
+    epoch=$(_iso_to_epoch "$ts") || continue
+    [[ -n "$epoch" ]] || continue
+    [[ "$epoch" -ge "$claimed_epoch" ]] || continue
+    if [[ $((now_epoch - epoch)) -le "$CLAIM_HEARTBEAT_WINDOW" ]]; then
+      return 0
+    fi
+  done <<< "$rows"
+  return 1
+}
+
 # claim_comment_live <comment-json>: return 0 (true) if the comment represents
-# a live (non-stale) claim. A claim is live when claimedAt + ttl > now.
+# a live claim. A claim is live when claimedAt + ttl > now, OR when an
+# owner-matched sge-claim-heartbeat comment landed within
+# CLAIM_HEARTBEAT_WINDOW seconds of now (issue #2229) — a heartbeat proves
+# the claimant is still actively working, which the fixed TTL alone cannot
+# distinguish from a dead claimant. CLAIM_MAX_LIFETIME is a hard ceiling
+# (security review, #2229): past it, no heartbeat can keep the claim alive —
+# a wedged or malicious heartbeat loop cannot hold the mutex forever.
 claim_comment_live() {
-  local meta claimed_at ttl_val claimed_epoch now_epoch
+  local meta owner claimed_at ttl_val claimed_epoch now_epoch
   meta=$(parse_claim_metadata "${1:-}")
   [[ -n "$meta" ]] || return 1
+  owner=$(printf '%s' "$meta" | jq -r '.owner // empty' 2>/dev/null) || return 1
   claimed_at=$(printf '%s' "$meta" | jq -r '.claimedAt // empty' 2>/dev/null) || return 1
   ttl_val=$(printf '%s' "$meta" | jq -r '.ttl // 900' 2>/dev/null) || ttl_val=900
   [[ -n "$claimed_at" ]] || return 1
-  # GNU date first (Linux/Git-Bash), BSD date fallback (macOS).
-  claimed_epoch=$(date -u -d "$claimed_at" +%s 2>/dev/null \
-    || date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$claimed_at" +%s 2>/dev/null) || return 1
+  claimed_epoch=$(_iso_to_epoch "$claimed_at") || return 1
+  [[ -n "$claimed_epoch" ]] || return 1
   now_epoch=$(date -u +%s)
-  [[ $((claimed_epoch + ttl_val)) -gt "$now_epoch" ]]
+  if [[ $((claimed_epoch + ttl_val)) -gt "$now_epoch" ]]; then
+    return 0
+  fi
+  # claimedAt + ttl has elapsed — not live UNLESS BOTH: a recent, owner-matched
+  # heartbeat proves the work is still genuinely in flight (#2229), AND the
+  # absolute ceiling hasn't been exceeded (no infinite extension via looping
+  # heartbeats — security review, #2229).
+  [[ $((now_epoch - claimed_epoch)) -le "$CLAIM_MAX_LIFETIME" ]] || return 1
+  heartbeat_in_window "$owner" "$claimed_epoch"
 }
 
 # post_claim_comment: post the JSON claim comment alongside the pr-reviewing
@@ -251,6 +344,38 @@ post_claim_comment() {
     echo "PR #$PR: claim comment posted (id=$comment_id, owner=$owner, ttl=${CLAIM_COMMENT_TTL}s)" >&2
   else
     echo "warning: PR #$PR could not post claim comment — continuing (issue #1312)" >&2
+  fi
+}
+
+# post_claim_heartbeat: post an sge-claim-heartbeat comment proving the
+# current review claim is still actively worked. Call at phase boundaries
+# (post-dispatch, post-fix, post-CI-poll) on a review expected to outrun
+# CLAIM_COMMENT_TTL (issue #2229) — same fence and shape as the review
+# daemon's heartbeat (github_adapter.py, #1312 AC2), read by
+# heartbeat_in_window above. Best-effort — a failure is logged but never
+# aborts the review; the claim label remains the real mutex.
+post_claim_heartbeat() {
+  local owner at body _rf comment_id
+  owner="${SGE_AGENT_ID:-$(hostname 2>/dev/null || echo "unknown")}"
+  at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  # jq -n --arg, not printf (security review, #2229): heartbeat_in_window now
+  # trusts the fenced {owner} field to bind a heartbeat to its claim, so an
+  # owner containing a literal '"' (SGE_AGENT_ID / hostname is not sanitized)
+  # must not be able to inject a second "owner" key via naive string
+  # formatting — jq's --arg encodes it as a safe JSON string value.
+  body="$(printf '```%s\n%s\n```' "$HEARTBEAT_COMMENT_FENCE" \
+    "$(jq -n --arg owner "$owner" --arg at "$at" '{owner:$owner, at:$at}')")"
+  _rf="$(_claim_repo_full)"
+  if [[ -z "$_rf" ]]; then
+    echo "warning: PR #$PR could not determine repo for heartbeat comment — skipping (issue #2229)" >&2
+    return 0
+  fi
+  comment_id=$(gh api "repos/$_rf/issues/$PR/comments" \
+    -f body="$body" --jq '.id' 2>/dev/null) || comment_id=""
+  if [[ -n "$comment_id" ]]; then
+    echo "PR #$PR: heartbeat posted (id=$comment_id, owner=$owner)" >&2
+  else
+    echo "warning: PR #$PR could not post heartbeat comment — continuing (issue #2229)" >&2
   fi
 }
 
@@ -616,7 +741,12 @@ await_head_convergence() {
 # #1166). It is excluded from the green guard because it is definitionally red
 # pre-swap and is OWNED by the transition being performed; every other check
 # keeps its full fail-closed weight.
-SELF_LABEL_CHECK_NAME="Require pr-reviewed label"
+# Overridable per-repo via SGE_SELF_LABEL_CHECK_NAME (issue #2185): the literal
+# job name varies by repo (e.g. ppp's gate job is "PR reviewed merge gate", not
+# the historical default) — a hardcoded name never matches there, so the
+# self-exclusion silently fails to apply and the gate's own expected-red
+# pre-swap state permanently blocks `pass --auto-merge`.
+SELF_LABEL_CHECK_NAME="${SGE_SELF_LABEL_CHECK_NAME:-Require pr-reviewed label}"
 
 assert_required_checks_green() {
   local raw rc err errfile
@@ -1773,6 +1903,17 @@ case "$CMD" in
     # the label already being absent (released twice, or never claimed).
     remove_label "$FIXING"
     echo "PR #$PR: $FIXING released"
+    ;;
+
+  heartbeat)
+    # Prove a review claim is still genuinely in flight (issue #2229). Call at
+    # phase boundaries (post-dispatch, post-fix, post-CI-poll) on any review
+    # expected to outrun CLAIM_COMMENT_TTL — a heartbeat within
+    # CLAIM_HEARTBEAT_WINDOW seconds of "now" keeps claim_comment_live()
+    # returning true even after claimedAt + ttl has elapsed, so the mutex does
+    # not release out from under active work. Advisory/best-effort: never
+    # fails the review just because the comment post failed.
+    post_claim_heartbeat
     ;;
 
   status)
