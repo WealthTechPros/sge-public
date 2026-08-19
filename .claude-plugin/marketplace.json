@@ -7,14 +7,12 @@
   },
   "metadata": {
     "description": "WealthTech Pros — Specification-Governed Engineering (SGE) tooling for regulated financial-services engineering teams.",
-    "version": "4.33.2"
-  },
+    "version": "4.34.4"  },
   "plugins": [
     {
       "name": "sge",
       "description": "SGE methodology + shared workflow skills for all WTP repos — spec-governed implementation, PR merge gates, governance drift sweeps, and an FS AI-governance register.",
-      "version": "4.33.2",
-      "author": {
+      "version": "4.34.4",      "author": {
         "name": "WealthTech Pros",
         "email": "rob.duncan@wealthtechpros.com",
         "url": "https://wealthtechpros.com"
@@ -37,8 +35,7 @@
     {
       "name": "sgd",
       "description": "[DEPRECATED - renamed to sge, please run /plugin install sge instead] SGD methodology + shared workflow skills for all WTP repos — spec-governed implementation, PR merge gates, governance drift sweeps, and an FS AI-governance register.",
-      "version": "4.33.2",
-      "source": "./"
+      "version": "4.34.4",      "source": "./"
     }
   ]
 }

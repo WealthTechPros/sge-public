@@ -111,6 +111,10 @@ Two further legs over `fetch_claimed_prs`, both mechanised in [`monitor-lib.sh`]
 
 A **fourth leg** over drafts: `is_stale_draft <pr>` returns 0 (no claim label, head older than `STALE_DRAFT_MINUTES` (default **45**), no check in flight) means presumed abandoned. `stale_draft_lane <pr>` then readies a **green** draft (logged + audited) or posts an idempotent abandonment comment on a **red** one â€” **never** auto-ready over red CI; an active draft is a no-op. **Run it here** â€” full rules and rationale: [`stale-draft-lane.md`](references/stale-draft-lane.md).
 
+### Stacked-PR detection & merge-order recommendation (#2296)
+
+**At lane-assignment and each backfill,** scan the candidate set for stacked PRs — where one PR's `baseRefName` equals another open PR's `headRefName`. Before acting on any lane in a stack, emit a merge-order recommendation with reasoning (which PR must land first and why). Flag **partial-merge hazards** (merging PR A alone leaves a governance artefact inconsistent with PR B's correction); for any PR in the queue that carries a merge commit, check for silent reversions per AC3. Full detection rules and the merge-order algorithm: [`../lib/stacked-pr-hazards.md`](../lib/stacked-pr-hazards.md).
+
 ---
 
 ## Merge readiness â€” three gates

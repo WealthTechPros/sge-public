@@ -29,9 +29,27 @@ It runs **inline** in the main conversation — do not fork it into a subagent. 
 
 `$ARGUMENTS` is the parent issue number (optionally followed by flags). Example: `/sge:decompose-issue 312`
 
-**Issue context (preloaded):**
+**Issue context — fetch as your first action (issue #226, #2266 security review):**
 
-!`gh issue view $(echo $ARGUMENTS | cut -d' ' -f1 | tr -cd '0-9') --json number,title,body,labels,milestone,state,url 2>/dev/null || echo "NO_ISSUE_LOADED — ask the user for an issue number"`
+> A `!`-preload injection line cannot safely carry `$ARGUMENTS` into executable
+> Bash — the harness substitutes `$ARGUMENTS` as raw, unescaped text into the
+> command string *before* any shell parses it, so any quoting scheme is
+> breakable by an adversarial argument (confirmed live: a payload containing a
+> bare `"` broke out of a `bash -c '...' _ "$ARGUMENTS"` positional-passing
+> attempt and executed arbitrary commands — the harness never gives `bash -c`
+> a real argv, so that pattern isn't actually safe here even though it is in
+> a normal shell; see
+> [`no-positional-args-in-injection.test.sh`](../tests/no-positional-args-in-injection.test.sh)
+> and upstream anthropics/claude-code#16163). Fetch the issue as a **real
+> Bash tool call you issue yourself**, extracting the leading numeric token
+> from the parsed `$ARGUMENTS` text of your own invocation (not re-interpolated
+> into a command string) and passing it as a normal, safely-quoted argument:
+> ```bash
+> SGE_ROOT="$(bash scripts/resolve-sge-root.sh 2>/dev/null || bash "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-sge-root.sh")" \
+>   || { echo "NO_SGE_ROOT — SGE plugin root not found; ask the user for an issue number"; }
+> bash "$SGE_ROOT/scripts/issue-read.sh" view "<PARENT-ISSUE-NUMBER>" \
+>   || echo "NO_ISSUE_LOADED — ask the user for an issue number"
+> ```
 
 > **Spec-ID note:** `SPEC-NNN` is the current convention; legacy `SGD-NNN` is also accepted by the commit-msg hook and trailers. Grep the parent title/body for `SPEC-[0-9]+` (or `SGD-[0-9]+`) to decide which lane the children belong to.
 
@@ -237,13 +255,40 @@ EOF
 > enumerated from the source of truth (e.g. `brand-assets/tokens.json`)."* A
 > name-grep-only AC on a sweep child is a false-green trap — see Phase 3b.
 
-**No-spec lane** (general feature/bug/chore parent): drop the `SPEC-NNN-` title prefix and use the `enabler` / `story` labels alone (plus any `module:*` label inherited from the parent). The children inherit the parent's milestone:
+**No-spec lane** (general feature/bug/chore parent): drop the `SPEC-NNN-` title prefix and use the `enabler` / `story` labels alone (plus any `module:*` label inherited from the parent). The children inherit the parent's milestone — GitHub-only convention (Jira/Forgejo have no equivalent field carried through `$IW`), so it is fetched separately here rather than in the shared preload, whose normalised `issue-read.sh view` shape stays deliberately narrow (`number,title,body,labels,assignees,state`) across all three backends:
 
 ```bash
+PARENT_MILESTONE=$(gh issue view "$PARENT" --json milestone --jq '.milestone.title // empty')
 E1=$(JIRA_ADAPTER_ALLOW_CREATE=1 "$IW" create "Enabler: <parent title> — foundation" \
   "$(printf 'Parent: #%s\nDependsOn: —\nOwns: ...' "$PARENT")")
-gh issue edit "$E1" --add-label "enabler" --milestone "<parent milestone>"
+if [ -n "$PARENT_MILESTONE" ]; then
+  gh issue edit "$E1" --add-label "enabler" --milestone "$PARENT_MILESTONE"
+else
+  gh issue edit "$E1" --add-label "enabler"
+fi
 ```
+
+**Label the parent `tracking` — same step, not a follow-up (#2241).** Once a
+parent has children, no single PR closes it, and a child's PR carrying
+`Closes #parent` would shut the umbrella with most of its slices unbuilt. The
+label is the mechanical signal `/sge:sge-implement` Phase 6 reads (see
+[close-keyword](../sge-implement/references/close-keyword.md)):
+
+`--add-label` does **not** create a missing label — it fails with
+`'tracking' not found`, and `tracking` exists in no repo by default. Without the
+create step the parent is silently never labelled, the umbrella check returns
+`false`, and the next child's PR carries `Closes #parent`. Same ensure-exists
+convention as `/sge:build-ready-audit`'s verdict labels:
+
+```bash
+gh label create "tracking" --color "5319E7" \
+  --description "Umbrella issue: no single PR closes it (#2241)" 2>/dev/null || true
+gh issue edit "$PARENT" --add-label "tracking"
+```
+
+Children carry `Closes #child`; the parent only ever `Part of #parent`. When
+the last child merges, the parent is closed **by hand**, after its label is
+removed deliberately.
 
 **Metadata fields, every child:**
 
@@ -331,7 +376,17 @@ no transitive walk exists.
 
 ## Phase 6: Record the DAG on the Parent
 
-Skip only if `--no-comment` is passed. Comment on the parent with the full child sequence and the parallel lanes, so the parent becomes the single source of truth for the decomposition:
+**First, label the parent as a tracking issue (issue #2241).** The moment a parent has children, it is an umbrella: it must be closed by a human once every child has landed, never auto-closed by one child's PR merging.
+
+```bash
+gh issue edit "$PARENT" --add-label tracking   # GitHub path; Jira label parity is S4 (P9)
+```
+
+This is not bookkeeping — it is the **mechanical** half of the #2241 fix. `/sge:sge-implement` Phase 6 refuses to emit a closing keyword for a `tracking`-labelled issue, `rl_ensure_closing_link` refuses to append one, and `.github/scripts/check-tracking-close-keyword.sh` refuses any PR whose closing keyword resolves to one. All three key off **this label**, so a decomposition that skips it leaves the parent auto-closeable by the first child that merges — exactly the incident (`data-remediation` #13, closed by a PR delivering 1 of its 5 ACs). Children are safe by construction: Phase 5 gives each `Parent: #N`, never a closing keyword.
+
+> Label name overridable via `SGE_TRACKING_LABELS` (default `tracking,epic`); use whichever your repo declares, but apply one.
+
+Then comment on the parent with the full child sequence and the parallel lanes, so the parent becomes the single source of truth for the decomposition (skip only if `--no-comment` is passed — the label is applied regardless):
 
 ```bash
 "$IW" comment "$PARENT" "$(cat <<'EOF'

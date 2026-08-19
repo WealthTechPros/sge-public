@@ -49,7 +49,7 @@ Runs as `context: fork`: the audit is self-contained (own worktree, own server, 
 
 ## Step 1: Derive the QA criteria
 
-1. Extract the linked issue number from the PR body (patterns: `Closes #N`, `Fixes #N`, `Resolves #N`, bare `#N`):
+1. Extract the linked issue number from the PR body (patterns: `Closes #N`, `Fixes #N`, `Resolves #N`, `Part of #N`, bare `#N`):
 
    ```bash
    gh issue view "$ISSUE_NUMBER" --json title,body,labels
@@ -65,12 +65,21 @@ The output of this step is a numbered list of criteria. Every criterion must end
 
 ## Step 2: Check out the PR in an isolated worktree
 
-Never QA in the shared checkout. Create a detached worktree per the shared [`worktrees`](../worktrees/SKILL.md) convention — the canonical sibling `../<repo>-worktrees/qa-<PR>` layout (purpose token `qa`, `<id>` = the PR number) — and check the PR out there:
+Never QA in the shared checkout. Create a detached worktree per the shared [`worktrees`](../worktrees/SKILL.md) convention — the canonical sibling `../<repo>-worktrees/qa-<PR>` layout (purpose token `qa`, `<id>` = the PR number).
+
+**Claim before create (issue #2214).** Export an agent-unique `SGE_AGENT_ID` and route through `resume-or-create.sh` with purpose `qa`, so a concurrent QA lane on the same PR backs off instead of racing this checkout — mechanics: [`worktrees` — PR-scoped lanes](../worktrees/SKILL.md#pr-scoped-lanes-pr-review--pr-fix--qa---same-helper-purpose-param-issue-2214).
 
 ```bash
 REPO_ROOT=$(git rev-parse --show-toplevel)
-WT="${REPO_ROOT}/../$(basename "$REPO_ROOT")-worktrees/qa-$1"
-git worktree add "$WT" --detach
+export SGE_AGENT_ID="${SGE_AGENT_ID:-qa-$1}"
+while IFS= read -r _line; do case "$_line" in
+  verdict:*)  roc_verdict="${_line#verdict:}" ;;
+  worktree:*) roc_worktree="${_line#worktree:}" ;;
+esac; done < <(bash "${CLAUDE_PLUGIN_ROOT}/skills/worktrees/resume-or-create.sh" decide "$1" "$REPO_ROOT" "" qa)
+[ "$roc_verdict" = "backoff" ] && { echo "PR #$1: qa worktree claimed by a live agent — back off"; exit 3; }
+WT="${roc_worktree:-$REPO_ROOT/../$(basename "$REPO_ROOT")-worktrees/qa-$1}"
+[ -d "$WT" ] || git worktree add "$WT" --detach
+bash "${CLAUDE_PLUGIN_ROOT}/skills/worktrees/resume-or-create.sh" claim "$WT"
 cd "$WT"
 gh pr checkout $1
 HEAD_SHA=$(git rev-parse HEAD)

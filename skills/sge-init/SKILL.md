@@ -252,7 +252,43 @@ each tagged with the stakeholder who should answer it. These are the **QD record
   (`Open`/`Closed`), and — on closure — the decision, who decided, and the date.
 - **Closure:** a QD is closed by recording the decision in the registry **and** updating
   every spec that lists it in `questions[]` (remove the ref, fold the answer into the
-  spec body). `/sge:sge-align` check C8 flags QDs open past threshold.
+  spec body). `/sge:sge-align` check C8 flags QDs open past threshold **and** runs the
+  structural/referential-integrity validator below (issue #2313).
+
+**Format — one `### QD-NN` heading per entry, mechanically parseable.** This is the
+checked convention `skills/sge-align/assets/check-qd-registry.sh` validates against —
+follow it exactly so the seeded registry is auditable from the first commit, not just
+human-readable:
+
+```markdown
+### QD-01
+
+- **Question:** <the precise question>
+- **Stakeholder:** <name/role who answers it>
+- **Raised:** <YYYY-MM-DD>
+- **Status:** Open
+
+### QD-02
+
+- **Question:** <the precise question>
+- **Stakeholder:** <name/role who answers it>
+- **Raised:** <YYYY-MM-DD>
+- **Status:** Closed
+- **Decision:** <the recorded answer>
+- **Decided by:** <name/role>
+- **Decided:** <YYYY-MM-DD>
+```
+
+A `Closed` entry's `Decision`/`Decided by`/`Decided` fields are **immutable** once
+written — the validator treats a changed decision text on a previously-closed QD as a
+silent-revert defect (#2220's "closed QDs whose decision text was silently reverted by
+a merge" finding), not a normal edit. To correct a closed decision, open a **new** QD
+that supersedes it and references the old one by ID — never edit history in place.
+
+Run the validator standalone at any point with
+`skills/sge-align/assets/check-qd-registry.sh` (same pattern as Step 7b's C11 script) —
+useful right after seeding the first entries, to confirm the registry parses cleanly
+before the first `/sge:sge-align` sweep.
 
 Do **not** create any external database without explicit approval.
 
@@ -339,6 +375,25 @@ The gate requires a PR touching a `regulated_paths` file to carry a human sign-o
 
 Skip and note it in the Review Package for repos that render no regulated numbers.
 
+## Step 7e — Point to the branch-protection-as-code reference (solo-dev posture)
+
+Branch protection rulesets are typically GitHub-side only — no PR, no diff, no review trail when an admin changes what gates a merge. If the new repo's team is solo-dev (the common WTP case), propose adopting the documented Pulumi GitHub-provider pattern rather than configuring protection by hand:
+
+- Reference: [`docs/branch-protection-solo-dev.md`](../../docs/branch-protection-solo-dev.md) — a `github.BranchProtection` snippet adapted from `WealthTechPros/wtp-org`'s live `infra/github/__main__.py`, encoding PR-required / `required_approving_review_count=0` / no-force-push / no-delete / linear-history.
+- This is a solo-dev posture specifically — a multi-reviewer team should raise `required_approving_review_count` above 0 instead of adopting the snippet verbatim.
+- Skip this step and note it in the Review Package if the repo already has protection-as-code in place, or if the team isn't solo-dev.
+
+## Step 7f — Propose a recurring drift-check cadence
+
+`sge-init`'s output (Steps 1–7e) is a **governance snapshot at t=0** — Vision, capability model, specs, ADRs, the QD registry, and (where adopted) the Step 7b C11 posture baseline, explicitly seeded "so future sweeps can report a delta." A snapshot with an intended delta but no scheduled re-measurement is a delta of one: nothing in Steps 1–9 proposes *when* that next data point gets produced. `/sge:sge-align` (drift detection) and `/sge:improvement-sweep` (the scheduled hill-climb cadence) both already exist in the plugin — this step just proposes wiring the freshly onboarded repo into them.
+
+Propose one of the following (AI proposes, human disposes — write only after approval), same tier-by-repo-capability judgement as Step 7b:
+
+1. **Preferred, if the repo has CI:** propose adding `.github/workflows/improvement-sweep.yml`, copied from this framework repo's own `.github/workflows/improvement-sweep.yml` (dependency-free Node picker + a guarded climb step that only fires when `ANTHROPIC_API_KEY` is configured — inert-safe without it). Templatize the one repo-specific value it carries: the `--repo <name>` arg passed to `select-gap.mjs` inside the `pick` job. This gives the repo the same weekly (`cron: '0 7 * * 1'`) cadence this framework repo runs on itself, appending a visible delta row every cycle — acted, skipped, or failed, never silent.
+2. **Fallback, if the repo has no CI or isn't ready for the full sweep asset tree:** propose, at minimum, a recorded decision in the Review Package (Step 9): "drift re-check cadence: `<proposed interval>`, owner: `<stakeholder>`" — so the absence of automation is a visible, deliberate choice, not a silent gap.
+
+Skip and note in the Review Package only if the repo is explicitly ideation-stage with no runtime code and no near-term implementation planned (drift has nothing to measure yet) — otherwise always propose at least option 2.
+
 ## Step 8 — Record the artefact map in CLAUDE.md
 
 Propose adding (or merging into) the repo's `CLAUDE.md` a short **SGE artefact map**
@@ -380,6 +435,7 @@ Output a single summary the human can read in under five minutes:
 - ADR title (+ vision element protected)
 - Open-questions count (QD refs)
 - Agent Security baseline: starting C11 score (N/5 controls passing) and any gap issues proposed
+- Drift-check cadence proposed (Step 7f): scheduled `improvement-sweep.yml` cron adopted, or the recorded interval + owner fallback
 - Cross-repo touches (flag anything reaching another repo — follow the cross-repo change protocol)
 - **What you guessed vs. what came straight from the interview**
 - The top 2 risks or assumptions the human should challenge first

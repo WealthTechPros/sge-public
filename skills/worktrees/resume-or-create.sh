@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# resume-or-create.sh — search-before-create for issue worktrees (issue #1171).
+# resume-or-create.sh — search-before-create for purpose-scoped worktrees
+# (issue #1171; generalised beyond `issue-<N>` to any worktree purpose token
+# — `pr-review-<N>`, `pr-fix-<N>`, `qa-<N>` — under issue #2214).
 #
 # When an agent is dispatched on issue N, a predecessor agent may already have
 # created a worktree (`../<repo>-worktrees/issue-N` OR the team-pipeline
@@ -10,25 +12,42 @@
 # committed progress. This helper answers ONE question before any
 # `git worktree add`: resume, create, or back off?
 #
+# Issue #2214 — the same collision happens one layer up, at PR granularity:
+# a `/sge:pr-review` lane and a `/sge:pr-fix` lane (or two concurrent review
+# lanes) landing on the SAME PR's worktree with no claim check is exactly how
+# a `git stash -u`/`pop` cycle briefly swallowed one agent's uncommitted work
+# under another's feet. Every purpose token from the canonical layout
+# (`worktrees/SKILL.md`) — `pr-review`, `pr-fix`, `qa` — now goes through the
+# SAME claim-lease machinery as `issue`, keyed by that PR/issue number *within*
+# its own purpose lane: `pr-review-812` and `pr-fix-812` are independent lanes
+# (an implementer rewriting the branch under `pr-fix-812` does not block a
+# `pr-review-812` worktree from existing), but two agents both wanting
+# `pr-review-812` mutex exactly like two agents wanting `issue-42` do.
+#
 # It is a decision helper only. It does NOT create, remove, rebase, or install
 # anything (that is the calling skill's Phase 3, plus the mandatory
 # rescue-guard.sh on resume). It reads git state and prints a machine-readable
 # verdict block; the caller acts on it.
 #
 # Usage — invoke a subcommand (CLI form), or source for the predicates:
-#   bash resume-or-create.sh decide <issue-number> [repo-root] [base-ref]
+#   bash resume-or-create.sh decide <id> [repo-root] [base-ref] [purpose]
 #   bash resume-or-create.sh claim  <worktree>        # write/refresh a claim lease
 #   bash resume-or-create.sh release <worktree>       # drop the claim lease
 #
 #   source resume-or-create.sh
-#   roc_find_worktree <issue> <repo-root>       # prints worktree path or empty
-#   roc_find_branch   <issue> <repo-root>       # prints branch name or empty
-#   roc_claim_state   <worktree>                # prints free | mine | held-fresh
+#   roc_find_worktree <id> <repo-root> [purpose]   # prints worktree path or empty
+#   roc_find_branch   <id> <repo-root>              # prints branch name or empty (issue purpose only)
+#   roc_claim_state   <worktree>                    # prints free | mine | held-fresh
+#
+# `purpose` defaults to `issue` (backward compatible with every existing call
+# site). Pass `pr-review` / `pr-fix` / `qa` to target that lane's worktree
+# instead — the trailing path segment matched is `<purpose>-<id>`, exactly the
+# canonical layout in `worktrees/SKILL.md`.
 #
 # `decide` prints (stdout), one key:value per line:
 #   verdict:resume | create | backoff
 #   worktree:<path|->            # existing worktree to resume, or - when none
-#   branch:<name|->              # existing issue branch, or - when none
+#   branch:<name|->              # existing issue branch, or - when none (issue purpose only)
 #   open_pr:<number|->           # existing OPEN PR for the branch, or - / unknown
 #   claim:free | mine | held-fresh
 #   note:<human-readable one-liner>
@@ -37,12 +56,13 @@
 #   backoff — an existing worktree carries a FRESH claim lease owned by ANOTHER
 #             live agent (younger than SGE_WT_CLAIM_TTL_MIN, default 30 min, and
 #             not this agent's SGE_AGENT_ID). Do NOT steal it; report and stop.
-#   resume  — an existing worktree for issue N is found and is not
+#   resume  — an existing worktree for <purpose>-<id> is found and is not
 #             another-agent-fresh-claimed (free, mine, or stale claim to take
 #             over). Caller MUST run rescue-guard.sh assess before trusting it.
-#   create  — no existing worktree for issue N; proceed with git worktree add.
+#   create  — no existing worktree for <purpose>-<id>; proceed with git worktree add.
 #             (An existing *branch* with no worktree is surfaced so the caller
-#             checks it out rather than orphaning it / opening a duplicate PR.)
+#             checks it out rather than orphaning it / opening a duplicate PR —
+#             issue-purpose only; PR-scoped purposes never guess a branch name.)
 #
 # Exit codes (decide):
 #   0  — verdict:resume or verdict:create
@@ -64,15 +84,17 @@ RG_WT_CLAIM_TTL_MIN="${SGE_WT_CLAIM_TTL_MIN:-30}"
 # outside any repo tree. Contents: "<agent-id> <epoch-seconds>".
 RG_CLAIM_FILE=".sge-wt-claim"
 
-# roc_find_worktree <issue> <repo-root>
-# Prints the path of an existing worktree for issue <issue>, or nothing.
-# Matches BOTH the canonical sibling `<repo>-worktrees/issue-N` and the
-# in-repo team-pipeline `.worktrees/issue-N` — by exact trailing path segment
-# `issue-N`, so `issue-12` never matches `issue-123`.
+# roc_find_worktree <id> <repo-root> [purpose=issue]
+# Prints the path of an existing worktree for <purpose>-<id>, or nothing.
+# Matches BOTH the canonical sibling `<repo>-worktrees/<purpose>-N` and the
+# in-repo team-pipeline `.worktrees/<purpose>-N` — by exact trailing path
+# segment `<purpose>-N`, so `issue-12` never matches `issue-123`, and
+# `pr-review-812` never matches `pr-fix-812` (different purpose, same id —
+# issue #2214: those are independent lanes, not the same claim).
 roc_find_worktree() {
-  local issue="$1" root="$2"
+  local id="$1" root="$2" purpose="${3:-issue}"
   git -C "$root" worktree list --porcelain 2>/dev/null \
-    | awk -v want="issue-${issue}" '
+    | awk -v want="${purpose}-${id}" '
         /^worktree /  { path = substr($0, 10) }
         /^worktree /  {
           n = split(path, seg, /[\/\\]/)
@@ -145,9 +167,14 @@ roc_release() {
   rm -f "$wt/$RG_CLAIM_FILE" 2>/dev/null || true
 }
 
-# roc_decide <issue> [repo-root] [base-ref] — the single entrypoint.
+# roc_decide <id> [repo-root] [base-ref] [purpose=issue] — the single entrypoint.
+# purpose=issue additionally resolves a branch (issue-N naming convention);
+# any other purpose (pr-review/pr-fix/qa, issue #2214) is worktree-only — the
+# branch for a PR-scoped lane is the PR's own head branch, already known to
+# the caller (gh pr checkout), so this helper never guesses one.
 roc_decide() {
   local issue="$1" root="${2:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+  local purpose="${4:-issue}"
   # base-ref ($3) is accepted for signature symmetry with rescue-guard and
   # forwarded by callers; the decision itself does not need it (rescue-guard
   # consumes it on resume).
@@ -157,8 +184,12 @@ roc_decide() {
   fi
 
   local wt branch pr claim verdict note rc=0
-  wt=$(roc_find_worktree "$issue" "$root")
-  branch=$(roc_find_branch "$issue" "$root")
+  wt=$(roc_find_worktree "$issue" "$root" "$purpose")
+  if [ "$purpose" = "issue" ]; then
+    branch=$(roc_find_branch "$issue" "$root")
+  else
+    branch=""
+  fi
 
   if [ -n "$wt" ]; then
     claim=$(roc_claim_state "$wt")
@@ -175,7 +206,7 @@ roc_decide() {
     if [ -n "$branch" ]; then
       note="no worktree; branch '$branch' exists — check it out (do not open a duplicate PR)"
     else
-      note="no worktree or branch for issue ${issue}; create fresh"
+      note="no worktree or branch for ${purpose}-${issue}; create fresh"
     fi
   fi
 

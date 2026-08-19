@@ -106,6 +106,8 @@ gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null \
 
 `IR` (`scripts/issue-read.sh`) routes issue list/view calls through `scripts/forgejo-adapter.sh` when the repo host is Forgejo/Gitea, and delegates to `gh` unchanged for GitHub. Re-define `IR` at the top of every subsequent Bash call (same SPEC-057 shell-state rule as `WRC`).
 
+**Self-hosted Forgejo/Gitea:** the host is classified by hostname substring (`*forgejo*`/`*gitea*`); a self-hosted instance on a vanity domain (e.g. `git.example.com`) needs `SGE_FORGEJO_HOSTS` (`;`-separated bare hosts) declared before sweeping it — otherwise `IR` fails loud naming the unrecognised host (ADR-0010).
+
 ## Sweep scope (governance layers L0–L8)
 
 L0 Vision, L1 Capability Model, L2 Design System, L3 Feature Specs, L4 ADRs, L5 DAG Manifest, L6 Change Protocol, L7 SGE Alerts, L8 Cortex.
@@ -157,7 +159,7 @@ A subagent returning malformed records gets one retry, then its check is reporte
 | **C5** | Acceptance criteria → Tests | a Gherkin scenario with no test — mechanism: `references/check-mechanisms.md` |
 | **C6** | Spec ↔ Code | an `approved`/`implemented` spec with no code, or a route with no spec |
 | **C7** | Spec/ADR → Vision citation | no `success_measure_moved` / `vision_element_protected` |
-| **C8** | Stakeholder questions | an open `## Open Questions` with no `QD-NN`, or an unanswered `QD-NN` past threshold |
+| **C8** | Stakeholder questions | an open `## Open Questions` with no `QD-NN`, an unanswered `QD-NN` past threshold, **or** a structural/referential-integrity defect in the QD registry (duplicate id, undocumented closure, silently reverted closed-decision text, dangling/stale `questions[]` ref) — mechanism: `skills/sge-align/assets/check-qd-registry.sh` (issue #2313) |
 | **C9** | Cross-repo contract | a contract ref that no longer matches upstream — mechanism: `references/check-mechanisms.md` |
 | **C10** | Design System (L2) | `/sge:atomic-audit` reports maturity tier L0/L1 — mechanism: `references/check-mechanisms.md` |
 | **C11** | Agent Security (Zero-Trust) | one of five ZT controls fails — full mechanism: `references/agent-security-c11.md` |

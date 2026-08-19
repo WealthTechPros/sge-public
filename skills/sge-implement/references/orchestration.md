@@ -5,6 +5,15 @@ front-loaded governance-verdict reuse path. The operational rules live in
 `SKILL.md` (Usage note + Phase 0.5); this file carries the full "why" and the
 passing-shape detail.
 
+> **`$SGE_ROOT` convention.** Every `bash`/`node` snippet below assumes
+> `$SGE_ROOT` has already been resolved in the current shell via the
+> bootstrap function documented in `scripts/resolve-sge-root.sh`'s header
+> comment — never a bare `${CLAUDE_PLUGIN_ROOT}` or `${CLAUDE_PLUGIN_ROOT:-.}`
+> (#1567/#1963: the latter silently resolves to the caller's cwd, which is
+> almost never this plugin's own directory). Each *separate* shell invocation
+> (a fresh Bash tool call, a different subagent) must re-resolve it — it is
+> not exported or otherwise inherited across shell boundaries.
+
 ## Do not duplicate the review (Usage note)
 
 When this skill runs as a dispatched subagent (Tier-0 fan-out,
@@ -114,12 +123,16 @@ recycle within the shared temp dir, which would either lose the handle or let a
 join adopt a sibling lane's verdict.
 
 ```bash
+# $SGE_ROOT resolved via the bootstrap function in scripts/resolve-sge-root.sh's
+# header comment (never a bare `${CLAUDE_PLUGIN_ROOT:-.}` — #1567/#1963). This
+# snippet runs in Phase 0.5's shell; the join below runs in a DIFFERENT shell
+# (Phase 3) and must re-resolve $SGE_ROOT independently — it is not inherited.
 ISSUE=<issue-number>
 FORK_HANDLE="govtrace-${ISSUE}-${RANDOM}${RANDOM}"
 FORK_OUTPUT="/tmp/sge-govtrace-${FORK_HANDLE}.json"
 # Persist the id so the Phase 3 join (a different shell) reads it back:
 printf '%s\n' "$FORK_HANDLE" > "/tmp/sge-govtrace-handle-${ISSUE}"
-node "${CLAUDE_PLUGIN_ROOT:-.}/skills/lib/fork-util.mjs" register \
+node "$SGE_ROOT/skills/lib/fork-util.mjs" register \
   --handle-id "$FORK_HANDLE" --output-file "$FORK_OUTPUT" --issue "$ISSUE"
 # The fork writes its Step-7 JSON verdict to $FORK_OUTPUT when it completes.
 ```
@@ -129,9 +142,12 @@ Recover the handle from the per-issue state file (this shell's `$FORK_HANDLE`
 from Phase 0.5 is gone):
 
 ```bash
+# $SGE_ROOT re-resolved independently in THIS shell — see the register step
+# above for why it cannot simply be inherited across the Phase 0.5 -> Phase 3
+# shell boundary.
 ISSUE=<issue-number>
 FORK_HANDLE=$(cat "/tmp/sge-govtrace-handle-${ISSUE}")
-VERDICT_JSON=$(node "${CLAUDE_PLUGIN_ROOT:-.}/skills/lib/fork-util.mjs" join \
+VERDICT_JSON=$(node "$SGE_ROOT/skills/lib/fork-util.mjs" join \
   --handle-id "$FORK_HANDLE")
 # exit 1 = timeout / malformed / cross-lane issue mismatch → treat as "blocked",
 #          halt, and re-fork synchronously (never proceed to Edit/Write)
