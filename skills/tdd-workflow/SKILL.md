@@ -223,6 +223,41 @@ decision, never a silent default.
 > `/sge:pr-review` responsibility. Fidelity discipline is yours to keep even
 > where the mechanical gate is inert.
 
+## Invariants vs examples
+
+A Gherkin scenario proves one **example** passes. It says nothing about the
+inputs its author never wrote down — an off-by-one at a boundary, an ordering
+assumption that happens to hold for every hand-picked case but not in general,
+a numeric invariant (`C1 must be ≤ Addressable − Exclusions`, `total = Σ
+parts`) that a convenient example satisfies by construction while an
+adversarial generated input breaks it. This governs the **invariants/property-
+testing layer** (SPEC-118, issue #2253) — the discipline applies whether or not
+the spec being implemented declares a formal `## Invariants` section.
+
+**When a spec declares `## Invariants`** (`docs/spec-template.md`, optional,
+sibling to `## Seam evidence`): the slice backlog gains **one property test per
+declared invariant**, run **alongside** the Gherkin-derived example tests from
+the "SGE linkage" section above — additive, never a replacement. Use
+`fast-check` for JS/TS (this repo's own stack, per `CLAUDE.md`) — a
+generator-driven property test that asserts the invariant holds across many
+randomly generated inputs, not just the examples the spec's Gherkin already
+covers. `/sge:pr-review` flags a declared invariant with no matching property
+test present in the tree (`major`, `traceability`) — same severity class and
+mechanism as the seam-evidence check, applied to a different property:
+[`skills/pr-review/references/invariants-gate.md`](../pr-review/references/invariants-gate.md).
+
+**Mandatory, not merely optional, on financial/data-integrity paths** — a diff
+touching a path matching the same security-sensitive glob `DIFF_RISK` already
+uses (`auth/`, `config/`, `migrat*`, etc. — `rl_security_glob_regex` in
+`skills/pr-review/review-lib.sh`, reused unmodified, no new glob invented)
+already classifies `high` risk; on such a diff a governing spec's declared
+invariants are not optional coverage.
+
+**No `## Invariants` section declared** — no obligation. Absence is not a gap,
+same posture as `## Seam evidence` for a single-backend surface. This section
+does not require every spec to enumerate invariants; it gives specs that
+*have* one a machine-checked floor under it.
+
 ## Legacy and untestable code
 
 Do not silently abandon this skill in repos where code can't be unit-tested

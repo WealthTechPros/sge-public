@@ -42,7 +42,7 @@ Drive a pull request's CI to green by reading the actual failures, reproducing t
 
 `$ARGUMENTS` is the PR number (or branch). If omitted, uses the current branch to find the PR.
 
-> **Target repo — cross-repo / control-session invocation.** These steps act on the repo in the **current working directory**; the check-state snapshot below and every `gh` call resolve there. From a control/orchestrator session (or before `cd`-ing into the PR's worktree), resolve + `cd` via the shared helper — `cd "$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh resolve owner/repo)" || exit 1` (fail-loud, never falls through to the ambient hub cwd). Because this skill's `git` conflict work is raw `git`, the `cd` (not a bare `export GH_REPO`) is required. The full convention — precedence, hygiene, and the raw-`git`/`MSYS_NO_PATHCONV` pitfalls — lives once in [`gh-repo`](../gh-repo/SKILL.md). Same-repo: leave `GH_REPO` unset; cwd detection is used.
+> **Target repo — cross-repo / control-session invocation.** These steps act on the repo in the **current working directory**; the check-state snapshot below and every `gh` call resolve there. Resolve the plugin root once (used throughout this skill) via `SGE_ROOT="$(bash ./scripts/resolve-sge-root.sh 2>/dev/null || bash "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-sge-root.sh")" || exit 1`. From a control/orchestrator session (or before `cd`-ing into the PR's worktree), resolve + `cd` via the shared helper — `cd "$("$SGE_ROOT/scripts/with-repo-cwd.sh" resolve owner/repo)" || exit 1` (fail-loud, never falls through to the ambient hub cwd). Because this skill's `git` conflict work is raw `git`, the `cd` (not a bare `export GH_REPO`) is required. The full convention — precedence, hygiene, and the raw-`git`/`MSYS_NO_PATHCONV` pitfalls — lives once in [`gh-repo`](../gh-repo/SKILL.md). Same-repo: leave `GH_REPO` unset; cwd detection is used.
 
 ### Context (collected at invocation)
 
@@ -57,7 +57,7 @@ When the repo is Forgejo-hosted, detect this at **Step 0** and substitute the
 adapter equivalents — never mix `gh` and adapter calls for the same PR.
 
 ```bash
-HOST_KIND=$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh host 2>/dev/null || echo unknown)
+HOST_KIND=$("$SGE_ROOT/scripts/with-repo-cwd.sh" host 2>/dev/null || echo unknown)
 echo "[pr-fix] host-kind: $HOST_KIND"
 ```
 
@@ -192,11 +192,13 @@ Keep the lock advisory and self-expiring — never let a forgotten lock wedge an
 Before touching the branch, claim the fix so a **second** driver (another `/sge:pr-fix`, or a `/sge:pr-monitor` lane that classified this PR CODE FAIL) does not dispatch a duplicate fix agent onto a branch you are about to force-push — the racing-fixers hazard of issue #1174.
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/skills/pr-review/pr-labels.sh claim-fix $1 || exit 3
+"$SGE_ROOT/skills/pr-review/pr-labels.sh" claim-fix $1 || exit 3
 ```
 
 - **Exit 3** — another run holds a *fresh* `pr-fixing` claim (< `SGE_FIX_CLAIM_TTL_MIN`, default 30 min). **Back off; do not race.** Someone else owns this PR's fix.
 - **Proceeds** — no claim, or a *stale* one (crashed session) you take over. `--force-claim` overrides deliberately.
+
+**Lane manifest (issue #2214, ask 3).** Also post an advisory lane-manifest claim — `source .../pr-review/review-lib.sh; rl_post_lane_manifest $1 fix` — so a reviewer landing on this PR while you are force-pushing fix commits sees `role: fix` is live and defers, rather than reviewing content mid-rewrite. Fire-and-forget; never blocks the fix.
 
 `pr-fixing` is a self-expiring **lease**, honoured by `/sge:pr-monitor`'s `CLAIM_LABELS_RE` so its lanes skip a PR you are fixing. You **must** release it on exit (see [When to exit](#when-to-exit)) — a crashed session's claim frees itself within the lease window, but an explicit release frees the lane immediately.
 
@@ -204,13 +206,23 @@ ${CLAUDE_PLUGIN_ROOT}/skills/pr-review/pr-labels.sh claim-fix $1 || exit 3
 
 ## Step 1: Check the PR branch out into an isolated worktree
 
-Do **not** assume the branch exists locally, and never fix it in the shared main checkout. Fetch and check it out in its own worktree — the canonical `../<repo>-worktrees/pr-fix-<pr>` layout (placement, lifecycle, and the "branch already checked out elsewhere" rule are defined once in [`worktrees`](../worktrees/SKILL.md); don't restate them):
+Do **not** assume the branch exists locally, and never fix it in the shared main checkout. Fetch and check it out in its own worktree — the canonical `../<repo>-worktrees/pr-fix-<pr>` layout (placement, lifecycle, and the "branch already checked out elsewhere" rule are defined once in [`worktrees`](../worktrees/SKILL.md); don't restate them).
+
+**Claim before create (issue #2214) — a `pr-review` lane fixing this same PR concurrently must not collide with `pr-fix`'s worktree.** Export an agent-unique `SGE_AGENT_ID` (never a bare session/temp path) and route through `resume-or-create.sh` with purpose `pr-fix`; on `backoff` another live agent already holds this PR's `pr-fix` worktree — do not steal it:
 
 ```bash
 REPO_ROOT=$(git rev-parse --show-toplevel)
-WT="$REPO_ROOT/../$(basename "$REPO_ROOT")-worktrees/pr-fix-$1"   # see ../worktrees/SKILL.md
+export SGE_AGENT_ID="${SGE_AGENT_ID:-fix-$1}"
 git fetch origin
-git worktree add "$WT" --detach
+# Purpose-scoped claim decision — full mechanics: ../worktrees/SKILL.md#pr-scoped-lanes-pr-review--pr-fix--qa---same-helper-purpose-param-issue-2214
+while IFS= read -r _line; do case "$_line" in
+  verdict:*)  roc_verdict="${_line#verdict:}" ;;
+  worktree:*) roc_worktree="${_line#worktree:}" ;;
+esac; done < <(bash "$SGE_ROOT/skills/worktrees/resume-or-create.sh" decide "$1" "$REPO_ROOT" "" pr-fix)
+[ "$roc_verdict" = "backoff" ] && { echo "PR #$1: pr-fix worktree claimed by a live agent — back off"; exit 3; }
+WT="${roc_worktree:-$REPO_ROOT/../$(basename "$REPO_ROOT")-worktrees/pr-fix-$1}"
+[ -d "$WT" ] || git worktree add "$WT" --detach
+bash "$SGE_ROOT/skills/worktrees/resume-or-create.sh" claim "$WT"
 cd "$WT" && gh pr checkout $1
 ```
 
@@ -241,7 +253,7 @@ This is the [bounded refinement loop](../loops/SKILL.md#c-bounded-refinement-loo
    - **Mark any prior review verdict stale** — fix commits invalidate a `pr-reviewed` label:
 
      ```bash
-     ${CLAUDE_PLUGIN_ROOT}/skills/pr-review/pr-labels.sh stale $1
+     "$SGE_ROOT/skills/pr-review/pr-labels.sh" stale $1
      ```
 
      > **Label ownership.** `pr-fix` marks `pr-reviewed` **stale** when fix commits land, but never re-applies it. `pr-reviewed` and auto-merge are owned exclusively by `/sge:pr-review` — only it runs `pr-labels.sh pass` after a clean review with all findings fixed. Never `gh pr edit --add-label pr-reviewed` or `gh pr merge --auto` from this skill.
@@ -413,7 +425,7 @@ The general rule: **never suppress a signal to make it green** — fix what the 
 **Release the `pr-fixing` claim on EVERY exit** — green, structurally blocked, thrashing-paused, or hand-back. This is the binding termination contract of the #1174 mutex (mirroring `/sge:pr-review`'s claim): a lane you claimed but never released stays skipped by every other monitor until the lease expires.
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/skills/pr-review/pr-labels.sh release-fix $1
+"$SGE_ROOT/skills/pr-review/pr-labels.sh" release-fix $1
 ```
 
 Release it whether or not the PR went green — the claim signals *"a fix agent is on this"*, not *"this PR is fixed"*. (`release-fix` is idempotent, so releasing a claim you never took, or twice, is safe.)

@@ -80,15 +80,18 @@ Why a sibling directory (and not inside the repo, and not a shared pool):
 
 ---
 
-## Resume before create — search-before-create for issue worktrees
+## Resume before create — search-before-create for purpose-scoped worktrees
 
-**Before `git worktree add` for an issue, search for an existing worktree/branch
-and resume it.** A predecessor agent dispatched on the same issue may have
-created `issue-<N>` (either layout) and/or a branch before dying or stalling.
-Creating a *new* worktree then collides (git refuses a second checkout of a
-branch) or orphans the predecessor's committed progress. The decision helper
-`resume-or-create.sh` (issue #1171) answers one question — resume, create, or
-back off — from git state alone:
+**Before `git worktree add`, search for an existing worktree/branch and
+resume it — for every purpose token, not only `issue`.** A predecessor agent
+may have created `<purpose>-<id>` (either layout) and/or a branch before dying
+or stalling. Creating a *new* worktree then collides (git refuses a second
+checkout of a branch) or orphans the predecessor's committed progress, or —
+the failure mode issue #2214 reported — strands a **second live agent** on
+the same working tree, racing `git stash`/checkout against each other. The
+decision helper `resume-or-create.sh` (issue #1171; generalised to
+`pr-review`/`pr-fix`/`qa` under #2214) answers one question — resume, create,
+or back off — from git state alone:
 
 ```bash
 # Parse the key:value block WITHOUT eval — worktree paths / branch names are
@@ -104,7 +107,7 @@ while IFS= read -r _line; do
     claim:*)    roc_claim="${_line#claim:}" ;;
   esac
 done < <(
-  bash "${CLAUDE_PLUGIN_ROOT}/skills/worktrees/resume-or-create.sh" \
+  bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/worktrees/resume-or-create.sh" \
     decide <N> "$(git rev-parse --show-toplevel)" origin/main
 )   # sets roc_verdict, roc_worktree, roc_branch, roc_open_pr, roc_claim
 ```
@@ -118,7 +121,7 @@ Act on `roc_verdict`:
 - **`resume`** — an `issue-<N>` worktree exists and is free / your own / a stale
   claim you may take over. `cd "$roc_worktree"`, then **the rescue-guard is
   mandatory** before trusting any `tsc`/test output:
-  `bash "${CLAUDE_PLUGIN_ROOT}/skills/worktrees/rescue-guard.sh" assess "$roc_worktree" origin/main`
+  `bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/worktrees/rescue-guard.sh" assess "$roc_worktree" origin/main`
   (rebase onto base + isolated install per its verdict, issue #951). Inspect any
   uncommitted predecessor changes — keep what is coherent, report what you found.
 - **`create`** — no worktree for issue N; proceed with `git worktree add`. If
@@ -130,10 +133,54 @@ than opening a duplicate. `roc_open_pr` is `unknown` when `gh` can't be reached 
 treat that as "check manually", never as "no PR".
 
 On resume/create, lease the worktree so a concurrent sibling backs off:
-`bash "${CLAUDE_PLUGIN_ROOT}/skills/worktrees/resume-or-create.sh" claim "$WT"`
+`bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/worktrees/resume-or-create.sh" claim "$WT"`
 (the lease is `.sge-wt-claim` at the worktree root — refresh periodically for
 long runs; drop it with `release` when done). This is advisory, TTL-bounded, and
 never blocks `/sge:tidy-worktrees` (which owns real deletion).
+
+**`SGE_AGENT_ID` MUST be set before `claim`/`decide` (issue #2214).** The
+lease records `$SGE_AGENT_ID`, not the session's PID or a shared session path —
+two agents in the SAME session sharing an unset/empty `SGE_AGENT_ID` would
+both read as "mine" and silently double-claim. `pr-review`/`pr-fix`/`qa-audit`
+each export a distinct id before touching a worktree (`review-<pr>`,
+`fix-<pr>`, `qa-<pr>` — mirroring the `impl-<N>` convention `team-pipeline`
+already uses); a run with no natural id falls back to
+`${SGE_AGENT_ID:-$(hostname)-$$}`, never a bare session/temp path.
+
+### PR-scoped lanes (`pr-review` / `pr-fix` / `qa`) — same helper, purpose param (issue #2214)
+
+`pr-fix`, the `pr-review` Phase 6.5/7 fix worktree, and `qa-audit` each create
+a **PR-numbered** worktree — historically with a bare `git worktree add` and no
+claim check, which is exactly how a `pr-review` lane and a `pr-fix` lane (or
+two `pr-review` lanes) landed on the same tree and raced a `git stash`/pop
+cycle. Route every PR-scoped worktree through the same `resume-or-create.sh`
+decision, passing the purpose token as the 4th `decide` argument:
+
+```bash
+export SGE_AGENT_ID="${SGE_AGENT_ID:-review-$1}"   # or fix-$1 / qa-$1 — agent-unique, not session-scoped
+while IFS= read -r _line; do
+  case "$_line" in
+    verdict:*)  roc_verdict="${_line#verdict:}" ;;
+    worktree:*) roc_worktree="${_line#worktree:}" ;;
+  esac
+done < <(
+  bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/worktrees/resume-or-create.sh" \
+    decide "$1" "$(git rev-parse --show-toplevel)" "" pr-review   # purpose: pr-review | pr-fix | qa
+)
+[ "$roc_verdict" = "backoff" ] && { echo "PR #$1: worktree claimed by a live agent — back off, do not review a moving tree"; exit 3; }
+WT="${roc_worktree:-$(git rev-parse --show-toplevel)/../$(basename "$(git rev-parse --show-toplevel)")-worktrees/pr-review-$1}"
+[ -d "$WT" ] || git worktree add "$WT" --detach
+bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/worktrees/resume-or-create.sh" claim "$WT"
+cd "$WT" && gh pr checkout "$1"
+```
+
+A `pr-review-<N>` claim and a `pr-fix-<N>` claim on the **same** PR number are
+**independent lanes** (different purpose token) — an implementer's `pr-fix`
+worktree does not block a reviewer from creating its own `pr-review` worktree
+on the same PR. What the claim *does* prevent is two agents both wanting the
+**same** purpose lane on the **same** PR — the incident's actual collision.
+Release on exit exactly as issue-purpose worktrees do (`release "$WT"`), and
+`git worktree remove "$WT" --force` per each skill's own cleanup phase.
 
 ---
 

@@ -196,8 +196,14 @@ else
   scope="the last 50 commits on HEAD"
   log="$(git -C "$ROOT" log -50 --format='%H%x09%(trailers:key=Agent-Id,valueonly)' 2>/dev/null || true)"
 fi
-zt5_total="$(printf '%s\n' "$log" | awk -F'\t' '$1 ~ /^[0-9a-f]{7,40}$/ {t++} END{print t+0}')"
-zt5_agent="$(printf '%s\n' "$log" | awk -F'\t' '$1 ~ /^[0-9a-f]{7,40}$/ && $2 != "" {a++} END{print a+0}')"
+# SHA match avoids {7,40} interval-expression syntax on purpose: it is the single
+# most common awk portability gap (mawk — the Debian/Ubuntu default awk — needs
+# --re-interval on some builds; POSIX awk does not guarantee interval expressions
+# at all), so a plain "one or more hex digits" match is used instead — still
+# anchored, still cannot false-match the (deliberately non-hex) blank/no-trailer
+# lines that %(trailers:...) can emit.
+zt5_total="$(printf '%s\n' "$log" | awk -F'\t' '$1 ~ /^[0-9a-f]+$/ {t++} END{print t+0}')"
+zt5_agent="$(printf '%s\n' "$log" | awk -F'\t' '$1 ~ /^[0-9a-f]+$/ && $2 != "" {a++} END{print a+0}')"
 if [ "$zt5_total" = 0 ]; then
   add_control ZT-5 "Agent Identity" pass "no commits found (empty history) — nothing to attribute"
 elif [ "$zt5_agent" = 0 ]; then

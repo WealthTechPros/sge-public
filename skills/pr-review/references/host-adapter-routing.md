@@ -8,8 +8,9 @@ Before Phase 1, detect the host and source the PR-read shim so every read in
 Phases 1–3 routes correctly without branching on the host inside each phase:
 
 ```bash
-HOST_KIND="$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh host)"
-source "${CLAUDE_PLUGIN_ROOT}/skills/lib/forgejo-pr-read.sh"
+SGE_ROOT="$(bash ./scripts/resolve-sge-root.sh 2>/dev/null || bash "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-sge-root.sh")" || exit 1
+HOST_KIND="$("$SGE_ROOT/scripts/with-repo-cwd.sh" host)"
+source "$SGE_ROOT/skills/lib/forgejo-pr-read.sh"
 ```
 
 | Read operation            | GitHub (`gh`)                           | Any host (`fpr_*`)    |

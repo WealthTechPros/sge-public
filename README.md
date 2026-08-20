@@ -10,6 +10,27 @@ This repo is the home of **SGE** end-to-end — methodology first, platform seco
 - **`docs-site/`, `docs/`** — the SGE methodology docs (docs.sge.wealthtechpros.com).
 - **`platform/`** — the **SGE Platform** (the GitHub App + dashboard UI, formerly the standalone `repo-sentry` repo, merged in here with full history and then archived). The app lives under `platform/reposentry/{frontend,backend}`, infra under `platform/infra`, product docs under `platform/docs-site`. CI/CD and the RepoSentry→SGE brand/domain rename land in follow-up steps; `platform/` keeps deploying from its existing pipeline until then.
 
+### Naming: `sgd` → `sge` — what renames and what doesn't
+
+The product/methodology was renamed `sgd` → `sge` (#2017, #2021, #2201). Brand
+prose and user-facing slash commands rename; code-level and historical
+identifiers deliberately do not. When touching a stale `sgd` reference,
+check it against this list before renaming:
+
+- **Renames:** brand prose ("SGD" → "SGE" in docs/marketing copy), and any
+  `/sgd:<command>` slash-command reference (the namespace is `/sge:` now).
+- **Stays `sgd`/`SGD` — do not rename:**
+  - `SGD-NNN` spec IDs — historical identifiers, permanently retained (the
+    forward-going convention mints `SGE-NNN` from here on; both forms are
+    accepted by commit-trailer parsing).
+  - The `SGD_AGENT_ID` environment variable.
+  - `docs/sgd/` directory paths in seeded repos.
+  - The `sgd-init` npx package name (`npx @wealthtechpros/sgd-init`).
+  - Dated references to historical events (e.g. "SGD realignment",
+    "SGD-seeded") describing things that happened under the old name.
+
+See #2208 for the rename-surfaces pass that established this list.
+
 ## Skills
 
 | Skill | Command | Purpose |

@@ -49,8 +49,9 @@ fail-loud from team-pipeline's pre-flight — do not swallow it here.
 ## Routing rule (mechanical)
 
 > **Target repo.** Apply the shared repo-targeting convention —
-> [`gh-repo`](../gh-repo/SKILL.md) — before routing: resolve + `cd` via the
-> shared helper — `cd "$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh resolve owner/repo)" || exit 1`
+> [`gh-repo`](../gh-repo/SKILL.md) — before routing: resolve the plugin root via
+> `SGE_ROOT="$(bash ./scripts/resolve-sge-root.sh 2>/dev/null || bash "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-sge-root.sh")" || exit 1`,
+> then `cd` via the shared helper — `cd "$("$SGE_ROOT/scripts/with-repo-cwd.sh" resolve owner/repo)" || exit 1`
 > (fail-loud, never falls through to the ambient cwd) — or export
 > `GH_REPO=owner/repo` for gh-only preflight, and run the startup echo it
 > defines. `/sge:team-pipeline` inherits the same convention.

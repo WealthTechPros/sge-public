@@ -92,8 +92,8 @@
           "description": "Commits produced for this item, as \"<sha> <subject>\"."
         },
         "labelState": {
-          "enum": ["pr-reviewed", "pr-reviewing", "none"],
-          "description": "Final merge-gate label state of a reviewed PR at run exit (issue #855, emitted by pr-review). A well-behaved review exits at pr-reviewed (passed) or none (failed/released/advisory/no-op); labelState: pr-reviewing means the run exited while still holding the claim — a violated termination contract the orchestrator must re-dispatch or nudge. Optional: only outcomes for a claimed pr-review carry it."
+          "enum": ["pr-reviewed", "pr-reviewing", "changes-requested", "none"],
+          "description": "Final merge-gate label state of a reviewed PR at run exit (issue #855, emitted by pr-review). A well-behaved review exits at pr-reviewed (passed), changes-requested (failed with findings the author must address — issue #2238), or none (released/advisory/no-op); labelState: pr-reviewing means the run exited while still holding the claim — a violated termination contract the orchestrator must re-dispatch or nudge. Optional: only outcomes for a claimed pr-review carry it."
         }
       },
       "additionalProperties": true

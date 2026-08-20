@@ -46,7 +46,7 @@ see Step 8.
 > `/sge:sge-implement` Phase 5 dispatches this as a forked subagent from a
 > hub/control checkout (e.g. `wtp-org`), apply the shared repo-targeting
 > convention — [`gh-repo`](../gh-repo/SKILL.md) — first: resolve + `cd` via
-> the shared helper — `cd "$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh
+> the shared helper — `cd "$(${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/with-repo-cwd.sh
 > resolve owner/repo)" || exit 1` (fail-loud, never falls through to the
 > ambient hub cwd) — before the Context block below runs, and re-enter it at
 > the top of every subsequent Bash call. The `cd` (not a bare `export

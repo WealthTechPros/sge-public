@@ -75,11 +75,14 @@ who only want the acceptance/scope/dependency gate.
 
 The full audit runs during a triage sweep — long after an issue is written. To
 score an issue's four build-ready gates **the moment it is authored** (not only
-during a sweep), run the dependency-free pre-check over its body:
+during a sweep), run the dependency-free pre-check over its body. `$SGE_ROOT`
+below is resolved via the bootstrap `_sge_root()` function — the copy-verbatim
+source of truth is `scripts/resolve-sge-root.sh`'s header comment; never a bare
+`${CLAUDE_PLUGIN_ROOT}`, which is empty whenever unset:
 
 ```bash
-gh issue view 256 --json body --jq .body | node "${CLAUDE_PLUGIN_ROOT:-.}/skills/lib/build-ready-prescorer.mjs"
-node "${CLAUDE_PLUGIN_ROOT:-.}/skills/lib/build-ready-prescorer.mjs" --body "<draft body>" --json   # structured
+gh issue view 256 --json body --jq .body | node "$SGE_ROOT/skills/lib/build-ready-prescorer.mjs"
+node "$SGE_ROOT/skills/lib/build-ready-prescorer.mjs" --body "<draft body>" --json   # structured
 ```
 
 It names **which** gate failed and why — `criteria` (2A), `scope` (2B, the
@@ -165,7 +168,7 @@ issue body with the **canonical Phase 2 sizing rubric** — the same rubric
 
 ```bash
 gh issue view <N> --json body --jq .body | \
-  node "${CLAUDE_PLUGIN_ROOT:-.}/skills/lib/issue-prescorer.mjs"
+  node "$SGE_ROOT/skills/lib/issue-prescorer.mjs"
 # → { "tier": "SMALL"|"MEDIUM"|"LARGE"|"AMBIGUOUS", "score": N, "signals": {...}, "reason": "..." }
 ```
 
@@ -230,8 +233,10 @@ and unchanged: this audit is a caller of that skill, not a fork of its logic.
 **State the target repo explicitly in the dispatch prompt (SPEC-057, issue
 #1558)** — a forked subagent starts in this session's cwd and does not inherit
 shell state across its own tool calls, so instruct it to re-resolve and `cd`
-itself (`cd "$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh resolve
-owner/repo)" || exit 1`) before its own `gh`/artefact reads; otherwise, on a
+itself (`cd "$("$SGE_ROOT/scripts/with-repo-cwd.sh" resolve owner/repo)" ||
+exit 1` — `$SGE_ROOT` resolved via the bootstrap function in
+`scripts/resolve-sge-root.sh`'s header comment, never a bare
+`${CLAUDE_PLUGIN_ROOT}`, #1567/#1963) before its own `gh`/artefact reads; otherwise, on a
 hub/batch dispatch, a same-numbered issue in the hub repo is classified
 silently against the wrong repo's artefacts.
 
@@ -247,6 +252,33 @@ silently against the wrong repo's artefacts.
   `NOT_SGE_SCOPE`, `NOT_ONBOARDED`), the `layers` breakdown, `matchedSpec`,
   `matchConfidence`, and `requirementChanges[]` (for a would-modify-spec verdict).
 
+**Dispatch failure — fail loud, never guess (issue #2197).** The folded
+dispatch does not always return a valid governance-trace Step-7 verdict: a
+dispatch failure — governance-trace refusing with its own `NO_TARGET_ISSUE`
+(issue-number threading failure across the fork boundary), the fork erroring
+out before Step 7, or the returned text being malformed/non-JSON — is a real,
+expected failure mode, not a hypothetical. On any of those, this audit must
+**never silently substitute its own qualitative judgment of the governance
+question** in place of the classifier's real output — that is exactly the correctness gap #2197
+reported: the audit completing and reporting a normal-looking verdict while the
+actual classification never ran. Instead:
+
+- Record the failure as its own distinct governance state — `governance.verdict:
+  "DISPATCH_FAILED"` — carrying `matchedSpec: null`, `matchConfidence: null`,
+  `layers: null`, `requirementChanges: []`, and a `dispatchError` string with
+  whatever the fork returned (its `NO_TARGET_ISSUE` payload, an error message,
+  or "malformed/empty response"). `DISPATCH_FAILED` is not one of
+  governance-trace's own five-way verdict tokens — it exists only in this
+  audit's output, so a caller can never confuse "the classifier ran and found
+  no match" with "the classifier never ran".
+- Treat `DISPATCH_FAILED` as a **hold-for-human** signal in the Step 3 table and
+  Step 4 rationale, exactly like a low-confidence match or
+  `MATCHES_EXISTING_MODIFIED` — never let it read as "governance: clear".
+- Do **not** retry indefinitely or fall through to a second, ungoverned
+  dispatch attempt that swallows the error — one dispatch per issue; a failure
+  is reported, not silently absorbed. (A caller that wants a retry re-runs the
+  audit or `/sge:governance-trace` directly.)
+
 **The governance verdict does not override the build-readiness verdict** — they
 are two independent axes and both are reported. A `READY` issue can still carry
 `NEEDS_NEW_SPEC` (build-ready, but a spec must be authored first — a stronger
@@ -254,9 +286,10 @@ signal than a bare `READY`), and a `NOT_READY` issue can still be `MATCHES_EXIST
 The pipeline consumes both: only an issue that is **`READY` and whose governance
 verdict is non-blocking** (`MATCHES_EXISTING` or `NO_SPEC_WARRANTED`, or a
 `NEEDS_NEW_SPEC` whose stub has been approved) should flow straight to
-implementation; `MATCHES_EXISTING_MODIFIED`, `NOT_SGE_SCOPE`, or a low
-`matchConfidence` is a hold-for-human signal exactly as it is when
-`/sge:governance-trace` is run on its own.
+implementation; `MATCHES_EXISTING_MODIFIED`, `NOT_SGE_SCOPE`, `DISPATCH_FAILED`,
+or a low `matchConfidence` is a hold-for-human signal — the first two exactly as
+when `/sge:governance-trace` is run on its own, `DISPATCH_FAILED` per the
+dispatch-failure handling above (issue #2197).
 
 When `--skip-governance` is set, skip this step entirely and emit `governance: null`
 in each Step-5 result.
@@ -276,8 +309,12 @@ issue, resolve the structured execution-repo field with the SPEC-057 helper,
 passing the issue's own home repo as the tracking fallback:
 
 ```bash
+# $SGE_ROOT resolved via the bootstrap function — never a bare
+# `${CLAUDE_PLUGIN_ROOT}` (#1567/#1963). Requires CLAUDE_PLUGIN_ROOT already
+# set, OR run the copy-verbatim `_sge_root()` bootstrap function from
+# ${CLAUDE_PLUGIN_ROOT}/scripts/resolve-sge-root.sh's header comment first.
 EXEC_REPO="$(gh issue view "$N" --json body -q .body \
-  | "${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh" issue-repo "$TRACKING_REPO")"
+  | "$SGE_ROOT/scripts/with-repo-cwd.sh" issue-repo "$TRACKING_REPO")"
 ```
 
 The field grammar (`Repo: owner/name` / `execution-repo: owner/name`, absent ==
@@ -431,7 +468,7 @@ Step-2G verdict (omit the column entirely when `--skip-governance` was passed):
 
 **Build-ready:** #256, #298 · **Needs-spec:** #261 · **Too-large:** #270
 **Cross-repo execution (2R):** #298 → `acme/client-onboarding` (dispatch worktree/lock/PR there)
-**Governance holds (human review):** any `MATCHES_EXISTING_MODIFIED`, `NOT_SGE_SCOPE`, or low-confidence match
+**Governance holds (human review):** any `MATCHES_EXISTING_MODIFIED`, `NOT_SGE_SCOPE`, `DISPATCH_FAILED`, or low-confidence match
 ```
 
 Routing verdict labels (Step 3R) are always applied — they are not conditional
@@ -525,11 +562,17 @@ End by returning exactly this shape (one `results[]` entry per audited issue):
 - `governance` — the folded Step-2G classification (governance axis), carrying
   the passthrough of `/sge:governance-trace`'s Step-7 fields: `verdict` (one of
   `MATCHES_EXISTING` | `MATCHES_EXISTING_MODIFIED` | `NEEDS_NEW_SPEC` |
-  `NO_SPEC_WARRANTED` | `NOT_SGE_SCOPE` | `NOT_ONBOARDED`), `matchedSpec`,
-  `matchConfidence`, `layers`, and `requirementChanges[]`. **`null`** when
-  `--skip-governance` was passed. This is the second, independent axis — a caller
-  now gets both verdicts from one skill hop instead of chaining
-  `/sge:governance-trace` separately.
+  `NO_SPEC_WARRANTED` | `NOT_SGE_SCOPE` | `NOT_ONBOARDED` | **`DISPATCH_FAILED`**),
+  `matchedSpec`, `matchConfidence`, `layers`, and `requirementChanges[]`.
+  **`null`** when `--skip-governance` was passed. `DISPATCH_FAILED` (issue
+  #2197) is a sixth, audit-only sentinel — never emitted by
+  `/sge:governance-trace` itself — set when the folded dispatch didn't return a
+  valid Step-7 verdict (a `NO_TARGET_ISSUE` refusal, a fork error, or a
+  malformed response); it carries `matchedSpec: null`, `matchConfidence: null`,
+  `layers: null`, and a `dispatchError` string instead of a real classification,
+  and must be treated as hold-for-human, never as "governance: clear". This is
+  the second, independent axis — a caller now gets both verdicts from one skill
+  hop instead of chaining `/sge:governance-trace` separately.
 
 ---
 

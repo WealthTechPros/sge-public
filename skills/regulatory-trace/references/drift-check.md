@@ -72,6 +72,7 @@ C10/C11). Concretely:
    `| C12 | Regulatory traceability (regulated) | a spec under a `regulated` capability lacks an `fca_obligations` mapping, or a mapping cites a retired obligation | C12 / regulatory-trace |`.
 2. **Mechanism (Step 1 "Mapping & scoring"):** add a C12 paragraph —
    *"Run `bash ${CLAUDE_PLUGIN_ROOT}/skills/regulatory-trace/assets/check-regulatory-trace.sh`
+   (`$CLAUDE_PLUGIN_ROOT` resolved via `scripts/resolve-sge-root.sh` when unset)
    (or `/sge:regulatory-trace review`) as a forked read-only subagent and consume its
    JSON. `status: na` → C12 excluded (no regulated capability). `pass`/`fail` from the
    `high` count. A missing or unparsable obligations catalogue is a high

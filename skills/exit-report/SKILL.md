@@ -80,7 +80,8 @@ individually (a specific PR deduped, an issue claimed elsewhere); reserve
 
 **`labelState` on a review outcome (issue #855).** A `pr-review` outcome carries
 the reviewed PR's **final merge-gate label state** as `labelState` —
-`pr-reviewed` (passed), `none` (failed / released / advisory / no-op), or
+`pr-reviewed` (passed), `changes-requested` (failed with findings the author
+must address — issue #2238), `none` (released / advisory / no-op), or
 `pr-reviewing`. A well-behaved review never exits at `pr-reviewing`: that value
 means the run terminated while still holding the review claim — a **violated
 termination contract** (pr-review Phase 9) — so an orchestrator treats

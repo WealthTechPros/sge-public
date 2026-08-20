@@ -6,7 +6,8 @@
 # skills/pr-monitor/SKILL.md lives here instead, and the skill sources this
 # file at startup:
 #
-#   source "${CLAUDE_PLUGIN_ROOT}/skills/pr-monitor/monitor-lib.sh"
+#   SGE_ROOT="$(bash ./scripts/resolve-sge-root.sh 2>/dev/null || bash "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-sge-root.sh")" || exit 1
+#   source "$SGE_ROOT/skills/pr-monitor/monitor-lib.sh"
 #
 # The SKILL.md keeps the *judgement* (when to call what, priority order,
 # escalation rules); this file keeps the *mechanics*. Behaviour-preserving
@@ -233,7 +234,10 @@ reclaim_if_stale() {
     # RECLAIM: swap pr-reviewing to this session and ENTER THE LANE rather than
     # skipping forever. start-review re-adds pr-reviewing (now owned by us) and
     # clears any stale pr-reviewed â€” the canonical, mutex-safe way to take over.
-    ${CLAUDE_PLUGIN_ROOT}/skills/pr-review/pr-labels.sh start-review "$pr"
+    local _root="${CLAUDE_PLUGIN_ROOT:-}"
+    [ -n "$_root" ] || _root="$(bash "$(dirname "${BASH_SOURCE[0]}")/../../scripts/resolve-sge-root.sh" 2>/dev/null)"
+    [ -n "$_root" ] || _root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+    "$_root/skills/pr-review/pr-labels.sh" start-review "$pr"
     return 0   # eligible â€” enter the lane and review it
   fi
   return 1     # FRESH claim â†’ strict mutex: skip and re-check next cycle
@@ -479,7 +483,14 @@ pr_ready_for_merge() {
 
   # Gate 1 â€” issue linked
   body=$(gh pr view "$pr" --json body --jq '.body' 2>/dev/null)
-  if ! printf '%s' "$body" | grep -iqE '(clos(e|es|ed)|fix(es|ed)?|resolv(e|es|ed))[[:space:]]+#[0-9]+'; then
+  # This gate asserts the PR is LINKED to an issue, not that it closes one.
+  # `Part of #N` (#2241) is the deliberate non-closing link written when a PR
+  # lands part of a multi-AC issue or the issue is a `tracking`/`epic` umbrella.
+  # Rejecting it made every correctly-formed partial PR unmergeable, and the
+  # documented remedy was to append `Fixes #N` — reintroducing the defect.
+  # No cross-repo prefix: a reference to an issue in ANOTHER repo is not a
+  # link to this PR's own tracked issue and must not satisfy this gate.
+  if ! printf '%s' "$body" | grep -iqE '(clos(e|es|ed)|fix(es|ed)?|resolv(e|es|ed)|(^|[^[:alnum:]])part[[:space:]]+of)[[:space:]]+#[0-9]+'; then
     echo "GATE_FAIL:not_linked"; return 1
   fi
 
@@ -866,18 +877,23 @@ is_setup_step_html_error() {
 
 # Resolve scripts/github-status.sh (the shared outage predicate) so the park
 # helper can read the CURRENT degradation indicator. Overridable via
-# GITHUB_STATUS_SCRIPT (tests point it at a stub); else ${CLAUDE_PLUGIN_ROOT}/
-# scripts/github-status.sh; else resolve relative to THIS library file
-# (skills/pr-monitor/ -> ../../scripts/), so it works sourced or executed.
+# GITHUB_STATUS_SCRIPT (tests point it at a stub); else routed through
+# scripts/resolve-sge-root.sh (CLAUDE_PLUGIN_ROOT when set, else a search of
+# known plugin install roots, else self-location); else resolve relative to
+# THIS library file (skills/pr-monitor/ -> ../../scripts/) as a last resort,
+# so it works sourced or executed even when resolve-sge-root.sh itself can't
+# be found.
 _github_status_script_path() {
   if [ -n "${GITHUB_STATUS_SCRIPT:-}" ]; then
     printf '%s' "$GITHUB_STATUS_SCRIPT"; return 0
   fi
-  if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/github-status.sh" ]; then
-    printf '%s' "${CLAUDE_PLUGIN_ROOT}/scripts/github-status.sh"; return 0
-  fi
-  local here
+  local here root
   here=$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd) || return 0
+  root="${CLAUDE_PLUGIN_ROOT:-}"
+  [ -n "$root" ] || root="$(bash "$here/../../scripts/resolve-sge-root.sh" 2>/dev/null)"
+  if [ -n "$root" ] && [ -f "$root/scripts/github-status.sh" ]; then
+    printf '%s' "$root/scripts/github-status.sh"; return 0
+  fi
   printf '%s' "$here/../../scripts/github-status.sh"
 }
 

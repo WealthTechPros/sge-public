@@ -2,7 +2,7 @@
 name: spec-validate
 description: Use when a spec doc's `## Validation` section (docs/specs/README.md convention) needs to be run against a demo fixture — checking that a spec's stated business-rule invariants (e.g. "C1 must be ≤ Addressable − Exclusions", "Total = Exclusions + C1 + C2 + C3") actually hold, not just that a test exists for the scenario. Invoke after adding or editing a `## Validation` section, at spec-graduation time (draft → approved → implemented), or when /sge:sge-align's C4 sub-check flags an implemented spec with a missing or unverified Validation section.
 argument-hint: "<spec-file> [fixture.json]"
-allowed-tools: Read, Bash(node ${CLAUDE_PLUGIN_ROOT}/skills/spec-validate/assets/spec-validate.mjs:*)
+allowed-tools: Read, Bash(node ${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/spec-validate/assets/spec-validate.mjs:*)
 ---
 
 # Spec Validate
@@ -42,7 +42,7 @@ holds against real-shaped data".
 Run the bundled dependency-free Node script:
 
 ```
-node ${CLAUDE_PLUGIN_ROOT}/skills/spec-validate/assets/spec-validate.mjs <spec-file> [fixture.json]
+node ${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/spec-validate/assets/spec-validate.mjs <spec-file> [fixture.json]
 ```
 
 It:
@@ -79,8 +79,8 @@ Howard named directly (*"C1 must be ≤ Addressable − Exclusions"*, *"Total =
 Exclusions + C1 + C2 + C3"*) — is bundled here as the demo:
 
 ```
-node ${CLAUDE_PLUGIN_ROOT}/skills/spec-validate/assets/spec-validate.mjs \
-  ${CLAUDE_PLUGIN_ROOT}/skills/spec-validate/assets/example-spec.md
+node ${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/spec-validate/assets/spec-validate.mjs \
+  ${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/spec-validate/assets/example-spec.md
 ```
 
 (`example-spec.md`'s `<!-- validation:fixture --> ` hint resolves

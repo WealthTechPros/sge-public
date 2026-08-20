@@ -20,7 +20,7 @@ Orchestrate one dispatch **wave across N repos** from a single hub/control sessi
 ## Tool sequencing
 | Situation | Tool |
 |---|---|
-| Resolve each repo's local checkout (fail-loud) | Bash → `${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh` (SPEC-057) |
+| Resolve each repo's local checkout (fail-loud) | Bash → `${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/with-repo-cwd.sh` (SPEC-057) |
 | Enumerate an org fleet | Bash → `gh repo list "$ORG" --no-archived …` |
 | Discover the org-wide worklist | Agent → `/sge:available-issues --fleet …` |
 | Dispatch one repo lane | Agent (named, stoppable Task) → `/sge:team-pipeline` |

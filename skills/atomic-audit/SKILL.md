@@ -117,7 +117,7 @@ the report header.
 base that anchors the idempotency claim:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/skills/atomic-audit/scan.sh" <path>
+bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/atomic-audit/scan.sh" <path>
 ```
 
 It is read-only, pure grep/find, makes no stack assumptions beyond common
@@ -304,7 +304,7 @@ auditing serially:
 
 > **Target repo — cross-repo / control-session invocation.** Prefer an existing local
 > checkout over a fresh clone for each `--fleet` slug: resolve it via
-> `${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh resolve owner/repo`, which finds a
+> `${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/with-repo-cwd.sh resolve owner/repo`, which finds a
 > checkout under `SGE_CHECKOUT_ROOTS`/the hub sibling layout by matching `origin` — a repo
 > already checked out is audited from there, not re-cloned. Fall back to `gh repo clone`
 > into a temp dir only when the helper reports no match. See [`gh-repo`](../gh-repo/SKILL.md).

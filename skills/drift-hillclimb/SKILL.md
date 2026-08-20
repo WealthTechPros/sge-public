@@ -68,7 +68,7 @@ This loop opens PRs, so its envelope is explicit and non-negotiable:
 > token-economy/skill-quality dimensions) shell raw `git`/`gh` and read local telemetry
 > sidecars against the current checkout. From a control session climbing a *different*
 > repo — including each per-repo run under `--fleet` — resolve + `cd` first —
-> `cd "$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh resolve owner/repo)" || exit 1`
+> `cd "$(${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/with-repo-cwd.sh resolve owner/repo)" || exit 1`
 > (fail-loud) — and state the resolved checkout path explicitly when dispatching the
 > `sge-align`/`sge-implement`/`refactor` sub-agents (Steps 1/3): a dispatched agent starts
 > in the parent's cwd, not this skill's, so the target repo must be named in the dispatch
@@ -158,7 +158,7 @@ Always state the **stop reason** and whether the target was met — a hill-climb
 Run the bundled scorer, which joins the two sidecars and ranks skills worst-first. Governed value = successful runs (`merged | pass | ready | done | approved`); a skill's value-per-token = successes ÷ tokens spent, so the **worst** skill is the one with the most tokens per success (a skill that spent tokens but shipped nothing is Infinity — worst by construction):
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/drift-hillclimb/assets/score-token-economy.mjs" \
+node "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/drift-hillclimb/assets/score-token-economy.mjs" \
   --usage memory/token-usage.jsonl --runs memory/skill-runs.jsonl
 # optionally feed the org baseline from roi-report:
 #   /sge:roi-report | … > roi.json ; then add:  --roi roi.json
@@ -202,9 +202,9 @@ Stop conditions are the shared Governor's: target tokens/success reached, `--max
 Run the mechanical scan, then join it with the run sidecar via the bundled scorer:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/skills/sge-skill-audit/assets/scan-skills.sh" skills \
+bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/sge-skill-audit/assets/scan-skills.sh" skills \
   --trend docs/sge/skill-quality-trend.jsonl > /tmp/skill-quality-scan.json
-node "${CLAUDE_PLUGIN_ROOT}/skills/drift-hillclimb/assets/score-skill-quality.mjs" \
+node "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/drift-hillclimb/assets/score-skill-quality.mjs" \
   --scan /tmp/skill-quality-scan.json --runs memory/skill-runs.jsonl
 # optional: --window-days <n> (default 30) to widen/narrow the utilisation window
 ```

@@ -210,7 +210,7 @@ chronic false-positive). Flag a drop early, mid-morning, not after a lost aftern
 > **Target repo — cross-repo / control-session invocation.** `env-health` runs against the
 > repo in the current working directory (the "this repo" it self-heals). From a control
 > session monitoring or gating fan-out for a *different* repo, resolve + `cd` first —
-> `cd "$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh resolve owner/repo)" || exit 1`
+> `cd "$(${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/with-repo-cwd.sh resolve owner/repo)" || exit 1`
 > (fail-loud) — since `git rev-parse --show-toplevel` below and the throughput log path
 > both need cwd, not just `GH_REPO`. See [`gh-repo`](../gh-repo/SKILL.md).
 

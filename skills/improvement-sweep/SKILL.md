@@ -103,8 +103,9 @@ in `skipped[]`.
 
 > **Target repo — cross-repo / control-session invocation.** Steps below shell
 > raw `git`/`gh`/`node` and read local trend surfaces against the current
-> checkout. From a control session sweeping a *different* repo, resolve + `cd`
-> first — `cd "$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh resolve owner/repo)" || exit 1`
+> checkout. Resolve the plugin root once via `SGE_ROOT="$(bash ./scripts/resolve-sge-root.sh 2>/dev/null || bash "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-sge-root.sh")" || exit 1`
+> (used by Steps 1 and 4 below). From a control session sweeping a *different*
+> repo, resolve + `cd` first — `cd "$("$SGE_ROOT/scripts/with-repo-cwd.sh" resolve owner/repo)" || exit 1`
 > — and name the resolved checkout path when dispatching the `drift-hillclimb`
 > sub-agent. A dispatched agent starts in the parent's cwd, not this skill's.
 
@@ -115,7 +116,7 @@ prose. Run the selector against whatever surfaces exist; absent surfaces degrade
 to `unavailable` dials, never errors:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/improvement-sweep/assets/select-gap.mjs" \
+node "$SGE_ROOT/skills/improvement-sweep/assets/select-gap.mjs" \
   --coherence docs/sge/drift-trend.jsonl \
   --token docs/sge/token-economy-trend.jsonl \
   --skill-quality docs/sge/skill-quality-trend.jsonl \
@@ -160,7 +161,7 @@ Build the durable cycle record and append it as one line to
 
 ```bash
 node -e '
-  import("'"${CLAUDE_PLUGIN_ROOT}"'/skills/improvement-sweep/assets/select-gap.mjs").then(m => {
+  import("'"$SGE_ROOT"'/skills/improvement-sweep/assets/select-gap.mjs").then(m => {
     const rec = m.buildCycleRecord(SEL, { repo, status, prNumber, before, after, error });
     process.stdout.write(JSON.stringify(rec));
   })' >> docs/sge/improvement-sweep.jsonl

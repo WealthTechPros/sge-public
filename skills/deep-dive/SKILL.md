@@ -33,7 +33,7 @@ It runs **inline** in the main conversation — do not fork it into a subagent. 
 > or by `/sge:sge-align` triaging a drift issue, apply the shared
 > repo-targeting convention — [`gh-repo`](../gh-repo/SKILL.md) — first:
 > resolve + `cd` via the shared helper — `cd
-> "$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh resolve owner/repo)" ||
+> "$(${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/with-repo-cwd.sh resolve owner/repo)" ||
 > exit 1` (fail-loud, never falls through to the ambient hub cwd) — before the
 > preloaded issue-context call below runs, and re-enter it at the top of every
 > subsequent Bash call. The `cd` (not a bare `export GH_REPO`) is required:
@@ -170,7 +170,7 @@ Give each agent the issue number, title, body excerpt, and the label/keywords fr
 
 ## Phase 4: Governance Trace (SGE repos)
 
-Dispatch `/sge:governance-trace <issue-number>` as a **forked, headless** subagent (classify mode — no `--spec`, since at this point in the investigation you haven't yet decided which spec, if any, governs the issue). **State the target repo explicitly in the dispatch prompt** (SPEC-057) — a forked subagent starts in this session's cwd but does not inherit shell state across its own tool calls, so it must re-resolve and `cd` itself (`cd "$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh resolve owner/repo)" || exit 1`) before its own `gh`/artefact reads; never let it fall through to the ambient hub cwd. It owns the actual classification logic — capability mapping, spec coverage, requirement-change detection, non-goals check, `NOT_ONBOARDED` degradation — so this phase does not re-derive it inline. It returns:
+Dispatch `/sge:governance-trace <issue-number>` as a **forked, headless** subagent (classify mode — no `--spec`, since at this point in the investigation you haven't yet decided which spec, if any, governs the issue). **State the target repo explicitly in the dispatch prompt** (SPEC-057) — a forked subagent starts in this session's cwd but does not inherit shell state across its own tool calls, so it must re-resolve and `cd` itself (`cd "$(${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/with-repo-cwd.sh resolve owner/repo)" || exit 1`) before its own `gh`/artefact reads; never let it fall through to the ambient hub cwd. It owns the actual classification logic — capability mapping, spec coverage, requirement-change detection, non-goals check, `NOT_ONBOARDED` degradation — so this phase does not re-derive it inline. It returns:
 
 ```json
 {

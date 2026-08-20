@@ -65,7 +65,7 @@ When sge-align routes its skill-quality dimension here (`/sge:sge-align --dimens
 > **Target repo — cross-repo / control-session invocation.** Phase 1's `ls skills/` and the
 > bundled `scan-skills.sh` both resolve against the current working directory. From a
 > control session auditing a *different* repo's skills, resolve + `cd` first —
-> `cd "$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh resolve owner/repo)" || exit 1`
+> `cd "$(${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/with-repo-cwd.sh resolve owner/repo)" || exit 1`
 > (fail-loud; these are raw file reads, not `gh` calls, so `GH_REPO` alone doesn't cover
 > them). See [`gh-repo`](../gh-repo/SKILL.md).
 
@@ -89,10 +89,10 @@ Run `scan-skills.sh` ONCE for the whole target set — it is the single source o
 
 ```bash
 # whole-corpus sweep (--all) — point it at the audited repo's skills dir
-bash "${CLAUDE_PLUGIN_ROOT}/skills/sge-skill-audit/assets/scan-skills.sh" skills
+bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/sge-skill-audit/assets/scan-skills.sh" skills
 
 # single skill
-bash "${CLAUDE_PLUGIN_ROOT}/skills/sge-skill-audit/assets/scan-skills.sh" skills/<name>
+bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/sge-skill-audit/assets/scan-skills.sh" skills/<name>
 ```
 
 If `CLAUDE_PLUGIN_ROOT` is not exported to the shell, resolve the script beside this SKILL.md instead. Consume the JSON: `results[]` gives per-skill pass/fail/na for each SQ, `findings[]` gives one row per failure with severity — feed both straight into the Phase 3 report.
@@ -176,7 +176,7 @@ If `--fix` was passed, propose the fix as a diff for each ❌ finding and ask th
 On every `--all` sweep, append one dated summary row to the audited repo's `docs/sge/skill-quality-trend.jsonl` (the skill-layer sibling of sge-align's `docs/sge/drift-trend.jsonl`) by re-running the scan with `--trend`:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/skills/sge-skill-audit/assets/scan-skills.sh" skills --trend docs/sge/skill-quality-trend.jsonl
+bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/sge-skill-audit/assets/scan-skills.sh" skills --trend docs/sge/skill-quality-trend.jsonl
 ```
 
 Then read the previous row (the one before the row just appended) and print the delta, e.g. `SQ fails 12 → 9 (-3) across 41 skills`. First run: state there is nothing to diff yet. Commit the trend file (via `/sge:commit`) so the next sweep has a durable prior row — a trend file left uncommitted yields no trend.

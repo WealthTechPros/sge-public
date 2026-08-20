@@ -30,12 +30,12 @@ Maintain a machine-readable **AI use-case inventory** (`ai-inventory.yaml`) — 
 > audited-commit SHA (`git rev-parse HEAD`, cited in `report` mode) is read from, the
 > current checkout. From a control session maintaining a *different* repo's inventory,
 > resolve + `cd` first —
-> `cd "$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh resolve owner/repo)" || exit 1` —
+> `cd "$(${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/with-repo-cwd.sh resolve owner/repo)" || exit 1` —
 > since raw `git` needs cwd, not `GH_REPO`. See [`gh-repo`](../gh-repo/SKILL.md).
 
 1. Read the repo's CLAUDE.md for an AI-inventory path convention.
 2. Otherwise, place it beside the capability model (e.g. `.claude/product-context/ai-inventory.yaml`) or under `docs/sge/ai-inventory.yaml` — whichever convention the repo already uses for SGE artefacts.
-3. If no register exists, propose creating one from `${CLAUDE_PLUGIN_ROOT}/skills/sge-ai-inventory/assets/ai-inventory.template.yaml` and record the chosen path in CLAUDE.md so /sge:sge-align and future runs can find it.
+3. If no register exists, propose creating one from `${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/sge-ai-inventory/assets/ai-inventory.template.yaml` and record the chosen path in CLAUDE.md so /sge:sge-align and future runs can find it.
 
 ## Modes
 

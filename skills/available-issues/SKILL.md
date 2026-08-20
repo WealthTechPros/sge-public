@@ -93,10 +93,14 @@ HOST_KIND="$("$WRC" host 2>/dev/null || echo 'unknown')"
 if [ "$HOST_KIND" = "github" ]; then
   [ "$GH_TOKEN" = "proxy-injected" ] || [ "$GITHUB_TOKEN" = "proxy-injected" ] || gh auth status >/dev/null || exit 1
 fi
+# unknown host? references/forgejo-unknown-host.md
+[ "$HOST_KIND" = "unknown" ] && echo "WARNING: host unknown — see references/forgejo-unknown-host.md" >&2
 echo "repo context: $(git remote get-url origin) ($(pwd)) host: ${HOST_KIND}"
 ```
 
 `IR` (`scripts/issue-read.sh`, #1237) is the seam for all issue read operations in this skill: with a normalised JSON output shape so the rest of the skill is backend-agnostic. It resolves **two** independent dimensions — the **ALM (issue-tracker) backend** first (`with-repo-cwd.sh alm` → `github`|`jira`, SPEC-105 S2 #1700: a repo may be GitHub-hosted yet track work in Jira, routing `list`→P1 `list-dispatchable` / `view`→P2 `view-item` / `dependencies`→P7 `item-dependencies` / `dispatch-label`→P9 `dispatch-label-config` through `scripts/jira-adapter.sh`), then the **git host** (`gh` for GitHub, `scripts/forgejo-adapter.sh` for Forgejo/Gitea). `SGE_ALM_BACKEND` unset keeps the GitHub path byte-identical; an unrecognised value fails loud (DR1) — never a silent GitHub fallback. A Jira backend also needs `SGE_JIRA_PROJECT` (the project P1 enumerates) and the jira-adapter's credential/host-allow-list env.
+
+**Self-hosted Forgejo/Gitea:** `HOST_KIND` is classified from the `origin` remote by hostname substring (`*forgejo*`/`*gitea*`) — a self-hosted instance on a vanity domain (e.g. `git.example.com`) does not match either substring and classifies as `unknown` until the operator declares it. Declare it via `SGE_FORGEJO_HOSTS` (`;`-separated bare hosts, no code change needed) before running this skill against such a repo. `unknown` is not silently swallowed: `IR` fails loud naming the host and pointing at `SGE_FORGEJO_HOSTS`/`SGE_FORGEJO_DEFAULT_HOST` (ADR-0010) — if you hit that error, this is the fix.
 
 The helper verifies the checkout's `origin` actually matches the requested repo (a directory with the right name but the wrong origin is rejected) and refuses — with an actionable error — rather than proceeding in the ambient directory. Announce the resolved context once so the caller can catch a wrong-repo invocation immediately. Every `gh`/`git` snippet in the phases below assumes this entry sequence has just run in the same shell call.
 
@@ -216,6 +220,8 @@ in_flight() {
   local n=$1
   # open PR that closes the issue, or a branch named for it
   gh pr list --state open --search "linked:issue $n" --json number -q '.[0].number' 2>/dev/null | grep -q . && return 0
+  gh pr list --state open --search "in:body Part of #$n" --limit 100 --json number,body 2>/dev/null \
+    | jq -e --arg n "$n" 'any(.[]; .body | test("(^|[^[:alnum:]])part[[:space:]]+of[[:space:]]+#" + $n + "([^0-9]|$)"; "i"))' >/dev/null 2>&1 && return 0
   git ls-remote --heads origin 2>/dev/null | grep -qE "refs/heads/(feat|fix|chore)/(issue-|sge-)0*${n}([^0-9]|$)" && return 0
   return 1
 }
@@ -265,7 +271,7 @@ fallback:
 
 ```bash
 exec_repo_of() {  # $1 = issue body, $2 = tracking repo (this run's repo)
-  printf '%s' "$1" | "${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh" issue-repo "$2"
+  printf '%s' "$1" | "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/with-repo-cwd.sh" issue-repo "$2"
 }
 ```
 
@@ -377,82 +383,7 @@ The inverse view — every blocked candidate, its blockers, and whether each blo
 
 ## Fleet mode (`--fleet`) — org-wide worklist
 
-One invocation → one conflict-safe, dependency-annotated worklist spanning every repo in the fleet. This section's output shape is the **discovery contract consumed by `/sge:fleet-dispatch`**.
-
-### Fleet membership — from the argument only
-
-Fleet membership comes exclusively from `--fleet` (or config the *caller* expands) — never from org or repo names baked into this skill:
-
-- **`--fleet <org>`** — a single token with no comma and no slash is a GitHub org; enumerate its repos live:
-
-  ```bash
-  gh repo list "$ORG" --no-archived --limit 200 --json nameWithOwner -q '.[].nameWithOwner'
-  ```
-
-- **`--fleet owner/a,owner/b,…`** — an explicit comma-separated list; each entry takes any form the helper accepts (`name`, `owner/name`, GitHub URL). A caller holding a fleet manifest expands it itself, e.g. `--fleet "$(yq -r '[.repos[].name] | join(",")' fleet.yaml)"`.
-
-### Per-repo pass — helper-resolved, fail-loud
-
-For each fleet member, resolve its local checkout with the SPEC-057 helper and run **Phases 1–4 unchanged** inside it (per-repo conflict analysis is identical to single-repo mode):
-
-```bash
-for R in $FLEET; do
-  cd "$("$WRC" resolve "$R")" || exit 1   # unreachable checkout/repo → abort the run, loudly
-  # Phases 1–4 exactly as single-repo, in this repo's context
-done
-```
-
-**Fail-loud rule:** a fleet member whose checkout cannot be resolved — or whose `gh` calls fail — **aborts the whole run** with the helper's error naming the repo. Never emit a silently-narrowed worklist: a consumer dispatching against it would believe the missing repo had nothing ready. To proceed without the unreachable repo, the caller re-invokes with the reachable subset listed explicitly.
-
-### Aggregation semantics
-
-- **Claim + dependency gates: per repo, unchanged.** `agent-lock`, assignees, in-flight branches/PRs, and `DependsOn: #N` all resolve within each issue's own repo — a bare `#N` is repo-local, exactly as in single-repo mode.
-- **Conflict matrix: per repo only.** File/route/schema surfaces in different repos cannot merge-conflict, so cross-repo pairs are parallel-safe by construction; `serialGroups` never span repos.
-- **Ranking:** Phase 4's strict-priority order applied across the aggregate; cross-repo ties break by repo slug (lexicographic), then lowest issue number — deterministic, same input → same worklist.
-- **`--count`** caps the **aggregate** parallel set, not each repo's share.
-
-### Fleet output — the `/sge:fleet-dispatch` discovery contract
-
-Every entry is **repo-qualified** (the single-repo shapes above are unchanged — bare-number arrays — so `/sge:team-pipeline` keeps parsing them):
-
-```
-Fleet worklist (3 repos; 4 parallel-safe of 9 ready):
-  owner/a#218   high    surface: app/billing/**
-  owner/b#41    high    surface: docs/specs/**
-  owner/a#224   medium  surface: cli/commands/**
-  owner/c#12    low     (spec-only)
-Serial groups:
-  owner/a: #207, #219        (both touch app/auth/**)
-Blocked:
-  owner/b#33  ← depends on owner/b#10 (open)
-```
-
-```json
-{
-  "fleet": ["owner/a", "owner/b", "owner/c"],
-  "parallelSafe": [
-    { "repo": "owner/a", "issue": 218, "priority": "high", "surface": ["app/billing/**"] },
-    { "repo": "owner/b", "issue": 41,  "priority": "high", "surface": ["docs/specs/**"] }
-  ],
-  "serialGroups": [ { "repo": "owner/a", "issues": [207, 219] } ],
-  "blocked":      [ { "repo": "owner/b", "issue": 33, "blockedBy": [10] } ],
-  "conflicts":    [ { "repo": "owner/a", "a": 207, "b": 219, "on": ["app/auth/login.ts"] } ]
-}
-```
-
-Contract guarantees for the consumer (`/sge:fleet-dispatch`):
-
-- `parallelSafe` is pairwise conflict-free **and** each entry was unclaimed/unblocked in its own repo at derivation time;
-- `blocked[].blockedBy` numbers are repo-local to `blocked[].repo`;
-- `parallelSafe` ordering **is** the dispatch priority order;
-- the shape is stable — additive fields only.
-
-### Flag interactions under `--fleet`
-
-- `--mode autonomous-next` → exactly one entry, with a `"repo"` field: `{ "repo": "owner/a", "issue": 218, "priority": "high", "reason": "…" }` (or `{ "repo": null, "issue": null, "reason": "…" }` when the fleet is drained).
-- `--setup` → **refused** (exit with an error). Claiming and worktree creation across repos belongs to the consumer — `/sge:fleet-dispatch` owns the cross-repo claim lifecycle.
-- `--analyze N` → refused (issue numbers are repo-local); use `--repo <owner/name> --analyze N` instead.
-- `--module` / `--milestone` → applied per repo, same label/milestone name in each.
+One invocation → one conflict-safe, dependency-annotated worklist spanning every repo in the fleet — the discovery contract `/sge:fleet-dispatch` consumes. Membership, per-repo pass mechanics, aggregation semantics, output shape (incl. the `/sge:fleet-dispatch` contract guarantees), and flag interactions: [`references/fleet-mode.md`](references/fleet-mode.md).
 
 ---
 

@@ -8,12 +8,14 @@ When the repo's `origin` is a Forgejo or Gitea instance, `gh pr list/view/checks
 fail because `gh` only speaks to GitHub. Use the host-agnostic routing shim instead:
 
 ```bash
+SGE_ROOT="$(bash ./scripts/resolve-sge-root.sh 2>/dev/null || bash "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-sge-root.sh")" || exit 1
+
 # Detect the host kind once per Startup.
-HOST_KIND="$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh host)"
+HOST_KIND="$("$SGE_ROOT/scripts/with-repo-cwd.sh" host)"
 
 # Source the routing shim — it exposes fpr_list / fpr_view / fpr_diff / fpr_checks
 # that transparently route to gh (GitHub) or forgejo-adapter.sh (Forgejo/Gitea).
-source "${CLAUDE_PLUGIN_ROOT}/skills/lib/forgejo-pr-read.sh"
+source "$SGE_ROOT/skills/lib/forgejo-pr-read.sh"
 ```
 
 Then replace every `gh pr list`/`gh pr view`/`gh pr checks` call in the monitor loop

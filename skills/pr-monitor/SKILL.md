@@ -48,7 +48,7 @@ Watch the **oldest open non-spec PRs** in a rolling window of `$1` lanes (defaul
 
 Without the flag, behaviour is unchanged.
 
-> **Target repo â€” cross-repo / control-session invocation.** This monitor acts on the **cwd** repo (it takes a lane count, not a repo) and dispatches `/sge:pr-review` / `/sge:pr-fix`. From a control/orchestrator or remote/worktree session, resolve + `cd` via `cd "$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh resolve owner/repo)" || exit 1` â€” **or** `export GH_REPO=owner/repo` for `gh`-only monitoring. Convention: [`gh-repo`](../gh-repo/SKILL.md).
+> **Target repo â€” cross-repo / control-session invocation.** This monitor acts on the **cwd** repo (it takes a lane count, not a repo) and dispatches `/sge:pr-review` / `/sge:pr-fix`. From a control/orchestrator or remote/worktree session, resolve the plugin root via `SGE_ROOT="$(bash ./scripts/resolve-sge-root.sh 2>/dev/null || bash "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-sge-root.sh")" || exit 1`, then `cd` via `cd "$("$SGE_ROOT/scripts/with-repo-cwd.sh" resolve owner/repo)" || exit 1` â€” **or** `export GH_REPO=owner/repo` for `gh`-only monitoring. Convention: [`gh-repo`](../gh-repo/SKILL.md).
 
 > **Bundled library â€” [`monitor-lib.sh`](monitor-lib.sh).** All the mechanical bash referenced below (`is_spec_pr`, `fetch_*`, `*_stale*`, `*_stall`, `is_stale_draft`, `stale_draft_lane`, `pr_ready_for_merge`, `is_infra_failure`, `is_cancelled_run`, `escape_cancelled_run`, `worktree_synced_with_remote`, `update_branch_safe`, `worktree_sync_state`, `automerge_settle_ok`, `disarm_stale_automerge`, `is_setup_step_html_error`, `check_systemic_failure`, `is_blast_radius_pr`) lives there, **sourced** at Startup â€” this file carries the judgement, the library the code. Don't restate function bodies; change them in the library, where `skills/tests/pr-monitor-*.test.sh` execute them.
 
@@ -111,6 +111,10 @@ Two further legs over `fetch_claimed_prs`, both mechanised in [`monitor-lib.sh`]
 
 A **fourth leg** over drafts: `is_stale_draft <pr>` returns 0 (no claim label, head older than `STALE_DRAFT_MINUTES` (default **45**), no check in flight) means presumed abandoned. `stale_draft_lane <pr>` then readies a **green** draft (logged + audited) or posts an idempotent abandonment comment on a **red** one â€” **never** auto-ready over red CI; an active draft is a no-op. **Run it here** â€” full rules and rationale: [`stale-draft-lane.md`](references/stale-draft-lane.md).
 
+### Stacked-PR detection & merge-order recommendation (#2296)
+
+**At lane-assignment and each backfill,** scan the candidate set for stacked PRs — where one PR's `baseRefName` equals another open PR's `headRefName`. Before acting on any lane in a stack, emit a merge-order recommendation with reasoning (which PR must land first and why). Flag **partial-merge hazards** (merging PR A alone leaves a governance artefact inconsistent with PR B's correction); for any PR in the queue that carries a merge commit, check for silent reversions per AC3. Full detection rules and the merge-order algorithm: [`../lib/stacked-pr-hazards.md`](../lib/stacked-pr-hazards.md).
+
 ---
 
 ## Merge readiness â€” three gates
@@ -159,7 +163,8 @@ done
 LANES="${LANES:-3}"
 
 # Load the mechanical half of this skill (all functions referenced below).
-source "${CLAUDE_PLUGIN_ROOT}/skills/pr-monitor/monitor-lib.sh"
+SGE_ROOT="$(bash ./scripts/resolve-sge-root.sh 2>/dev/null || bash "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-sge-root.sh")" || exit 1
+source "$SGE_ROOT/skills/pr-monitor/monitor-lib.sh"
 
 # Read the repo's CLAUDE.md â†’ spec globs (export SPEC_GLOB_RE for is_spec_pr),
 # merge-gate label (export MERGE_GATE_LABEL if the repo differs â€” default:
@@ -170,7 +175,7 @@ source "${CLAUDE_PLUGIN_ROOT}/skills/pr-monitor/monitor-lib.sh"
 
 ---
 
-> **Non-GitHub hosts (Forgejo/Gitea):** when `origin` is a Forgejo/Gitea instance, `source "${CLAUDE_PLUGIN_ROOT}/skills/lib/forgejo-pr-read.sh"` and replace the loop's `gh pr list/view/checks` reads with `fpr_list`/`fpr_view`/`fpr_checks`. Mutating ops (labels, merge) stay GitHub-only until the mutating slice â€” skip + log deferral. Auth fails loud; the host must be on the adapter allow-list (ADR-0010). Full routing table, field mapping, and auth detail: [`host-adapter-routing.md`](references/host-adapter-routing.md).
+> **Non-GitHub hosts (Forgejo/Gitea):** when `origin` is a Forgejo/Gitea instance, `source "$SGE_ROOT/skills/lib/forgejo-pr-read.sh"` and replace the loop's `gh pr list/view/checks` reads with `fpr_list`/`fpr_view`/`fpr_checks`. Mutating ops (labels, merge) stay GitHub-only until the mutating slice â€” skip + log deferral. Auth fails loud; the host must be on the adapter allow-list (ADR-0010). Full routing table, field mapping, and auth detail: [`host-adapter-routing.md`](references/host-adapter-routing.md).
 
 ## Per-PR classification (each cycle)
 
@@ -186,7 +191,7 @@ Each cycle, classify every occupied lane into one state and act. Evaluate **top 
 | **NOT LINKED** | Gate 1 open â€” no closing keyword in the body | link it (repo's issue-linking flow â€” see *Ensure issue-closing linkage*) |
 | **NOT REVIEWED** | Gate 2 open â€” merge-gate label missing / `mergeStateStatus: BLOCKED` | run `/sge:pr-review` **automatically â€” never ask first** (see *Review gates*), appending `--no-automerge` when `NO_AUTOMERGE=1` |
 | **READY** | all three gates pass **and** `automerge_settle_ok "$pr"` (gate label continuously present â‰¥ `AUTOMERGE_SETTLE_SECONDS`, default 300 â€” #1668) | ensure auto-merge enabled â€” `/sge:pr-review` normally enables it on `pass`; this row is the **fallback** for PRs it couldn't (repo setting off, reviewed out of band): `gh pr merge "$pr" --squash --auto`. **Do not arm before the settle window** â€” a reviewer that self-corrects needs time to retract first. **Under `--no-automerge` (`NO_AUTOMERGE=1`, SPEC-090) this fallback is SKIPPED** â€” report the lane `READY_HELD` and keep its watch running; merge left to the human / merge plane (ADR-0008 Layer-2 gate). |
-| **MERGED** | PR is merged/closed | replace the lane with the next oldest eligible PR |
+| **MERGED** | PR is merged/closed | `${CLAUDE_PLUGIN_ROOT}/scripts/detect-admin-bypass.sh --pr "$pr"` (fail-loud admin-bypass detection, #2384 â€” see below), then replace the lane with the next oldest eligible PR |
 
 Keep the cheap rows cheap: **rerun-infra and update-branch are triage, not fixes** â€” spend them before dispatching any fix agent. For the infra-vs-code judgement, defer to `/sge:pr-fix`'s classification rather than re-deriving it.
 
@@ -223,9 +228,9 @@ Follow through by gate:
 - **Label gate** â€” a required check such as `Require pr-reviewed label` is failing / the merge-gate label is missing. Run `/sge:pr-review "$pr"` â€” **it owns the label state machine; the monitor never applies `pr-reviewed` itself.** Verify the swap happened:
 
   ```bash
-  ${CLAUDE_PLUGIN_ROOT}/skills/pr-review/pr-labels.sh status "$pr"
-  # clean pass  â†’ reviewing=false reviewed=true hold=false
-  # failed gate â†’ reviewing=false reviewed=false hold=false  (findings on the PR carry the state)
+  "$SGE_ROOT/skills/pr-review/pr-labels.sh" status "$pr"
+  # clean pass  â†’ reviewing=false reviewed=true hold=false changes-requested=false
+  # failed gate â†’ reviewing=false reviewed=false hold=false changes-requested=true  (findings on the PR carry the detail, the label carries the visible state — issue #2238)
   ```
 
   If the review passed but `status` doesn't show `reviewed=true`, re-run the review rather than patching labels by hand.
@@ -234,7 +239,7 @@ Follow through by gate:
 - **Conversation-resolution gate** â€” `mergeStateStatus: BLOCKED` with all checks green and review APPROVED (`reviewDecision: APPROVED`, `pr-reviewed` present) means `required_conversation_resolution`: unresolved threads, typically the `github-advanced-security` / skillspector bot on a first-party skill's own instructions (waived at the SkillSpector gate, SPEC-059). Clear ONLY those adjudicated-benign threads:
 
   ```bash
-  ${CLAUDE_PLUGIN_ROOT}/skills/pr-monitor/resolve-scanner-threads.sh --pr "$pr"
+  "$SGE_ROOT/skills/pr-monitor/resolve-scanner-threads.sh" --pr "$pr"
   # Resolves a thread ONLY if ALL hold: first-comment author is the code-scanning
   # bot, path matches skills/**, the rule class is in the accepted first-party set
   # (.github/skillspector-waivers.json), and an audit-rationale comment is posted
@@ -259,6 +264,22 @@ fi
 ```
 
 Same-repo only â€” cross-repo `owner/repo#N` won't auto-close (flag for manual close). Only add the keyword when the PR genuinely implements the issue.
+
+---
+
+## Admin-bypass detection (issue #2384, admin-bypass half of #2209)
+
+`gh pr merge --admin` cannot be prevented at the GitHub API level â€” branch protection has no "except when I say so" audit hook. This is **fail-loud detection, not prevention**: per the 2026-08-19 decision recorded on #2209, a merge that landed via admin bypass on a repo with required contexts red should never be silently indistinguishable from a routine merge, regardless of *why* the verdict path was broken (App outage, missing operator credentials, #2219's independence-exclusion case). This pairs with #2219's declared-exception model â€” an override should always be an explicit, recorded exception, never a normalized default path.
+
+**Mechanism** â€” [`scripts/detect-admin-bypass.sh`](../../scripts/detect-admin-bypass.sh): for a merged PR, resolve the base branch's required status-check contexts, fetch check-runs (+ legacy statuses) for the PR's **head SHA** (the commit that carried the pre-merge verdicts â€” the merge commit itself has no check-run history), collapse to the latest conclusion per named check, and compare against the required set. `success`/`neutral`/`skipped` (e.g. a legitimately path-filtered job) count as satisfying a context, matching GitHub's own branch-protection semantics; anything else (`failure`/`cancelled`/`timed_out`/`pending`/missing) on a PR that nonetheless merged is only reachable via an admin override.
+
+Run it every time the **MERGED** row fires:
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/scripts/detect-admin-bypass.sh --pr "$pr"
+```
+
+On detection it appends an NDJSON record to the rolling log (`$ADMIN_BYPASS_LOG`, default `/tmp/admin-bypass.ndjson`) **and** posts an idempotent (head-SHA-marker-keyed) comment on the PR naming the specific context(s) that were not green at merge time â€” never re-posted for the same head SHA. Exit is always 0: the merge already happened, there is nothing left to block; the flagged PR comment/log line is the actionable signal, not a gate. A repo-wide sweep (`--scan [--since <ISO8601>]`, default lookback 24h) is available for a periodic audit pass outside the per-merge hook.
 
 ---
 
@@ -369,50 +390,9 @@ On any stop, emit **one** [exit report](../exit-report/SKILL.md) â€” the sh
 
 ## Appendix A â€” Global-Blast-Radius Carve-Outs
 
-> **Canonical definition** â€” this is the single source of truth for the carve-out
-> list. `pr-fix` and `team-pipeline` reference this appendix; do not duplicate or
-> diverge from it.
-
-Some PRs have a **global blast radius**: they can break things far outside the
-files they directly touch. A risk-based "run only affected tests" strategy is
-**unsafe** for these PRs â€” a passing affected-test run can let a broken change
-through.
-
-### When a lane PR matches any carve-out condition â€” run the full suite
-
-Detect carve-out PRs at lane-assignment time and again before declaring any
-carve-out PR green with `is_blast_radius_pr <pr>` from
-[`monitor-lib.sh`](monitor-lib.sh) â€” it returns 0 (true) when the PR matches
-any condition below, echoing a one-word reason string (`lockfile`,
-`shared-config`, `ci-workflow`, `codegen-schema`, `container`, `bot-author`)
-so callers can log it. The table below is the canonical condition list; the
-function implements it â€” keep them in lockstep.
-
-### Carve-out conditions
-
-| Condition | Glob / pattern |
-|-----------|----------------|
-| Dependency manifests / lockfiles | `package.json`, `pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `.npmrc`, `patches/`, `pyproject.toml`, `poetry.lock`, `uv.lock`, `requirements*.txt`, `requirements/*.txt` (any depth), `setup.py`, `setup.cfg`, `Pipfile`, `Pipfile.lock` |
-| Bot author | PR author login matches `*[bot]`, `dependabot*`, or `renovate*` |
-| Shared config files | `tsconfig*.json`, `vite.config.*`, `vitest.config.*` |
-| CI workflow files | `.github/workflows/*.yml` / `.yaml` |
-| Codegen / schema / DB migrations | `*.prisma`, `migrations/` (any depth), `alembic/` + `alembic.ini` (any depth), `codegen.*` |
-| Container / image definitions | `Dockerfile*` (any depth), `docker-compose*.yml` / `.yaml` |
-
-### What "run the full suite" means
-
-When `is_blast_radius_pr` returns true for a lane PR:
-
-1. **Do not accept an affected-tests run as proof of green** â€” a partial run can
-   miss failures in code the changed files influence transitively.
-2. **Instruct `/sge:pr-fix`** (via the dispatch prompt) that this is a carve-out
-   PR â€” it runs the full build + test suite, not just the failing check.
-3. **Gate 3 (CI green)** is satisfied only by a completed **full-suite run**, not
-   a partial subset.
-4. **Log the carve-out reason** in the heartbeat line:
-   ```bash
-   carve_out_reason=$(is_blast_radius_pr "$pr") || true   # reason echoed to stdout
-   printf '[%s] cycle %s | L%s:#%s BLAST_RADIUS(%s)\n' \
-     "$(date -u +%H:%M:%S)" "$CYCLE_NUM" "$lane" "$pr" "$carve_out_reason"
-   ```
-
+Some PRs have a **global blast radius**: they can break things far outside the files they
+directly touch â€” a risk-based "run only affected tests" strategy is **unsafe** for these PRs.
+Canonical carve-out condition list (lockfiles, bot authors, shared config, CI workflow files,
+codegen/schema/migrations, container definitions), `is_blast_radius_pr` detection, and what
+"run the full suite" means for a matched lane PR: [`blast-radius-carveouts.md`](references/blast-radius-carveouts.md).
+`pr-fix` and `team-pipeline` reference this same appendix â€” do not duplicate or diverge from it.
