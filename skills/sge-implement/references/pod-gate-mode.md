@@ -147,3 +147,13 @@ solo-repo pipeline works identically.
 |---|---|---|---|
 | Pod-gate (gate owner = pod) | `handed-off` | `Phase 6.5` | "Gate owned by pod — handed off as draft PR #N" |
 | Self-drive (gate owner unset / not pod) | `merged` (success) / `blocked` | `Phase 8` / `Phase 0.5` | (unchanged) |
+
+## Phase 5 is not suppressed in pod mode (issue #1324)
+
+Pre-PR `/sge:sge-review` (sge-implement Phase 5) and the pod's merge-gate review
+are **complementary, not redundant**. Phase 5 catches blockers before the draft
+ever lands in the merge queue, which saves a wasted pod dispatch; the pod's
+review is the merge gate itself.
+
+**Never skip Phase 5 to save tokens.** Handing a pod an unreviewed draft moves
+the cost rather than removing it — the pod pays it, plus a round-trip.

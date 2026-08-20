@@ -53,7 +53,7 @@ Look up the policy in priority order:
 Run the bundled evaluator (see its header comment for full flag/exit-code docs):
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/cost-guard/evaluate-budget.mjs" \
+node "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/cost-guard/evaluate-budget.mjs" \
   --jsonl "$JSONL" \
   ${SPEC_ID:+--spec "$SPEC_ID"} \
   ${SESSION_ID:+--session "$SESSION_ID"} \

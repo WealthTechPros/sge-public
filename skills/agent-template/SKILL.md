@@ -174,7 +174,7 @@ gate's decision strands a worktree.
 ## Minimal custom orchestrator checklist
 
 ```
-[ ] Reconcile worklist before building queue (${CLAUDE_PLUGIN_ROOT}/scripts/reconcile-worklist.mjs)
+[ ] Reconcile worklist before building queue (${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/reconcile-worklist.mjs)
 [ ] Dependency gate: drop issues with unresolved blockers
 [ ] Phase 1.5: batch /sge:build-ready-audit when queue >= 2; store govtraceMap
 [ ] Phase 3c: look up govtraceMap[N]; inject SGE_GOVTRACE_VERDICT in lane prompt

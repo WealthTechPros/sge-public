@@ -3,7 +3,7 @@ name: regulatory-trace
 description: Use when a regulated WTP repo must map its feature specs and capabilities to named FCA / UK-regulatory obligations and frameworks (ISO 27001, ISO 42001, ISO 27701) and export that mapping as audit evidence — preparing for a client's third-party due-diligence pack, an FG26/4 material-arrangement registration, an ISO surveillance audit, or a tripartite (firm + auditor + regulator) evidence request. Also use when a spec in a 'regulated' capability lacks an obligation mapping, or when /sge:sge-align's C12 regulatory-traceability check raises drift. Complements /sge:sge-ai-inventory (which governs AI *use cases*) — this skill governs *spec-level SDLC traceability* across ALL specs, AI or not.
 argument-hint: "[add|map|review|export] [SPEC-NNN | CAP-NNN]"
 context: fork
-allowed-tools: Read, Write, Edit, Glob, Grep, AskUserQuestion, Bash(git status:*), Bash(git log:*), Bash(git rev-parse:*), Bash(git ls-files:*), Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/regulatory-trace/assets/check-regulatory-trace.sh:*)
+allowed-tools: Read, Write, Edit, Glob, Grep, AskUserQuestion, Bash(git status:*), Bash(git log:*), Bash(git rev-parse:*), Bash(git ls-files:*), Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/regulatory-trace/assets/check-regulatory-trace.sh:*), Bash(bash scripts/resolve-sge-root.sh:*)
 ---
 
 # SGE Regulatory Traceability
@@ -31,14 +31,15 @@ Map SGE **feature specs and capabilities** to the **named FCA / UK-regulatory ob
 > **Target repo — cross-repo / control-session invocation.** Every mode below reads the
 > current checkout and shells the bundled `check-regulatory-trace.sh` against it via raw
 > `git` (`status`/`log`/`rev-parse`/`ls-files`). From a control session mapping a
-> *different* repo's obligations, resolve + `cd` first —
-> `cd "$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh resolve owner/repo)" || exit 1`
+> *different* repo's obligations, resolve + `cd` first — resolve the plugin root via
+> `SGE_ROOT="$(bash ./scripts/resolve-sge-root.sh 2>/dev/null || bash "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-sge-root.sh")" || exit 1`,
+> then `cd "$("$SGE_ROOT/scripts/with-repo-cwd.sh" resolve owner/repo)" || exit 1`
 > (fail-loud; raw `git` needs cwd, not `GH_REPO`). See [`gh-repo`](../gh-repo/SKILL.md).
 
 1. Read the repo's `CLAUDE.md` for an SGE-artefact path convention, then locate, per `/sge:sge-align` Step 0:
    - **Specs** — `docs/specs/*.md` or `docs/features/*.md` (YAML frontmatter with `id`/`ref`, `capability`, `status`, `success_measure_moved`).
    - **Capability model** — `.claude/product-context/capability-model.yaml` or `platform/docs/sgd-build/capability-model.yaml`.
-2. **Obligation catalogue** — the canonical id list lives at `${CLAUDE_PLUGIN_ROOT}/skills/regulatory-trace/assets/obligations-catalogue.yaml` (the controlled vocabulary; every mapping must reference an id that exists there, and never one flagged `retired: true`).
+2. **Obligation catalogue** — the canonical id list lives at `skills/regulatory-trace/assets/obligations-catalogue.yaml` under the plugin root resolved via `scripts/resolve-sge-root.sh` (the controlled vocabulary; every mapping must reference an id that exists there, and never one flagged `retired: true`).
 3. **Traceability matrix store** — the per-repo mapping register. Place it beside the capability model as `regulatory-trace.yaml` (or under `docs/sge/regulatory-trace.yaml` if that is the repo's SGE-artefact home) and **record the chosen path in `CLAUDE.md`** so `/sge:sge-align` C12 and future runs find it. Seed from `assets/regulatory-trace.template.yaml` if absent.
 
 The **preferred** mapping home is **inline in the spec frontmatter** (`regulatory:` block — see `references/spec-schema-extension.md`); `regulatory-trace.yaml` is the *aggregate* index the export reads and the place to map capability-level controls that no single spec owns. Inline-in-spec is authoritative; the index is derived. When both exist and disagree, the spec frontmatter wins and `review` flags the drift.
@@ -65,7 +66,7 @@ Then:
 
 ### review — audit regulatory coverage (the C12 source of truth)
 
-Run the mechanical drift check and report — this is the same logic `/sge:sge-align` consumes as **check C12** (`references/drift-check.md`). Shell out to `bash ${CLAUDE_PLUGIN_ROOT}/skills/regulatory-trace/assets/check-regulatory-trace.sh` (the script resolves the obligations catalogue automatically — an explicit `$1` override first, else the audited repo's own copy, else `$CLAUDE_PLUGIN_ROOT`, else the copy bundled beside the script; a missing or unparsable catalogue is a high `convention-unknown` finding and `status: fail`, never a silent pass) — it is the **single source of truth for the gating sub-checks RT-1..RT-3** (coverage, retired-reference, unknown-id/vocabulary) and emits the C12 JSON. The two **advisory** findings below — index drift and orphan catalogue ids (RT-4/RT-5) — are *not* in the shared script (they need the cross-file index/catalogue view); perform them skill-side and append them to the report as advisory (they do not change the C12 pass/fail gate):
+Run the mechanical drift check and report — this is the same logic `/sge:sge-align` consumes as **check C12** (`references/drift-check.md`). Shell out to `bash ${CLAUDE_PLUGIN_ROOT}/skills/regulatory-trace/assets/check-regulatory-trace.sh` (the script resolves the obligations catalogue automatically — an explicit `$1` override first, else the audited repo's own copy, else `$CLAUDE_PLUGIN_ROOT`, else a `scripts/resolve-sge-root.sh` lookup, else the copy bundled beside the script; a missing or unparsable catalogue is a high `convention-unknown` finding and `status: fail`, never a silent pass) — it is the **single source of truth for the gating sub-checks RT-1..RT-3** (coverage, retired-reference, unknown-id/vocabulary) and emits the C12 JSON. The two **advisory** findings below — index drift and orphan catalogue ids (RT-4/RT-5) — are *not* in the shared script (they need the cross-file index/catalogue view); perform them skill-side and append them to the report as advisory (they do not change the C12 pass/fail gate):
 
 - **Coverage gaps (high):** every spec whose governing capability is `regulated: true` but the spec carries **no `regulatory.fca_obligations`** mapping. This is the C12 fail condition.
 - **Retired-reference gaps (high):** any mapping that references a catalogue id flagged `retired: true` (the obligation was withdrawn/superseded — the mapping is stale evidence).

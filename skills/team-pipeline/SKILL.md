@@ -116,7 +116,7 @@ file-map, read ≤ 5 files to locate the surface, then build.
 
 **Rule 2 — Draft PR on first commit.** After the **first commit** (even if
 partial), immediately `git push origin "${SGE_BRANCH_PREFIX:-fix/issue-}<N>"` and
-`gh pr create --draft --title "<title>" --body "Fixes #<N>"` — do NOT wait for
+`gh pr create --draft --title "<title>" --body "Part of #<N>"` — do NOT wait for
 completion (the draft is the progress signal; no-draft-after-first-commit is the
 stall signal). Keep working; push each commit. Commit via `/sge:commit --no-push` — it derives the mandatory `Spec:`/`SGE-Override:` trailer itself (its step 5). The branch prefix is
 `SGE_BRANCH_PREFIX` (default `fix/issue-`); set it to `claude/issue-` for Routine
@@ -431,9 +431,11 @@ budget target, the full **Lean Agent Contract** (Rules 1–3), and these Steps
    adoption the fork is skipped, so `create_entities` the adopted front-loaded
    verdict, `path: front-loaded` (fire-and-forget).
 3. Implement the change (TDD per AC) per the Lean Agent Contract — draft PR on
-   first commit (`Fixes #<N>`; cross-repo `Fixes owner/repo#<N>`), cheap inline
+   first commit (`Part of #<N>`; cross-repo `Part of owner/repo#<N>` — #2241), cheap inline
    gates, write the completion file (no self-reported token count, #857), no
    `/sge:pr-review`.
+
+**Lane manifest** — [mechanism](references/mechanisms.md#lane-manifest-issue-2214-ask-3) (#2214 ask 3).
 
 Update state: add the lane to `activeAgents` with spawn time + execution worktree
 path.
@@ -612,14 +614,11 @@ candidates; the issue carries the gate's comment; a human re-runs
 
 ## Global-Blast-Radius Carve-Outs
 
-A **carve-out** PR (dependency manifests/lockfiles, shared config, CI workflows,
-codegen/schema/migrations, or a bot-authored PR) has global blast radius, so
-partial test runs are **not** evidence of green: **it must never be considered
-green until the full build + test suite has passed on CI**, enforced by the
-pr-monitor, the Phase 4 monitor, and the Phase 3d agent. Condition table,
-`is_blast_radius_pr` detector, per-role detail:
-[`pr-monitor` Appendix A](../pr-monitor/SKILL.md#appendix-a--global-blast-radius-carve-outs)
-· [troubleshooting](references/troubleshooting.md).
+A **carve-out** PR (lockfiles, shared config, CI workflows, codegen/migrations,
+or bot-authored) has global blast radius: partial test runs are **not**
+evidence of green — **never consider it green until the full suite passes on
+CI**, enforced by pr-monitor, the Phase 4 monitor, and the Phase 3d agent.
+Detector + detail: [`pr-monitor` Appendix A](../pr-monitor/SKILL.md#appendix-a--global-blast-radius-carve-outs).
 
 ---
 

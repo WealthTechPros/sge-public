@@ -31,11 +31,12 @@ Designed to be looped: `/loop 30m /sge:reap-orphans`
 
 The reaper is a **bundled script** — [`reap-orphans.ps1`](reap-orphans.ps1), beside this file. Do not re-inline, re-read, or rewrite its body — run it directly and pass any flags the user provided:
 
-```pwsh
-pwsh -File "${CLAUDE_PLUGIN_ROOT}/skills/reap-orphans/reap-orphans.ps1" [-DryRun] [-HogMB <N>]
+```bash
+SGE_ROOT="$(bash ./scripts/resolve-sge-root.sh 2>/dev/null || bash "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-sge-root.sh")" || exit 1
+pwsh -File "$SGE_ROOT/skills/reap-orphans/reap-orphans.ps1" [-DryRun] [-HogMB <N>]
 ```
 
-Use `powershell` in place of `pwsh` if PowerShell 7 is not installed. When running from a repo checkout rather than an installed plugin (so `${CLAUDE_PLUGIN_ROOT}` is unset), invoke `reap-orphans.ps1` by its path next to this SKILL.md instead.
+Use `powershell` in place of `pwsh` if PowerShell 7 is not installed. When running from a repo checkout rather than an installed plugin (so `CLAUDE_PLUGIN_ROOT` is unset and `resolve-sge-root.sh` self-locates via its own checkout instead), invoke `reap-orphans.ps1` by its path next to this SKILL.md if the resolver script is unavailable for any reason.
 
 The script protects the current session tree, kills only orphaned `claude`/`node`/`bash` whose parent is dead, and reports live hogs. Behaviour, protection logic, and output format are defined entirely inside `reap-orphans.ps1`.
 

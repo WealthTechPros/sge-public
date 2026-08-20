@@ -41,8 +41,9 @@ Examples:
 
 > **Target repo — cross-repo / control-session invocation.** The worktree below is created
 > relative to the current checkout. From a control/hub session refactoring a *different*
-> repo, resolve + `cd` into that repo first —
-> `cd "$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh resolve owner/repo)" || exit 1` —
+> repo, resolve + `cd` into that repo first — resolve the plugin root via
+> `SGE_ROOT="$(bash ./scripts/resolve-sge-root.sh 2>/dev/null || bash "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-sge-root.sh")" || exit 1`,
+> then `cd "$("$SGE_ROOT/scripts/with-repo-cwd.sh" resolve owner/repo)" || exit 1` —
 > before applying the `worktrees` convention, since the worktree, quality suite, and Phase
 > 6's `gh repo view` all need cwd. See [`gh-repo`](../gh-repo/SKILL.md).
 

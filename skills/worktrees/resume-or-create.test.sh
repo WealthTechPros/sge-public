@@ -94,6 +94,41 @@ IWT="$ROOT/.worktrees/issue-99"
 git -C "$ROOT" worktree add -q "$IWT" fix/issue-99
 check "find-worktree matches in-repo .worktrees layout" "$(tail2 "$(roc_find_worktree 99 "$ROOT")")" "$(tail2 "$IWT")"
 
+# --- Purpose-scoped worktrees (issue #2214): pr-review-<PR> / pr-fix-<PR> /
+# qa-<PR> share the SAME claim-lease machinery as issue-<N>, so a reviewer and
+# a fixer working the same PR number in different purpose lanes never collide,
+# and two agents in the SAME purpose lane (e.g. two reviewers on one PR) are
+# mutex'd exactly like the issue-worktree case above.
+git -C "$ROOT" branch fix/pr812
+RWT="$TMP/repo-worktrees/pr-review-812"
+git -C "$ROOT" worktree add -q "$RWT" fix/pr812
+check "find-worktree(purpose=pr-review) locates pr-review-812" \
+  "$(tail2 "$(roc_find_worktree 812 "$ROOT" pr-review)")" "$(tail2 "$RWT")"
+check "find-worktree(purpose=pr-review) segment-exact vs pr-review-8" \
+  "$(roc_find_worktree 8 "$ROOT" pr-review)" ""
+check "find-worktree(purpose=issue) does NOT match a pr-review worktree" \
+  "$(roc_find_worktree 812 "$ROOT" issue)" ""
+
+out="$(roc_decide 812 "$ROOT" "" pr-review 2>/dev/null)"; rc_pr_resume=$?
+check "pr-review purpose: worktree present -> verdict resume" \
+  "$(echo "$out" | grep '^verdict:')" "verdict:resume"
+check "pr-review purpose: resume exit code 0" "$rc_pr_resume" "0"
+
+# A DIFFERENT purpose lane on the SAME id (pr-fix-812) is independent — no
+# worktree found there yet, so it is a fresh 'create', never blocked by the
+# pr-review lane's claim. This is the fix for incident #1 (#2214): two agents
+# in different purpose lanes on the same PR no longer fight over one worktree.
+out="$(roc_decide 812 "$ROOT" "" pr-fix 2>/dev/null)"
+check "pr-fix purpose on same id is independent of pr-review -> verdict create" \
+  "$(echo "$out" | grep '^verdict:')" "verdict:create"
+
+# Fresh claim by another agent on the pr-review worktree -> backoff, same as issue-N.
+printf 'other-agent %s\n' "$(date +%s)" > "$RWT/.sge-wt-claim"
+out="$(roc_decide 812 "$ROOT" "" pr-review 2>/dev/null)"; rc_pr_backoff=$?
+check "pr-review purpose: held-fresh -> verdict backoff" \
+  "$(echo "$out" | grep '^verdict:')" "verdict:backoff"
+check "pr-review purpose: backoff exit code 10" "$rc_pr_backoff" "10"
+
 echo "----"
 if [ "$fail" -eq 0 ]; then echo "ALL PASS"; else echo "FAILURES"; fi
 exit "$fail"

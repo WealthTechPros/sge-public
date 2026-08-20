@@ -47,7 +47,7 @@ No arguments. The skill reads the local repo to auto-detect the docs workflow.
 > hub/control checkout (e.g. `wtp-org`) to install into a *different* target
 > repo, apply the shared repo-targeting convention —
 > [`gh-repo`](../gh-repo/SKILL.md) — first: resolve + `cd` via the shared
-> helper — `cd "$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh resolve
+> helper — `cd "$(${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/with-repo-cwd.sh resolve
 > owner/repo)" || exit 1` (fail-loud, never falls through to the ambient hub
 > cwd) — before Step 1 runs. This skill writes and pushes, so the `cd` is
 > required — a bare `export GH_REPO` does not steer `mkdir`/`cp`/`git`.

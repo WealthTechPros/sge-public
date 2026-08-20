@@ -36,7 +36,7 @@ pre-filled from the doc so they can correct any misreading.
 > **Target repo — cross-repo / control-session invocation.** The repo-state probes below
 > (`ls`, `git config`, `test -f`) resolve against the current working directory. From a
 > control/hub session seeding a *different* repo, resolve + `cd` first —
-> `cd "$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh resolve owner/repo)" || exit 1`
+> `cd "$(${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/with-repo-cwd.sh resolve owner/repo)" || exit 1`
 > (fail-loud) — this is the concrete form of "run it in the target repo" above for hub
 > dispatch. See [`gh-repo`](../gh-repo/SKILL.md).
 
@@ -194,6 +194,26 @@ test('S1 — <scenario name>', () => {
 });
 ```
 
+**Verify the stub is actually discoverable by the repo's test runner (issue #2312)
+— never just write the file and hope.** A generated stub that sits outside the
+repo's own test-glob (from the Step 1 repo scan, or the repo's `jest.config`/
+`pytest.ini`/equivalent) is invisible to CI: "executable specification" that
+nothing ever executes is exactly the gap #2206/#2220 found. Before presenting the
+draft, confirm the stub's path matches the repo's actual discovery pattern (e.g.
+`**/*.test.ts`, `tests/**/*_test.py`) — if it does not, either relocate it to a
+path the runner covers, or flag the mismatch explicitly in the Review Package
+(Step 9) rather than silently shipping an orphaned file.
+
+**Scenarios describing not-yet-built behaviour are `skip`-marked with a reason,
+never silently included as a stub that could pass or fail depending on the test
+framework's handling of an empty/TODO body.** Use the repo's idiom's skip
+primitive (`test.skip('S2 — <scenario name>', () => { /* not yet built: <reason> */ })`
+in Jest/Vitest, `@pytest.mark.skip(reason="not yet built: <reason>")` in pytest,
+`pending` in RSpec, or the closest equivalent) so the ratio of executed-to-skipped
+scenarios is an honest, publishable coverage figure per spec (per #2220's own ask)
+— a scenario is only ever a bare unskipped stub once real implementation work on
+it has actually started.
+
 **Same honesty rule as the `## Validation` stub:** when the spec's real expected
 values aren't yet known from the interview, generate the stub with an explicit `//
 TODO: fill in the real expected value from <source>` comment rather than inventing one
@@ -252,7 +272,43 @@ each tagged with the stakeholder who should answer it. These are the **QD record
   (`Open`/`Closed`), and — on closure — the decision, who decided, and the date.
 - **Closure:** a QD is closed by recording the decision in the registry **and** updating
   every spec that lists it in `questions[]` (remove the ref, fold the answer into the
-  spec body). `/sge:sge-align` check C8 flags QDs open past threshold.
+  spec body). `/sge:sge-align` check C8 flags QDs open past threshold **and** runs the
+  structural/referential-integrity validator below (issue #2313).
+
+**Format — one `### QD-NN` heading per entry, mechanically parseable.** This is the
+checked convention `skills/sge-align/assets/check-qd-registry.sh` validates against —
+follow it exactly so the seeded registry is auditable from the first commit, not just
+human-readable:
+
+```markdown
+### QD-01
+
+- **Question:** <the precise question>
+- **Stakeholder:** <name/role who answers it>
+- **Raised:** <YYYY-MM-DD>
+- **Status:** Open
+
+### QD-02
+
+- **Question:** <the precise question>
+- **Stakeholder:** <name/role who answers it>
+- **Raised:** <YYYY-MM-DD>
+- **Status:** Closed
+- **Decision:** <the recorded answer>
+- **Decided by:** <name/role>
+- **Decided:** <YYYY-MM-DD>
+```
+
+A `Closed` entry's `Decision`/`Decided by`/`Decided` fields are **immutable** once
+written — the validator treats a changed decision text on a previously-closed QD as a
+silent-revert defect (#2220's "closed QDs whose decision text was silently reverted by
+a merge" finding), not a normal edit. To correct a closed decision, open a **new** QD
+that supersedes it and references the old one by ID — never edit history in place.
+
+Run the validator standalone at any point with
+`skills/sge-align/assets/check-qd-registry.sh` (same pattern as Step 7b's C11 script) —
+useful right after seeding the first entries, to confirm the registry parses cleanly
+before the first `/sge:sge-align` sweep.
 
 Do **not** create any external database without explicit approval.
 
@@ -261,19 +317,27 @@ Do **not** create any external database without explicit approval.
 Propose adding the SGE commit-trailer guardrails so every future commit traces to a spec
 (AI proposes, human disposes — write only after approval):
 
-- `docs/sge/change-protocol.md` — from `${CLAUDE_PLUGIN_ROOT}/skills/sge-init/templates/change-protocol.md`
+- `docs/sge/change-protocol.md` — from `${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/sge-init/templates/change-protocol.md`
   (the 7-step protocol; tailor the wording to the repo).
-- A `commit-msg` hook — from `${CLAUDE_PLUGIN_ROOT}/skills/sge-init/templates/commit-msg`
+- A `commit-msg` hook — from `${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/sge-init/templates/commit-msg`
   (warns when a commit lacks a `Spec:` / `SGE-Override:` trailer; accepts `SPEC-NNN` or
   `SGD-NNN`). The hook is **warn-only by design** — it becomes blocking only when the
-  repo opts into Phase 2 enforcement.
+  repo opts into Phase 2 enforcement (Step 9 proposes a concrete graduation
+  criterion for this — don't leave "Phase 2" undefined).
+- The CI workflow, copied from this framework repo's own
+  `.github/workflows/require-commit-trailer.yml` (no repo-specific content — same
+  copy-in install as any other CI file: copy it into the onboarded repo's
+  `.github/workflows/`). This is the **unbypassable backstop** for the local hook above:
+  the hook is a fast in-session nudge a developer can skip (never ran
+  `core.hooksPath`, or used `--no-verify`); the CI workflow is what actually fails the
+  PR check if any commit lacks the trailer, matching 7c/7d's own copy-in pattern.
 
 **Install mechanism — stack-agnostic by default.** Use plain git, which works identically
 in Java, C#, Python, Go, and Node repos:
 
 ```sh
 mkdir -p .githooks
-cp "${CLAUDE_PLUGIN_ROOT}/skills/sge-init/templates/commit-msg" .githooks/commit-msg
+cp "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/sge-init/templates/commit-msg" .githooks/commit-msg
 chmod +x .githooks/commit-msg
 git config core.hooksPath .githooks
 ```
@@ -293,35 +357,18 @@ warning becomes blocking once the repo opts into Phase 2.
 
 ## Step 7b — Seed the Agent Security (Zero-Trust) dimension baseline
 
-After the change-protocol guardrails are in place, seed the **C11 Agent Security baseline** so the first `/sge:sge-align` run has a starting posture rather than reporting every control as 🔴 with no context.
-
-Propose the following (AI proposes, human disposes — write only after approval):
-
-1. **Initial posture check** — run `/sge:sge-align --dimension agent-security --dry-run` (if the repo is ready) or run the C11 script (`skills/sge-align/assets/check-agent-security.sh` in the plugin) against the current repo state and report the starting score (e.g. `2/5 controls passing at onboarding`).
-
-2. **Governance-posture seed record** — propose adding `docs/sge/agent-security-posture.md` with the initial C11 result, the date, and the audited SHA. This gives the first "before" snapshot so future sweeps can report a delta (`was 2/5 at onboarding, now 4/5`).
-
-   Template (fill in with actual check results — five controls; ZT-6 was dropped as a self-referential vanity control, sge#842):
-
-   ```markdown
-   # Agent Security Posture — <repo>
-
-   Seeded by /sge:sge-init at onboarding. Re-assess with `/sge:sge-align --dimension agent-security`.
-
-   | Date | SHA | Score | ZT-1 | ZT-2 | ZT-3 | ZT-4 | ZT-5 |
-   |------|-----|-------|------|------|------|------|------|
-   | <date> | <sha> | <N>/5 | ✅/🟡/🔴 | ✅/🟡/🔴 | ✅/🟡/🔴 | ✅/🟡/🔴 | ✅/🟡/🔴 |
-   ```
-
-3. **Gap tracking** — for any C11 control that fails (🔴) at onboarding, propose creating a GitHub issue with the relevant dependency reference (see `docs-site/governance/zero-trust-ai-agents.md` roadmap: #279 Least-Agency, #280 send-side controls, #281 prompt injection, #282 AI-BOM, #283 agent identity). This turns the gap into tracked work from day one rather than silent technical debt.
-
-Skip this step and note it in the Review Package if the repo has no CI or is a library with no MCP/agent surface — C11 is N/A for pure libraries and is excluded from the composite score (same exclusion rule as C10 for repos with no UI).
+Full mechanism: [`references/step7b-agent-security-baseline.md`](references/step7b-agent-security-baseline.md).
+After the change-protocol guardrails are in place, seed the **C11 Agent Security
+baseline** (initial posture check, `docs/sge/agent-security-posture.md` seed record,
+gap-tracking issues) so the first `/sge:sge-align` run has a starting posture rather
+than reporting every control as 🔴 with no context. Skip and note it in the Review
+Package if the repo has no CI or is a library with no MCP/agent surface.
 
 ## Step 7c — Scaffold the TDD test-evidence gate (issue #784)
 
 Propose adding the test-evidence gate alongside the change-protocol guardrails (AI proposes, human disposes — write only after approval):
 
-- `.sge/test-map.yml` — from `${CLAUDE_PLUGIN_ROOT}/skills/sge-init/templates/test-map.yml`. Tailor the commented-out `production_paths`/`test_paths` globs to the repo's actual languages and layout before uncommenting them; leave `mode: advisory` — never seed a new repo straight into blocking.
+- `.sge/test-map.yml` — from `${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/sge-init/templates/test-map.yml`. Tailor the commented-out `production_paths`/`test_paths` globs to the repo's actual languages and layout before uncommenting them; leave `mode: advisory` — never seed a new repo straight into blocking (Step 9 proposes a concrete graduation criterion — don't leave "Phase 2" undefined).
 - The CI workflow, copied from this framework repo's own `.github/workflows/require-test-evidence.yml` (it has no repo-specific content — same install mechanism as any other CI file: copy it into the onboarded repo's `.github/workflows/`).
 
 The gate reads `.sge/test-map.yml` for its production/test path classification, or falls back to built-in language-aware defaults if the file is absent or left with no uncommented lists — so it produces *some* signal even before this file is tailored. The in-session companion (`hooks/tdd-guard.sh`, ships with the plugin, no per-repo install needed) reads the same file for its warn-by-default nudge.
@@ -332,12 +379,63 @@ Skip this step and note it in the Review Package if the repo has no CI, or is a 
 
 Only for repos that render **regulated numbers to end users** (client valuations, cohort counts, suitability figures). Propose alongside 7c (AI proposes, human disposes):
 
-- `.sge/regulated-paths.yml` — from `${CLAUDE_PLUGIN_ROOT}/skills/sge-init/templates/regulated-paths.yml`. Tailor the commented-out `regulated_paths` globs to the files that render regulated numbers, and set the `signers:` list to the GitHub handles authorised to sign off. Leave `mode: advisory` — never seed a new repo straight into blocking.
+- `.sge/regulated-paths.yml` — from `${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/sge-init/templates/regulated-paths.yml`. Tailor the commented-out `regulated_paths` globs to the files that render regulated numbers, and set the `signers:` list to the GitHub handles authorised to sign off. Leave `mode: advisory` — never seed a new repo straight into blocking (Step 9 proposes a concrete graduation criterion — don't leave "Phase 2" undefined).
 - The CI workflow, copied from this framework repo's own `.github/workflows/require-regulated-signoff.yml` (no repo-specific content — same copy-in install as any other CI file).
 
 The gate requires a PR touching a `regulated_paths` file to carry a human sign-off, in either form: a **`signed-off` label** on the PR, or a **`Regulated-Sign-Off: @handle; <what you verified, ≥10 chars>`** trailer in the PR body or a commit. When a `signers:` list is declared, the sign-off must be **authenticated** — only the GitHub actor who applied the `signed-off` label may satisfy it (a trailer's `@handle` is free text and cannot self-sign); a repo that wants the lightweight trailer form declares no `signers:`. In advisory mode it warns only; a repo that declares no `regulated_paths` gets a permanently inert check — absence is not a gap.
 
 Skip and note it in the Review Package for repos that render no regulated numbers.
+
+## Step 7e — Propose applying branch protection with a default required-checks list (solo-dev posture)
+
+Branch protection rulesets are typically GitHub-side only — no PR, no diff, no review trail when an admin changes what gates a merge. Seeding gates in Steps 7/7c/7d without ever *requiring* them leaves every one of them opt-in: nothing stops a merge with a failing or absent check. Close that gap here — don't just point at the doc, **propose actually applying it** (AI proposes, human disposes — write only after approval, same pattern as every other artefact in this skill):
+
+- Reference: [`docs/branch-protection-solo-dev.md`](../../docs/branch-protection-solo-dev.md) — a `github.BranchProtection` snippet adapted from `WealthTechPros/wtp-org`'s live `infra/github/__main__.py`, encoding PR-required / `required_approving_review_count=0` / no-force-push / no-delete / linear-history, **plus a default `required_status_checks` list** (`"Require pr-reviewed label"`, `"Require commit trailer"`, `"Require test evidence"` — scoped to whichever of Steps 7/7c the repo actually adopted). Don't leave `required_status_checks` as an unscoped fill-in-the-blank — start from that default list and adjust for the repo's actual adopted gates.
+- If the new repo's team is solo-dev (the common WTP case), propose adopting the Pulumi GitHub-provider pattern rather than configuring protection by hand. This is a solo-dev posture specifically — a multi-reviewer team should raise `required_approving_review_count` above 0 instead of adopting the snippet verbatim.
+- **No Pulumi/infra pipeline available** (repo outside the `wtp-org`-managed fleet): propose the equivalent directly via `gh api repos/<org>/<repo>/branches/main/protection --method PUT` with the same fields (PR required, the default required-checks list above, no force-push, no deletion, linear history) — same content, no infra dependency, so repos outside the Pulumi-managed fleet aren't silently exempted from this step.
+- Skip this step and note it in the Review Package if the repo already has protection-as-code in place, or if the team isn't solo-dev (note in that case that `required_approving_review_count` should be raised instead).
+
+## Step 7f — Propose a recurring drift-check cadence
+
+`sge-init`'s output (Steps 1–7e) is a **governance snapshot at t=0** — Vision, capability model, specs, ADRs, the QD registry, and (where adopted) the Step 7b C11 posture baseline, explicitly seeded "so future sweeps can report a delta." A snapshot with an intended delta but no scheduled re-measurement is a delta of one: nothing in Steps 1–9 proposes *when* that next data point gets produced. `/sge:sge-align` (drift detection) and `/sge:improvement-sweep` (the scheduled hill-climb cadence) both already exist in the plugin — this step just proposes wiring the freshly onboarded repo into them.
+
+Propose one of the following (AI proposes, human disposes — write only after approval), same tier-by-repo-capability judgement as Step 7b:
+
+1. **Preferred, if the repo has CI:** propose adding `.github/workflows/improvement-sweep.yml`, copied from this framework repo's own `.github/workflows/improvement-sweep.yml` (dependency-free Node picker + a guarded climb step that only fires when `ANTHROPIC_API_KEY` is configured — inert-safe without it). Templatize the one repo-specific value it carries: the `--repo <name>` arg passed to `select-gap.mjs` inside the `pick` job. This gives the repo the same weekly (`cron: '0 7 * * 1'`) cadence this framework repo runs on itself, appending a visible delta row every cycle — acted, skipped, or failed, never silent.
+2. **Fallback, if the repo has no CI or isn't ready for the full sweep asset tree:** propose, at minimum, a recorded decision in the Review Package (Step 9): "drift re-check cadence: `<proposed interval>`, owner: `<stakeholder>`" — so the absence of automation is a visible, deliberate choice, not a silent gap.
+
+Skip and note in the Review Package only if the repo is explicitly ideation-stage with no runtime code and no near-term implementation planned (drift has nothing to measure yet) — otherwise always propose at least option 2.
+
+## Step 7f — Seed the review-independence posture declaration (solo-dev repos)
+
+This step is a sibling to Step 7e (branch-protection-as-code) — both address solo-developer
+posture but from different angles. Step 7e handles branch protection (structural gate);
+this step handles **review independence** (who may satisfy the SGE merge gate).
+
+If the repo is solo-dev (same question as Step 7e — do not ask twice; carry the answer
+forward), propose writing `.sge/posture.yaml` from the template at
+`${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/sge-init/templates/posture.yaml` (AI proposes, human
+disposes — write only after approval):
+
+- `profile: solo` — declares this is a single-primary-author repo.
+- `review_independence: declared-exception` — the repo explicitly opts into a declared,
+  PR-reviewable exception in place of the legacy opaque `SGE_GOVERNANCE_PROFILE=solo`
+  repo-variable bypass (sge#2219).
+- `reviewer_identity: <github-login>` — record the intended name of the dedicated
+  non-committing reviewer identity here.  **Do not attempt to create or provision that
+  identity in this step** — provisioning is handled separately (S2 of sge#2219,
+  docs/reviewer-identity-provisioning.md once that doc exists).  The field value is a
+  placeholder until the identity is provisioned and its login is known.
+
+**Constraint — reviewer must not commit.** The identity named in `reviewer_identity` must
+never push commits to branches it reviews.  An identity that commits enters the
+independence gate's exclusion set and invalidates its own verdicts — making the gate
+structurally unsatisfiable (the exact failure mode sge#2219 fixes).  Note this constraint
+clearly in any onboarding notes for the repo.
+
+**When to skip:** if the repo already has `.sge/posture.yaml`, skip and note it in the
+Review Package.  If the repo is team-dev (multiple independent committers), skip — the
+standard independence gate applies without a posture declaration.
 
 ## Step 8 — Record the artefact map in CLAUDE.md
 
@@ -380,9 +478,31 @@ Output a single summary the human can read in under five minutes:
 - ADR title (+ vision element protected)
 - Open-questions count (QD refs)
 - Agent Security baseline: starting C11 score (N/5 controls passing) and any gap issues proposed
+- Drift-check cadence proposed (Step 7f): scheduled `improvement-sweep.yml` cron adopted, or the recorded interval + owner fallback
 - Cross-repo touches (flag anything reaching another repo — follow the cross-repo change protocol)
 - **What you guessed vs. what came straight from the interview**
 - The top 2 risks or assumptions the human should challenge first
+- **Advisory-gate graduation criteria** — every gate seeded in Steps 7/7c/7d is
+  deliberately `mode: advisory` at t=0 (never seed a repo straight into
+  blocking). List each seeded gate alongside a proposed graduation trigger —
+  the criterion under which it moves advisory → blocking — so the decision is
+  visible now rather than forgotten once the seed commit lands. Default
+  proposal, adjust per repo:
+
+  | Gate | Mode | Proposed graduation criterion |
+  |------|------|-------------------------------|
+  | `.githooks/commit-msg` + `require-commit-trailer.yml` (Step 7) | advisory (warn-only hook; CI backstop enforces the trailer regex but not blocking merge on it) | 2 weeks of green advisory runs with no missing-trailer PR merged |
+  | `.sge/test-map.yml` + `require-test-evidence.yml` (Step 7c, if adopted) | advisory | 2 weeks of green advisory runs, or a stated coverage/compliance threshold the team picks |
+  | `.sge/regulated-paths.yml` + `require-regulated-signoff.yml` (Step 7d, if adopted) | advisory | first regulated release candidate, or 2 weeks of green advisory runs, whichever comes first |
+
+  For each seeded gate, propose recording the graduation decision as a **QD
+  record** in `docs/sge/questions.md` (see Step 6) — e.g. "QD-01: when does
+  `require-test-evidence.yml` graduate advisory → blocking?" with the
+  proposed criterion as its initial (open) answer — so it surfaces in
+  `/sge:sge-align`'s existing C8 QD-staleness check (flags QDs open past
+  threshold) instead of living only in a workflow YAML comment nobody
+  re-reads. This reuses machinery the framework already has rather than
+  inventing new plumbing.
 
 ---
 

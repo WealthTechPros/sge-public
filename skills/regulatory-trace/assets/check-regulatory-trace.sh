@@ -20,8 +20,10 @@
 #   is absent (#720):
 #     1. the audited repo's own copy (the sge repo itself, or a repo that vendors one)
 #     2. $CLAUDE_PLUGIN_ROOT, when the harness exports it
-#     3. the catalogue bundled beside this script (the installed-plugin copy — works
-#        even when CLAUDE_PLUGIN_ROOT is not exported to the shell environment)
+#     3. scripts/resolve-sge-root.sh (searches known plugin install roots — the
+#        bootstrap fix for a session where CLAUDE_PLUGIN_ROOT is unset)
+#     4. the catalogue bundled beside this script (the installed-plugin copy — works
+#        even when neither of the above resolves)
 #   A missing or unparsable catalogue is a HIGH `convention-unknown` finding and
 #   status=fail — RT-2/RT-3 must never silently skip and produce a false PASS.
 set -euo pipefail
@@ -37,6 +39,10 @@ elif [ -f "${ROOT}/skills/regulatory-trace/assets/obligations-catalogue.yaml" ];
   CATALOGUE="${ROOT}/skills/regulatory-trace/assets/obligations-catalogue.yaml"
 elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/skills/regulatory-trace/assets/obligations-catalogue.yaml" ]; then
   CATALOGUE="${CLAUDE_PLUGIN_ROOT}/skills/regulatory-trace/assets/obligations-catalogue.yaml"
+elif _resolved_root="$(bash "${SCRIPT_DIR}/../../../scripts/resolve-sge-root.sh" 2>/dev/null)" \
+  && [ -n "$_resolved_root" ] \
+  && [ -f "${_resolved_root}/skills/regulatory-trace/assets/obligations-catalogue.yaml" ]; then
+  CATALOGUE="${_resolved_root}/skills/regulatory-trace/assets/obligations-catalogue.yaml"
 else
   # The catalogue ships beside this script in both the sge repo and the installed
   # plugin, so sibling resolution works with no environment cooperation at all.

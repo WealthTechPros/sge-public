@@ -25,8 +25,14 @@ backend-aware write seam — never `gh issue create` directly, or a Jira-tracked
 repo's children silently never reach its tracker. `create` is P6, so it needs the
 explicit DP3 opt-in; `$IW` supplies the write flag but never the create scope.
 
+> **`$SGE_ROOT` convention.** The snippet below assumes `$SGE_ROOT` is already
+> resolved in the current shell via the copy-verbatim `_sge_root()` bootstrap
+> function (`scripts/resolve-sge-root.sh`'s header comment) — never a bare
+> `${CLAUDE_PLUGIN_ROOT:-.}` (#1567/#1963). Do not copy this snippet
+> standalone without first resolving `$SGE_ROOT`.
+
 ```bash
-IW="${CLAUDE_PLUGIN_ROOT:-.}/scripts/issue-write.sh"
+IW="$SGE_ROOT/scripts/issue-write.sh"
 
 ENABLER=$(JIRA_ADAPTER_ALLOW_CREATE=1 "$IW" create \
   "SPEC-NNN-E1: Enabler — Migration + Types + Service Shell" \

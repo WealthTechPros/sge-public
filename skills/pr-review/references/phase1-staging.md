@@ -15,7 +15,7 @@ a stage; calls that gate the dispatch, or that read/write the PR body, are order
 | `gh issue view` (linked) | `issues/N` | READ | independent |
 | `gh api .../pulls/$PR/comments` | PR comments | READ | independent |
 | `rl_bot_signal` | `pulls/$PR/reviews` + `/comments` | READ | independent; produces `BOT_FINDINGS` (feeds `rl_diff_risk`) |
-| `rl_ensure_closing_link` | `pulls/$PR` `.body` → `gh pr edit --body` | **conditional WRITE (body)** | must run AFTER every body reader — no read-after-write race |
+| `rl_ensure_closing_link` | `pulls/$PR` `.body` + `issues/$N` `.labels` → `gh pr edit --body` | **conditional WRITE (body)** | must run AFTER every body reader — no read-after-write race; skips on existing keyword, `Part of #N`, or a `tracking`/`epic` issue (#2241) |
 | `rl_diff_risk` | `pulls/$PR`, files, security globs | READ | needs `BOT_FINDINGS`; body-insensitive |
 | `rl_diff_trivial` | `pulls/$PR`, diff, checks, local git | READ | body-insensitive |
 
@@ -25,7 +25,8 @@ These read immutable-in-Phase-1 fields and gate whether any further call is made
 here spends nothing downstream:
 
 ```bash
-source "${CLAUDE_PLUGIN_ROOT}/skills/pr-review/review-lib.sh"   # rl_* helpers
+SGE_ROOT="$(bash ./scripts/resolve-sge-root.sh 2>/dev/null || bash "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-sge-root.sh")" || exit 1
+source "$SGE_ROOT/skills/pr-review/review-lib.sh"   # rl_* helpers
 REPO="${GH_REPO:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"; export GH_REPO="$REPO"
 PR="${1:-$(gh pr view --json number --jq .number 2>/dev/null)}"   # orchestrators pass it positionally
 [ -n "$PR" ] || { echo "NO_PR — pass a PR number"; exit 1; }
@@ -67,9 +68,15 @@ wait
 body readers `rl_phase5_verdict` and the comments/issue fetch) have finished, so no read-after-write
 race can hand a stale body to the pass-through gate or the verdict.
 
-If this PR *implements* an issue, its body must auto-close it: `rl_ensure_closing_link "$PR"
-<issue-number>` appends `Fixes #N` unless a closing keyword is present. **Same-repo only** —
-cross-repo issues (`owner/repo#N`) don't auto-close; note those for manual closure.
+If this PR *fully* implements an issue, its body should auto-close it: `rl_ensure_closing_link "$PR"
+<issue-number>` appends `Fixes #N` unless (a) a closing keyword for `#N` is already present, (b) a
+deliberate non-closing reference is present (`Part of #N`, `Refs #N`, `Relates to #N`), or (c) `#N`
+is labelled `tracking`/`epic` — override via `SGE_TRACKING_LABELS`. Cases (b) and (c) are issue
+#2241: this is the **last** write to the body, so appending a closing keyword over a slice PR's
+`Part of #N` re-creates the incident where one slice auto-closed a five-AC umbrella. It fails toward
+**not** appending — an unreadable label set skips the append and warns, because a manual close is
+cheap and a wrongly-closed umbrella is not. **Same-repo only** — cross-repo issues (`owner/repo#N`)
+don't auto-close; note those for manual closure.
 
 ## Stage 3 — diff-risk reads (parallel; after Stage 1's bot signal)
 

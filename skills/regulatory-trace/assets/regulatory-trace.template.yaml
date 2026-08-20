@@ -15,9 +15,10 @@ owner: ""                         # accountable individual for the evidence pack
 # is documentation for humans — no tool parses it (YAML does not expand env vars).
 # check-regulatory-trace.sh resolves the catalogue itself: an explicit $1 override
 # first, else a repo-local skills/regulatory-trace/assets/obligations-catalogue.yaml
-# (only if the repo vendors its own copy), else $CLAUDE_PLUGIN_ROOT, else the copy
-# bundled beside the script inside the installed plugin.
-catalogue: ${CLAUDE_PLUGIN_ROOT}/skills/regulatory-trace/assets/obligations-catalogue.yaml
+# (only if the repo vendors its own copy), else $CLAUDE_PLUGIN_ROOT, else a
+# scripts/resolve-sge-root.sh lookup, else the copy bundled beside the script
+# inside the installed plugin.
+catalogue: skills/regulatory-trace/assets/obligations-catalogue.yaml   # under the resolved plugin root
 
 # Capability-level regulatory posture — mirror of the capability-model extension.
 # Lets you flag a whole capability `regulated` and attach controls that aren't

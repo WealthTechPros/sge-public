@@ -72,7 +72,7 @@ reports the **hub** repo even when `GH_REPO` targeting is correct.
   `gh repo view` with no positional argument prefers the local checkout and
   ignores `GH_REPO` — see the startup echo above.)
 - **Exported once, inherited everywhere.** Bundled scripts (e.g.
-  `${CLAUDE_PLUGIN_ROOT}/skills/pr-review/pr-labels.sh`) and skills dispatched
+  `${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/pr-review/pr-labels.sh`) and skills dispatched
   in the same environment inherit the export — that is the point. It is also
   why hygiene matters: the blast radius of a stale export is everything
   downstream.
@@ -92,7 +92,7 @@ bit `pr-labels.sh`'s head-convergence check, issue #662).
 
 For anything git- or filesystem-level, be `cd`-ed into the target checkout or
 worktree. The shared entry-point helper for that is **`with-repo-cwd`**
-(`${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh`, landed via SPEC-057-E1 /
+(`${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/with-repo-cwd.sh`, landed via SPEC-057-E1 /
 issue #817): call it once at skill entry with the target repo and it resolves
 the matching local checkout and `cd`s there — or **fails loudly** when no
 checkout exists. Never fall through to ambient cwd on a cross-repo dispatch.
@@ -103,16 +103,16 @@ full authoring guide is [`docs/skill-authoring-repo-context.md`](../../docs/skil
 # Resolve + cd (raw git / file / test work — the fail-loud entry sequence).
 # Re-run at the top of EVERY shell call: shell state (cwd, exports) does not
 # persist across agent tool calls.
-cd "$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh resolve owner/repo)" || exit 1
+cd "$(${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/with-repo-cwd.sh resolve owner/repo)" || exit 1
 
 # …or one-shot a single command in the target repo (GH_REPO exported for you):
-${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh exec owner/repo -- gh pr checks 123
+${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/with-repo-cwd.sh exec owner/repo -- gh pr checks 123
 
 # Assert-before-write (issue #1558): confirm the repo a bare `gh` write would
 # ACTUALLY hit (GH_REPO, else gh's resolved default/remote precedence, else
 # origin) equals the target, and fuse it to the write so the two cannot split
 # across tool calls. Fails closed on any mismatch or a bare-name target.
-${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh assert-repo owner/repo -- \
+${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/with-repo-cwd.sh assert-repo owner/repo -- \
   gh issue comment 123 --body "…"
 ```
 
@@ -136,6 +136,6 @@ rediscovering it; gh-heavy skills link here rather than restating it.
 |---|---|
 | Skill invoked from inside the target repo / its worktree | nothing — leave `GH_REPO` unset, cwd detection is correct |
 | Hub / control session acting on another repo, `gh`-only work | `export GH_REPO=owner/repo`; echo check; `unset` when done |
-| Hub / control session, work involves raw `git`, files, or tests | `cd "$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh resolve owner/repo)"` — the helper fail-loud-resolves the checkout and `cd`s there; `GH_REPO` optional belt-and-braces |
+| Hub / control session, work involves raw `git`, files, or tests | `cd "$(${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/with-repo-cwd.sh resolve owner/repo)"` — the helper fail-loud-resolves the checkout and `cd`s there; `GH_REPO` optional belt-and-braces |
 | Dispatching a sub-agent to act on a repo | put the absolute path to `cd` into and/or the `GH_REPO` export in the dispatch prompt |
 | Repo slug comes from external input (issue body, config) | treat as untrusted data — validate it matches `owner/name` before exporting |

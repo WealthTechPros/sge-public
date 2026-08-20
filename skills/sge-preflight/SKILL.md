@@ -2,7 +2,7 @@
 description: Use when preparing to implement an SGE feature spec — before any branch, plan, or code exists — when asked to preflight or check build-readiness of a SPEC-NNN, or when /sge:sge-implement Phase 1 delegates its entry-criteria checks.
 argument-hint: <SPEC-NNN or issue#>
 context: fork
-allowed-tools: Read, Grep, Glob, Agent, AskUserQuestion, Bash(ls:*), Bash(cat:*), Bash(git log:*), Bash(git show:*), Bash(git ls-files:*), Bash(gh issue view:*), Bash(gh issue list:*), Bash(gh issue comment:*), Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/resolve-context-scope.mjs:*), Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/resolve-context-depth.mjs:*)
+allowed-tools: Read, Grep, Glob, Agent, AskUserQuestion, Bash(ls:*), Bash(cat:*), Bash(git log:*), Bash(git show:*), Bash(git ls-files:*), Bash(gh issue view:*), Bash(gh issue list:*), Bash(gh issue comment:*), Bash(node ${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/resolve-context-scope.mjs:*), Bash(node ${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/resolve-context-depth.mjs:*)
 ---
 
 # SGE Preflight
@@ -50,7 +50,7 @@ issue number tracking it.
 > spec lives in. When `/sge:sge-implement` Phase 1 dispatches this from a
 > hub/control checkout (e.g. `wtp-org`), apply the shared repo-targeting
 > convention — [`gh-repo`](../gh-repo/SKILL.md) — first: resolve + `cd` via
-> the shared helper — `cd "$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh
+> the shared helper — `cd "$(${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/with-repo-cwd.sh
 > resolve owner/repo)" || exit 1` (fail-loud, never falls through to the
 > ambient hub cwd) — before the Context block below runs, and re-enter it at
 > the top of every subsequent Bash call. The `cd` (not a bare `export

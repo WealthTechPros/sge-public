@@ -53,7 +53,7 @@ Two modes — **both always run Phases 0–2 (sync, inventory, safety audit)**:
 > tidy a *different* repo with no directory argument given, apply the shared
 > repo-targeting convention — [`gh-repo`](../gh-repo/SKILL.md) — first:
 > resolve + `cd` via the shared helper — `cd
-> "$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh resolve owner/repo)" ||
+> "$(${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/with-repo-cwd.sh resolve owner/repo)" ||
 > exit 1` (fail-loud, never falls through to the ambient hub cwd) — before
 > Phase 0's `git fetch --prune` runs, and re-enter it at the top of every
 > subsequent Bash call. This is a raw-`git`-heavy, destructive skill: the `cd`
@@ -115,7 +115,7 @@ Classify **each worktree and each branch**. Record the **tip SHA for every row**
 **Live ownership claim — `.sge-wt-claim` (issue #1759).** The shared [`resume-or-create.sh`](../worktrees/resume-or-create.sh) helper writes a `.sge-wt-claim` file (containing `<agent-id> <epoch-seconds>`) when a worker leases a worktree. The sweep reads it using the same `roc_claim_state` predicate:
 
 ```bash
-source "${CLAUDE_PLUGIN_ROOT}/skills/worktrees/resume-or-create.sh"
+source "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/worktrees/resume-or-create.sh"
 claim=$(roc_claim_state "$wt")
 # claim = "free" | "mine" | "held-fresh"
 ```
@@ -184,7 +184,7 @@ The shared guard answers the question mechanically, without mutating the worktre
 
 ```bash
 git -C "<worktree-path>" fetch origin main
-bash "${CLAUDE_PLUGIN_ROOT}/skills/worktrees/rescue-guard.sh" supersession "<worktree-path>" origin/main
+bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/worktrees/rescue-guard.sh" supersession "<worktree-path>" origin/main
 # base:origin/main   surviving_commits:<N|unknown>   touched_files:<N|unknown>   files_diff:empty|nonempty|unknown
 # exit 0  -> verdict:live       -> the branch has net work not in main; proceed to the rescued-worktree guard below
 # exit 30 -> verdict:superseded -> do NOT push a rescue PR; recommend Discard (option 4) — record the tip SHA first
@@ -208,7 +208,7 @@ A worktree rescued from stale WIP (or resumed from an abandoned session) has two
 Run the shared guard against the rescued worktree — it answers both questions mechanically (see [`../worktrees/rescue-guard.sh`](../worktrees/rescue-guard.sh)):
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/skills/worktrees/rescue-guard.sh" assess "<worktree-path>" origin/main
+bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/worktrees/rescue-guard.sh" assess "<worktree-path>" origin/main
 # behind_base:<N|unknown>   shared_node_modules:yes|no   verdict:<...>
 # exit 0  -> up-to-date, not shared: safe to push, verification claims trustworthy
 # exit 10 -> action required (see verdict); exit 3 -> not a git worktree
@@ -226,7 +226,7 @@ Re-run the guard until it returns `up-to-date` (exit 0). Only then push and open
 `assess` proves the tree is *trustworthy to verify* (rebased, not junctioned); it does **not** prove the rescued code compiles/formats/tests. A rescue that clears `assess` can still open a PR with red CI when the branch was committed without an install (real incident: client-onboarding #2399 — a rescued worktree opened with 6 red checks: type errors, unformatted files, a genuine logic bug). So once `assess` is clean, run `verify` to decide **ready vs draft**:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/skills/worktrees/rescue-guard.sh" verify "<worktree-path>" "<worktree-path>/CLAUDE.md"
+bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/worktrees/rescue-guard.sh" verify "<worktree-path>" "<worktree-path>/CLAUDE.md"
 # install:pass|fail|skip  typecheck:…  format:…  test:…   verify:pass | verify:fail:<stage>
 # exit 0  -> verify:pass         -> the rescue may open a READY PR
 # exit 20 -> verify:fail:<stage> -> open a DRAFT PR with a "CI-unverified (<stage>)" note, never ready

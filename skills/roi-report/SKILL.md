@@ -38,8 +38,9 @@ Flags:
 
 > **Target repo — cross-repo / control-session invocation.** Step 1's JSONL read and Step
 > 2's `gh pr list` both resolve against the current working directory / ambient repo. From
-> a control session reporting on a *different* repo, resolve + `cd` first —
-> `cd "$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh resolve owner/repo)" || exit 1` —
+> a control session reporting on a *different* repo, resolve + `cd` first — resolve the
+> plugin root via `SGE_ROOT="$(bash ./scripts/resolve-sge-root.sh 2>/dev/null || bash "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-sge-root.sh")" || exit 1`,
+> then `cd "$("$SGE_ROOT/scripts/with-repo-cwd.sh" resolve owner/repo)" || exit 1` —
 > since `${REPO_ROOT}/memory/token-usage.jsonl` is a raw file read that `GH_REPO` alone
 > would not cover. See [`gh-repo`](../gh-repo/SKILL.md).
 
@@ -82,7 +83,7 @@ Build `PRCostEntry` for each matched PR: attribute the spec's token totals to th
 Feed the parsed `SpecCostSummary` objects (Step 1) and the `PRCostEntry` list (Step 2) to the bundled aggregator via stdin (see its header comment for the full input/output contract):
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/roi-report/compute-roi.mjs" <<EOF
+node "$SGE_ROOT/skills/roi-report/compute-roi.mjs" <<EOF
 {
   "summaries": ${SUMMARIES_JSON},
   "prStats": { "qualityWeight": 1.0, "byPR": ${BY_PR_JSON} }

@@ -51,7 +51,7 @@
 # recommends delete-not-PR instead of pushing a rescue PR.
 #
 # Usage — SOURCE it for the individual predicates, or invoke a subcommand:
-#   source "${CLAUDE_PLUGIN_ROOT}/skills/worktrees/rescue-guard.sh"
+#   source "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/worktrees/rescue-guard.sh"
 #   rg_behind_base <worktree> [base-ref]        # integer; -1 = base unresolvable
 #   rg_shared_node_modules <worktree>           # yes | no
 #   rg_assess <worktree> [base-ref]             # prints the verdict block

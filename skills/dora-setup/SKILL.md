@@ -74,7 +74,7 @@ cd status
 > **Target repo — cross-repo / control-session invocation.** Every step from here on shells
 > raw `git`/`gh` against the `<org>/status` checkout created above — but shell state (cwd)
 > does not persist between calls. Re-enter it at the top of every subsequent step via
-> `cd "$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh resolve <org>/status)" || exit 1`
+> `cd "$(${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/with-repo-cwd.sh resolve <org>/status)" || exit 1`
 > (fail-loud, never falls through to the ambient hub cwd) rather than assuming Step 1's
 > `cd status` is still in effect. Steps that only call `gh` with an explicit
 > `--repo <org>/status` (`gh secret set`, `gh issue close`) don't need this — only steps

@@ -9,7 +9,7 @@ Detect the host at pre-flight and branch accordingly — **once per run**, at th
 top of Pre-Flight, before any `gh` or adapter call.
 
 ```bash
-HOST_KIND=$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh host 2>/dev/null || echo unknown)
+HOST_KIND=$(${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/with-repo-cwd.sh host 2>/dev/null || echo unknown)
 echo "[Pre-flight] host-kind: $HOST_KIND"
 ```
 
@@ -22,7 +22,7 @@ echo "[Pre-flight] host-kind: $HOST_KIND"
 ### Forgejo call-site substitution table
 
 For a `forgejo` repo all issue / PR / label operations route through
-`${CLAUDE_PLUGIN_ROOT}/scripts/forgejo-adapter.sh` (the single seam — never
+`${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/forgejo-adapter.sh` (the single seam — never
 scatter raw curl calls into skill bodies). `$ORIGIN` is the target repo's
 `git remote get-url origin`.
 
@@ -45,10 +45,10 @@ extend the standard Lean Agent Contract prompt with:
 > ORIGIN=$(git remote get-url origin)
 > After the first commit, open the draft PR via the adapter:
 >   FORGEJO_ADAPTER_ALLOW_WRITE=1 \
->     ${CLAUDE_PLUGIN_ROOT}/scripts/forgejo-adapter.sh create-pull \
+>     ${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/forgejo-adapter.sh create-pull \
 >     "$ORIGIN" "$(git rev-parse --abbrev-ref HEAD)" main \
 >     "<title>" --draft <<'BODY'
->   Fixes owner/repo#<N>
+>   Part of owner/repo#<N>
 >   BODY
 > (Never use `gh pr create` — `gh` cannot see the Forgejo remote.)
 > ```

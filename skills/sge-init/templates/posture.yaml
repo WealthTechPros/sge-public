@@ -1,0 +1,50 @@
+# .sge/posture.yaml — per-repo review-independence posture declaration.
+# Scaffolded by /sge:sge-init for solo-developer repos — tailor the
+# reviewer_identity field before relying on it; provisioning the identity
+# itself is a separate step (see docs/reviewer-identity-provisioning.md).
+#
+# When profile: solo and review_independence: declared-exception are set,
+# the SGE independence gate (.github/scripts/check-review-independence.sh)
+# accepts a verdict: pass sge-verdict block posted by the identity named in
+# reviewer_identity — subject to ALL existing integrity checks that apply to
+# any reviewer (SHA-binding to PR_HEAD_SHA, non-DISMISSED, unambiguous
+# single fence, etc.).  The declared identity is explicitly exempted from
+# the exclusion-set check that would otherwise exclude any identity that
+# also committed on the branch.
+#
+# This is a versioned, PR-reviewable replacement for the opaque
+# SGE_GOVERNANCE_PROFILE=solo / SGD_GOVERNANCE_PROFILE=solo repo-variable
+# bypass — "declared, not silent" (sge#2219).  The old bypass is removed
+# (or left as a legacy fallback) once S1 of sge#2219 lands.
+#
+# Schema
+# ------
+# profile            (required) solo | team
+#                    solo  — one primary author; review independence is
+#                            declared rather than structural.
+#                    team  — normal multi-reviewer setup; omit or leave
+#                            this file absent for the default gate behaviour.
+#
+# review_independence (required when profile: solo)
+#                    declared-exception — the repo deliberately exempts the
+#                    named reviewer_identity from the structural independence
+#                    requirement.  Any other string is reserved for future
+#                    posture variants.
+#
+# reviewer_identity  (required when profile: solo)
+#                    The GitHub login of the dedicated non-committing reviewer
+#                    identity.  This identity MUST NOT commit on any branch it
+#                    reviews — committing enters it into the exclusion set and
+#                    invalidates its own verdicts (sge#2288).
+#
+# Format: plain YAML — parsed by check-review-independence.sh using
+# dependency-free awk/grep (no yq or python required).  Keep to scalar
+# values only; no nested mappings or flow sequences.
+#
+# AI proposes, human disposes — /sge:sge-init proposes this draft; a human
+# reviews and writes it only after confirming the reviewer identity is
+# provisioned and meets the non-committing constraint.
+
+# profile: solo
+# review_independence: declared-exception
+# reviewer_identity: <github-login-of-dedicated-reviewer-bot>

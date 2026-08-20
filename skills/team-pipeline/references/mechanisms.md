@@ -2,7 +2,7 @@
 
 The exact bash for each phase's steps. Core SKILL.md states WHAT each step must
 do and its stop/abort conditions; this file holds the concrete commands. Run
-the block for the phase you are in. All `${CLAUDE_PLUGIN_ROOT}` paths are
+the block for the phase you are in. All `${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}` paths are
 substituted at skill-load time.
 
 ---
@@ -75,7 +75,7 @@ git fetch origin main --quiet    # git cherry needs a current origin/main
 # reconcile. WORKTREE_BASE/SIBLING_BASE drive discovery; BASE defaults to
 # origin/main. Exit 2 = harness error (not in a repo / missing base ref).
 report=$(BASE=origin/main WORKTREE_BASE="$WORKTREE_BASE" SIBLING_BASE="$SIBLING_BASE" \
-  bash "${CLAUDE_PLUGIN_ROOT}/skills/team-pipeline/assets/reconcile-flush.sh")
+  bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/team-pipeline/assets/reconcile-flush.sh")
 
 # Push + draft-PR the decision:"flush" candidates only; report the rest as
 # /sge:tidy-worktrees hand-off candidates. (node is used to read the JSON — it
@@ -95,8 +95,11 @@ printf '%s' "$report" \
       [ -n "$existing" ] && continue
       [ -z "$issue" ] && continue
       commit_msg=$(git -C "$path" log -1 --format="%s" 2>/dev/null)
+      # `Part of`, never `Fixes` (#2241): this flush opens PRs for stranded
+      # branches with NO knowledge of whether the work is complete, so it must
+      # never emit a keyword that auto-closes the issue on merge.
       gh pr create --head "$branch" --base main --draft \
-        --title "$commit_msg" --body "Fixes #${issue}" 2>/dev/null \
+        --title "$commit_msg" --body "Part of #${issue}" 2>/dev/null \
         && echo "[Flush] PR created for #$issue"
     done
 ```
@@ -398,6 +401,23 @@ or generic name — e.g. reusing an earlier lane's name for unrelated later
 dispatches — makes `activeAgents` lie about who owns what, which is
 precisely what lets a fresh dispatch miss a real in-flight collision. One
 task ↔ one uniquely-named live agent, always.
+
+### Lane manifest (issue #2214, ask 3)
+
+As soon as the draft PR opens (Step 3's first commit), the implementer posts
+an advisory lane-manifest claim so a reviewer that lands on this PR
+mid-implementation can see it and defer rather than review a moving target:
+
+```bash
+source "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/pr-review/review-lib.sh"
+rl_post_lane_manifest "$PR" implement
+```
+
+Fire-and-forget, best-effort — it never blocks the implementer if the post
+fails. Refresh it once more before the final push if the lane runs long
+(more than half the manifest TTL, default 900s); the claim self-expires, so a
+crashed lane never strands a false "still active" signal for a reviewer that
+lands after it died.
 
 ---
 

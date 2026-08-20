@@ -126,9 +126,9 @@ races the condition. Use one of:
    dispatched subagent to background a `--watch` (see #1681 above).
 
    The examples above assume the caller already resolved repo context (`cd` into the
-   target checkout via `${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh resolve owner/repo`,
-   or `export GH_REPO=owner/repo` for a gh-only wait) per [`gh-repo`](../gh-repo/SKILL.md) —
-   a loop is not the place to re-derive it.
+   target checkout via `"$SGE_ROOT/scripts/with-repo-cwd.sh" resolve owner/repo` —
+   `$SGE_ROOT` from `scripts/resolve-sge-root.sh` — or `export GH_REPO=owner/repo` for a
+   gh-only wait) per [`gh-repo`](../gh-repo/SKILL.md) — a loop is not the place to re-derive it.
 
 3. **The `Monitor` tool with an until-condition** for everything else — a health
    endpoint, a load threshold, a file appearing. Monitor evaluates the condition

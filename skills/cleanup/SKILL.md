@@ -35,10 +35,10 @@ Designed to be looped: `/loop 30m /sge:cleanup`
 The reset is a **bundled script** — [`cleanup.ps1`](cleanup.ps1), beside this file. Do not re-inline, re-read, or rewrite its body — run it directly and pass any flags the user provided:
 
 ```pwsh
-pwsh -File "${CLAUDE_PLUGIN_ROOT}/skills/cleanup/cleanup.ps1" [-DryRun] [-NoWSL]
+pwsh -File "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/cleanup/cleanup.ps1" [-DryRun] [-NoWSL]
 ```
 
-Use `powershell` in place of `pwsh` if PowerShell 7 is not installed. When running from a repo checkout rather than an installed plugin (so `${CLAUDE_PLUGIN_ROOT}` is unset), invoke `cleanup.ps1` by its path next to this SKILL.md instead.
+Use `powershell` in place of `pwsh` if PowerShell 7 is not installed. When running from a repo checkout rather than an installed plugin (so `CLAUDE_PLUGIN_ROOT` is unset), invoke `cleanup.ps1` by its path next to this SKILL.md instead.
 
 The browser-kill step inside `cleanup.ps1` enumerates candidates via `Get-CimInstance Win32_Process` (whose `.Name` includes the `.exe` suffix, unlike `Get-Process.Name`) and gates every kill on `ExecutablePath -match 'ms-playwright'` **or** `CommandLine -match '--headless|playwright'` — never on `--remote-debugging-port` alone, since a live user browser with DevTools open or a `claude-in-chrome` MCP session can carry that flag too and must stay untouchable by construction. Those preview/kill lines go via `Write-Host` (console only), so the `$n1 = Kill-HeadlessBrowsers ...` assignment captures only the integer count. The exact matching, kill, WSL, and summary behaviour is defined entirely inside `cleanup.ps1`.
 
