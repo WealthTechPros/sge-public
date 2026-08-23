@@ -154,6 +154,35 @@
 #                                             GraphQL read — a separate quota
 #                                             bucket — on a REST failure; see
 #                                             label_status below)
+#   pr-labels.sh reconcile-orphaned-claim <pr>
+#                                             watchdog/cron entry point (issue #2401):
+#                                             detect and force-release a PR stuck holding
+#                                             pr-reviewing whose worker died after Phase 6
+#                                             posted its sge-verdict but before Phase 7/8
+#                                             finished the label state machine. No-op
+#                                             (prints "no orphaned claim") unless ALL hold:
+#                                             pr-reviewing present, an sge-verdict (review
+#                                             OR issue comment) posted at/after the claim's
+#                                             claimedAt, the posted-claim TTL
+#                                             (SGE_REVIEW_POSTED_CLAIM_TTL_MIN, default 20m)
+#                                             has elapsed, AND no fresh owner-matched
+#                                             heartbeat is found within CLAIM_HEARTBEAT_WINDOW
+#                                             (issue #2409) — a live heartbeat always
+#                                             suppresses release, proving the worker is still
+#                                             genuinely in flight (e.g. inside Phase 7's
+#                                             CI-wait) rather than dead. On match: release pr-reviewing,
+#                                             apply changes-requested (the safe default —
+#                                             a dangling claim is NEVER auto-promoted to
+#                                             pr-reviewed even though a verdict exists,
+#                                             since the six verify-against-head checks in
+#                                             Phase 5 never ran to completion) and post a
+#                                             status comment naming what happened. Distinct
+#                                             from `start-review --force-claim`, which only
+#                                             ever fires as a SIDE EFFECT of a NEW review
+#                                             wanting the claim — this subcommand runs
+#                                             standalone with no new review dispatched, so
+#                                             a sweep can heal the fleet without burning a
+#                                             fresh specialist fan-out on every stuck PR.
 # END_USAGE
 #
 # Defensive by design:
@@ -247,6 +276,30 @@ CLAIM_HEARTBEAT_WINDOW="${SGE_REVIEW_HEARTBEAT_WINDOW:-900}"
 # (or malicious) claimant with comment access could hold the merge-gate mutex
 # forever. 4h comfortably covers the 30-50 min reviews this was built for.
 CLAIM_MAX_LIFETIME="${SGE_REVIEW_CLAIM_MAX_LIFETIME:-14400}"
+
+# Shorter TTL for a claim that already carries a posted verdict (issue #2401):
+# a normal in-flight review (no verdict yet) gets the full SGE_REVIEW_CLAIM_TTL_MIN
+# (default 30m) benefit of the doubt. A claim where Phase 6 already posted an
+# sge-verdict — the review's own opinion is on record — but the label never
+# transitioned via `pass`/`fail`/`held` is a MUCH stronger stall signal: the
+# worker died between "review posted" and "label state machine finished"
+# (Phase 6->7/8), not merely a slow-running review. Waiting the full 30 minutes
+# on that shape only delays the orphaned claim's release for no benefit — the
+# work is provably done, just not filed. Independently configurable so a fleet
+# can tune it without touching the general claim TTL.
+#
+# Default raised 5m -> 20m (review, #2409): a healthy worker heartbeating at
+# phase boundaries (SKILL.md) can legitimately still be inside Phase 7's
+# CI-wait, budgeted up to 20m for `high`-tier PRs (references/dispatch-scaling.md)
+# — a 5m default was SHORTER than both CLAIM_HEARTBEAT_WINDOW (900s/15m) and
+# that CI-wait budget, so it misfired on routine in-flight reviews, not just
+# genuine crashes. 20m clears the documented CI-wait budget. This is now the
+# secondary defence, not the sole one: the actual gating condition is
+# heartbeat freshness (see the heartbeat_in_window re-check in
+# reconcile-orphaned-claim and start-review below) — a live, owner-matched
+# heartbeat within CLAIM_HEARTBEAT_WINDOW ALWAYS suppresses release regardless
+# of this TTL number; the TTL only bounds a claim that has gone fully silent.
+SGE_REVIEW_POSTED_CLAIM_TTL_MIN="${SGE_REVIEW_POSTED_CLAIM_TTL_MIN:-20}"
 
 # _claim_repo_full: canonical owner/repo for API calls. Prefers GH_REPO;
 # falls back to gh detection. Prints nothing on failure.
@@ -364,6 +417,46 @@ claim_comment_live() {
   # heartbeats — security review, #2229).
   [[ $((now_epoch - claimed_epoch)) -le "$CLAIM_MAX_LIFETIME" ]] || return 1
   heartbeat_in_window "$owner" "$claimed_epoch"
+}
+
+# posted_verdict_after_claim <claimed-epoch>: return 0 (true) if this PR
+# already carries an sge-verdict fence — as a review OR a plain issue comment,
+# either counts (issue #2209: reviews vs. comments; #2292's fallback path) —
+# posted AT OR AFTER the claim's claimedAt. This is the orphaned-claim signal
+# (issue #2401): Phase 6 of /sge:pr-review posts the verdict BEFORE the label
+# state machine (Phase 7 CI-wait, Phase 8 `pass`/`fail`) — a claimant that
+# died between those two steps leaves `pr-reviewing` dangling with the
+# review's own opinion already on record. Checking for a verdict at/after
+# claimedAt (not merely "any verdict exists") avoids treating a STALE verdict
+# from a PRIOR review cycle as evidence this claim finished its work.
+# Best-effort: any read failure returns 1 (no evidence found) — never treat an
+# API error as proof a verdict was posted; the caller falls back to the
+# ordinary (longer) TTL, which is the safe default absent this stronger signal.
+posted_verdict_after_claim() {
+  local claimed_epoch="${1:-0}"
+  local _rf
+  _rf="$(_claim_repo_full)"
+  [[ -n "$_rf" ]] || return 1
+  local rows ts epoch
+  # Reviews (the normal posting path) and issue comments (the #2292
+  # comment-only fallback path) are two separate endpoints; a verdict landing
+  # in either counts. submitted_at (reviews) / created_at (comments) are
+  # GitHub's server-side timestamps.
+  rows=$(gh api "repos/$_rf/pulls/$PR/reviews" --paginate \
+    --jq '[.[] | select(.body // "" | contains("sge-verdict")) | .submitted_at] | .[]' \
+    2>/dev/null) || rows=""
+  rows="$rows
+$(gh api "repos/$_rf/issues/$PR/comments" --paginate \
+    --jq '[.[] | select(.body // "" | contains("sge-verdict")) | .created_at] | .[]' \
+    2>/dev/null || true)"
+  [[ -n "$(printf '%s' "$rows" | tr -d '[:space:]')" ]] || return 1
+  while IFS= read -r ts; do
+    [[ -n "$ts" ]] || continue
+    epoch=$(_iso_to_epoch "$ts") || continue
+    [[ -n "$epoch" ]] || continue
+    [[ "$epoch" -ge "$claimed_epoch" ]] && return 0
+  done <<< "$rows"
+  return 1
 }
 
 # post_claim_comment: post the JSON claim comment alongside the pr-reviewing
@@ -1182,7 +1275,49 @@ case "$CMD" in
       # Primary: claim comment TTL check (issue #1312).
       _CLAIM_JSON=$(find_claim_comment)
       if [[ -n "$_CLAIM_JSON" ]]; then
-        if claim_comment_live "$_CLAIM_JSON"; then
+        _CLAIM_LIVE=false
+        claim_comment_live "$_CLAIM_JSON" && _CLAIM_LIVE=true
+        # Orphaned-claim override (issue #2401): a claim that reads as "live" by
+        # the ordinary TTL/heartbeat rule ABOVE is downgraded to stale when it
+        # already carries a posted sge-verdict (Phase 6 completed) AND the
+        # posted-claim TTL has elapsed — a much stronger stall signal than "no
+        # verdict yet, still working". Only tightens the window; never widens
+        # it, so it can't weaken the #1312/#2229 liveness guarantee for a
+        # genuinely in-flight review with no verdict posted.
+        #
+        # Bug fixed (review, #2409): this override used to downgrade
+        # _CLAIM_LIVE to false on elapsed wall-clock time ALONE, bypassing the
+        # heartbeat check claim_comment_live() had just computed — a worker
+        # heartbeating at phase boundaries and still legitimately inside
+        # Phase 7's CI-wait (documented up to 20m for `high`-tier PRs) could
+        # have its live claim stolen purely because SGE_REVIEW_POSTED_CLAIM_TTL_MIN
+        # elapsed, heartbeat or no heartbeat. The TTL alone must never be the
+        # gating condition; a FRESH, owner-matched heartbeat must suppress the
+        # downgrade even after the posted-claim TTL has elapsed.
+        if [[ "$_CLAIM_LIVE" == "true" ]]; then
+          _CLAIM_META=$(parse_claim_metadata "$_CLAIM_JSON")
+          _CLAIM_OWNER_CHK=$(printf '%s' "$_CLAIM_META" | jq -r '.owner // empty' 2>/dev/null) || _CLAIM_OWNER_CHK=""
+          _CLAIM_AT=$(printf '%s' "$_CLAIM_META" | jq -r '.claimedAt // empty' 2>/dev/null) || _CLAIM_AT=""
+          _CLAIM_EPOCH=""
+          [[ -n "$_CLAIM_AT" ]] && _CLAIM_EPOCH=$(_iso_to_epoch "$_CLAIM_AT") || true
+          if [[ -n "$_CLAIM_EPOCH" ]]; then
+            _POSTED_TTL_S=$(( SGE_REVIEW_POSTED_CLAIM_TTL_MIN * 60 ))
+            _NOW_EPOCH=$(date -u +%s)
+            if [[ $(( _NOW_EPOCH - _CLAIM_EPOCH )) -ge "$_POSTED_TTL_S" ]] \
+              && posted_verdict_after_claim "$_CLAIM_EPOCH"; then
+              # Re-check heartbeat freshness AT THIS INSTANT before downgrading
+              # — the TTL elapsing is necessary but not sufficient. Only
+              # downgrade if the heartbeat is ALSO stale (or absent).
+              if heartbeat_in_window "$_CLAIM_OWNER_CHK" "$_CLAIM_EPOCH"; then
+                echo "PR #$PR: claim carries a posted sge-verdict past the posted-claim TTL, but a fresh heartbeat proves it is still genuinely in flight (issue #2401/#2409) — liveness NOT overridden" >&2
+              else
+                echo "PR #$PR: claim carries a posted sge-verdict but no terminal label, and no fresh heartbeat — orphaned (>= ${SGE_REVIEW_POSTED_CLAIM_TTL_MIN}m since claim, issue #2401); overriding TTL/heartbeat liveness" >&2
+                _CLAIM_LIVE=false
+              fi
+            fi
+          fi
+        fi
+        if [[ "$_CLAIM_LIVE" == "true" ]]; then
           _CLAIM_OWNER=$(parse_claim_metadata "$_CLAIM_JSON" \
             | jq -r '.owner // "unknown"' 2>/dev/null) || _CLAIM_OWNER="unknown"
           echo "refusing: PR #$PR has a live claim comment (owner=${_CLAIM_OWNER}) — another review is in flight (issue #1312)" >&2
@@ -1214,12 +1349,22 @@ case "$CMD" in
           fi
           if [[ -n "$CLAIMED_EPOCH" ]]; then
             CLAIM_AGE_MIN=$(( ($(date -u +%s) - CLAIMED_EPOCH) / 60 ))
-            if [[ "$CLAIM_AGE_MIN" -lt "$CLAIM_TTL_MIN" ]]; then
-              echo "refusing: PR #$PR already carries $REVIEWING — claimed ${CLAIM_AGE_MIN}m ago (< ${CLAIM_TTL_MIN}m TTL); another review pass is likely in flight (issue #699)" >&2
-              echo "Back off instead of running a duplicate review. The claim self-expires after ${CLAIM_TTL_MIN}m (SGE_REVIEW_CLAIM_TTL_MIN); re-run with --force-claim to take over deliberately." >&2
+            # Orphaned-claim override (issue #2401), fallback-path twin of the
+            # primary-path check above: a claim already carrying a posted
+            # sge-verdict is held to the shorter posted-claim TTL instead of
+            # the full CLAIM_TTL_MIN — only ever tightens the window.
+            _EFFECTIVE_TTL_MIN="$CLAIM_TTL_MIN"
+            if [[ "$CLAIM_AGE_MIN" -ge "$SGE_REVIEW_POSTED_CLAIM_TTL_MIN" ]] \
+              && posted_verdict_after_claim "$CLAIMED_EPOCH"; then
+              _EFFECTIVE_TTL_MIN="$SGE_REVIEW_POSTED_CLAIM_TTL_MIN"
+              echo "PR #$PR: claim carries a posted sge-verdict but no terminal label — orphaned (issue #2401); effective TTL ${_EFFECTIVE_TTL_MIN}m instead of ${CLAIM_TTL_MIN}m" >&2
+            fi
+            if [[ "$CLAIM_AGE_MIN" -lt "$_EFFECTIVE_TTL_MIN" ]]; then
+              echo "refusing: PR #$PR already carries $REVIEWING — claimed ${CLAIM_AGE_MIN}m ago (< ${_EFFECTIVE_TTL_MIN}m TTL); another review pass is likely in flight (issue #699)" >&2
+              echo "Back off instead of running a duplicate review. The claim self-expires after ${_EFFECTIVE_TTL_MIN}m; re-run with --force-claim to take over deliberately." >&2
               exit 3
             fi
-            echo "PR #$PR: existing $REVIEWING claim is stale (${CLAIM_AGE_MIN}m >= ${CLAIM_TTL_MIN}m) — taking over (issue #699)" >&2
+            echo "PR #$PR: existing $REVIEWING claim is stale (${CLAIM_AGE_MIN}m >= ${_EFFECTIVE_TTL_MIN}m) — taking over (issue #699)" >&2
           else
             echo "warning: PR #$PR carries $REVIEWING but the claim age could not be determined — proceeding (advisory guard, issue #699)" >&2
           fi
@@ -2212,6 +2357,91 @@ case "$CMD" in
     EXCL_ST="$(excluded_reviewer_status 2>/dev/null)" || EXCL_ST="(excluded_reviewer_status unavailable)"
     echo "PR #$PR: reviewer identity excluded — gate structurally cannot satisfy; $REVIEWING released, $EXCLUDED_REVIEWER applied ($EXCL_ST)"
     echo "Once a properly-provisioned non-excluded reviewer identity is available, a new review cycle will promote normally via pass."
+    ;;
+
+  reconcile-orphaned-claim)
+    # Watchdog/cron entry point (issue #2401) — see usage header above for the
+    # full contract. Distinct exit codes: 0 = no-op or reconciled; 1 = error.
+    LS="$(label_status 2>/dev/null)" || {
+      echo "error: PR #$PR — could not read label state" >&2
+      exit 1
+    }
+    if [[ "$LS" != *"reviewing=true"* ]]; then
+      echo "PR #$PR: no orphaned claim — $REVIEWING not present"
+      exit 0
+    fi
+    _CLAIM_JSON=$(find_claim_comment)
+    _CLAIMED_EPOCH=""
+    _CLAIM_OWNER=""
+    if [[ -n "$_CLAIM_JSON" ]]; then
+      _CLAIM_META=$(parse_claim_metadata "$_CLAIM_JSON")
+      _CLAIM_AT=$(printf '%s' "$_CLAIM_META" | jq -r '.claimedAt // empty' 2>/dev/null) || _CLAIM_AT=""
+      _CLAIM_OWNER=$(printf '%s' "$_CLAIM_META" | jq -r '.owner // empty' 2>/dev/null) || _CLAIM_OWNER=""
+      [[ -n "$_CLAIM_AT" ]] && _CLAIMED_EPOCH=$(_iso_to_epoch "$_CLAIM_AT") || true
+    fi
+    if [[ -z "$_CLAIMED_EPOCH" ]]; then
+      # Fallback (mirrors start-review's own fallback): no claim comment (or
+      # unparseable) — use the pr-reviewing labeled-event timestamp instead.
+      REPO_FULL="${GH_REPO:-$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || true)}"
+      if [[ -n "$REPO_FULL" ]]; then
+        CLAIMED_AT=$(gh api "repos/$REPO_FULL/issues/$PR/timeline" --paginate \
+          --jq '.[] | select(.event=="labeled" and .label.name=="pr-reviewing") | .created_at' \
+          2>/dev/null | tail -n 1) || CLAIMED_AT=""
+        [[ -n "$CLAIMED_AT" && "$CLAIMED_AT" != "null" ]] && _CLAIMED_EPOCH=$(_iso_to_epoch "$CLAIMED_AT") || true
+      fi
+    fi
+    if [[ -z "$_CLAIMED_EPOCH" ]]; then
+      echo "PR #$PR: no orphaned claim — could not determine claim age (fail-safe: never force-release without proof)"
+      exit 0
+    fi
+    _NOW_EPOCH=$(date -u +%s)
+    _POSTED_TTL_S=$(( SGE_REVIEW_POSTED_CLAIM_TTL_MIN * 60 ))
+    if [[ $(( _NOW_EPOCH - _CLAIMED_EPOCH )) -lt "$_POSTED_TTL_S" ]]; then
+      echo "PR #$PR: no orphaned claim — claim age < ${SGE_REVIEW_POSTED_CLAIM_TTL_MIN}m posted-claim TTL"
+      exit 0
+    fi
+    if ! posted_verdict_after_claim "$_CLAIMED_EPOCH"; then
+      echo "PR #$PR: no orphaned claim — no sge-verdict posted at/after claimedAt (review still genuinely in flight, or never posted; leave to the ordinary TTL)"
+      exit 0
+    fi
+    # Heartbeat liveness re-check (bug fixed, review #2409): the three
+    # conditions above (label present, verdict posted at/after claim,
+    # posted-claim TTL elapsed) gated purely on label state + elapsed
+    # wall-clock time — never consulting claim_comment_live()/heartbeat_in_window()
+    # at all. A healthy worker heartbeating at phase boundaries (SKILL.md) and
+    # still legitimately inside Phase 7's CI-wait (up to 20m for `high`-tier
+    # PRs, references/dispatch-scaling.md) would have its live claim stolen
+    # the moment SGE_REVIEW_POSTED_CLAIM_TTL_MIN elapsed, heartbeat or no
+    # heartbeat. A fresh, owner-matched heartbeat now suppresses the release —
+    # treat the claim as still-live and no-op — even once the TTL condition
+    # above is met, since the TTL is a necessary but not sufficient signal.
+    if [[ -n "$_CLAIM_OWNER" ]] && heartbeat_in_window "$_CLAIM_OWNER" "$_CLAIMED_EPOCH"; then
+      echo "PR #$PR: no orphaned claim — a fresh heartbeat (owner=${_CLAIM_OWNER}) proves the claim is still genuinely in flight (issue #2401/#2409); not force-releasing"
+      exit 0
+    fi
+    # All conditions hold: pr-reviewing present, verdict posted at/after
+    # claim, posted-claim TTL elapsed, and no fresh heartbeat suppresses it.
+    # This is the orphaned-claim shape (issue #2401) — force-release.
+    # changes-requested (not pr-reviewed) is the safe terminal state: a
+    # verdict exists but Phase 5's six verify-against-head checks and Phase
+    # 5.5's thread-resolution gate never ran to completion, so promoting
+    # straight to pr-reviewed would skip them entirely. A human or the next
+    # /sge:pr-review cycle re-reviews from a known-safe closed gate.
+    ensure_labels
+    delete_claim_comment
+    remove_label "$REVIEWED"
+    remove_label "$REVIEWING"
+    if ! (add_label "$CHANGES_REQUESTED"); then
+      echo "warning: failed to add label '$CHANGES_REQUESTED' to PR #$PR: add_label failed" >&2
+    fi
+    _RECONCILE_MSG="Reconciled an orphaned \`$REVIEWING\` claim (issue #2401): a review verdict was posted but the worker died before the label state machine finished. Released \`$REVIEWING\` and applied \`$CHANGES_REQUESTED\` — Phase 5's verify-against-head checks never completed, so this is not promoted to \`$REVIEWED\` automatically. Re-run /sge:pr-review to re-review from a clean state."
+    _RF="$(_claim_repo_full)"
+    if [[ -n "$_RF" ]]; then
+      gh api "repos/$_RF/issues/$PR/comments" -f body="$_RECONCILE_MSG" >/dev/null 2>&1 \
+        || echo "warning: could not post reconciliation status comment to PR #$PR" >&2
+    fi
+    STATUS="$(label_status)" || STATUS="(label_status unavailable)"
+    echo "PR #$PR: orphaned claim reconciled — $REVIEWING released, $CHANGES_REQUESTED applied ($STATUS)"
     ;;
 
   *)

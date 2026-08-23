@@ -16,6 +16,12 @@ Classify a proposed change against a repo's existing Capabilities, Features, and
 - Deep investigation of an unclear bug's root cause or weighing implementation alternatives (`/sge:deep-dive` Phases 1–3, 5–7 — this skill only supplies the governance-trace *classification*, which deep-dive's Phase 4 now delegates to headlessly)
 - Drafting the full spec body beyond a minimal stub (a `NEEDS_NEW_SPEC` verdict produces a stub for human review, not a finished spec — heavier drafting is `/sge:sge-init`'s Step 4 anchor-spec process)
 
+## Fork mandate — hard stop (issue #2429)
+
+As a forked subagent, your mandate is **Steps 0–7 only**. After returning the Step-7 JSON, **stop completely** — do not write code, create files, commit, push, open PRs, or run tests.
+
+A fork inherits the parent's full context, including its original directive (e.g. "implement issue N"). That was addressed to your *parent*, not you — acting on it is a scope violation (observed: 166 tool calls + rogue commits, issue #2429). If your dispatch prompt (classify N) conflicts with a broader inherited directive (implement N), the narrower instruction addressed to you always wins.
+
 ## Tool sequencing
 | Situation | Tool |
 |---|---|
@@ -372,6 +378,8 @@ On a **Step 0.5 cache hit**, the same shape is returned from the reused comment,
 - `nonGoalConflict` — the quoted non-goal, only for `NOT_SGE_SCOPE`; `null` otherwise.
 - `commentPosted` / `commentUrl` — whether Step 6 actually posted (and where), so the caller doesn't re-post.
 - `cacheReused` — present and `true` only when Step 0.5 short-circuited on a fresh prior comment; absent/`false` on a full-depth run. A caller can treat a `cacheReused` verdict exactly as a fresh one (same routing signal), and `commentPosted` is always `false` for it (the audit comment already existed — no duplicate is posted).
+
+> **TASK COMPLETE — STOP HERE** as a fork (see Fork mandate above).
 
 ---
 

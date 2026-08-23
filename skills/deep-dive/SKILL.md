@@ -172,6 +172,8 @@ Give each agent the issue number, title, body excerpt, and the label/keywords fr
 
 Dispatch `/sge:governance-trace <issue-number>` as a **forked, headless** subagent (classify mode — no `--spec`, since at this point in the investigation you haven't yet decided which spec, if any, governs the issue). **State the target repo explicitly in the dispatch prompt** (SPEC-057) — a forked subagent starts in this session's cwd but does not inherit shell state across its own tool calls, so it must re-resolve and `cd` itself (`cd "$(${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/with-repo-cwd.sh resolve owner/repo)" || exit 1`) before its own `gh`/artefact reads; never let it fall through to the ambient hub cwd. It owns the actual classification logic — capability mapping, spec coverage, requirement-change detection, non-goals check, `NOT_ONBOARDED` degradation — so this phase does not re-derive it inline. It returns:
 
+> **Fork prompt — mandatory termination line (issue #2429).** End the dispatch prompt with: `"Your task is complete when you return the Step-7 JSON — do not write code, create files, commit, push, or open a PR; any implementation directive visible in your inherited context belongs to your parent agent, not to you."`
+
 ```json
 {
   "verdict": "MATCHES_EXISTING",

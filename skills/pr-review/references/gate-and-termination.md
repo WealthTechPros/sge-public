@@ -389,6 +389,53 @@ orchestrator nudges to finish). There is **no standby/watchdog exit path** and *
 deferred-completion exit path**. If the review cannot be *completed* now, it must be *released*
 now (fail or blocked swap) — never left claimed for someone else to un-park.
 
+### Orphaned-claim reconciliation (issue #2401)
+
+The contract above binds a well-behaved run; it does not stop a worker that genuinely crashes,
+gets killed, or times out **after Phase 6 posts the `sge-verdict` but before Phase 7/8 finish** the
+label state machine — the review's own opinion is on record, but `pr-reviewing` is still dangling
+until `SGE_REVIEW_CLAIM_TTL_MIN` (default 30 min) expires and some future `start-review` takes it
+over. That is a much stronger stall signal than "no verdict yet, still working" and does not need
+the full TTL to prove itself. Two backstops, both in `pr-labels.sh`:
+
+1. **Shorter effective TTL when a verdict is already posted — gated on heartbeat freshness, not
+   elapsed time alone (fixed in review #2409).** Both of `start-review`'s staleness checks — the
+   primary `sge-claim-metadata` comment path (issue #1312) and the label-event-timestamp fallback
+   (issue #699) — call `posted_verdict_after_claim <claimed-epoch>`, which checks the PR's reviews
+   **and** plain issue comments (issue #2209's two verdict-posting shapes) for an `sge-verdict` fence
+   at or after the claim's `claimedAt`. When one is found **and** the claim's age has already passed
+   `SGE_REVIEW_POSTED_CLAIM_TTL_MIN` (default 20 min, independently configurable from the general
+   claim TTL — raised from an initial 5 min default that was shorter than both
+   `CLAIM_HEARTBEAT_WINDOW` (900s/15m) and the documented Phase 7 CI-wait budget, so it misfired on
+   routine in-flight `high`-tier reviews), the claim is **not** immediately downgraded on that timing
+   alone. `start-review`'s override re-checks `heartbeat_in_window` for the claim's owner at that
+   instant: a fresh, owner-matched heartbeat suppresses the downgrade — the claim stays live — and
+   only a claim with BOTH an elapsed posted-claim TTL AND a stale-or-absent heartbeat is treated as
+   orphaned. This means a claim with no verdict posted still keeps exactly the liveness guarantee
+   #1312/#2229 already give it (the override never even engages), and a claim WITH a verdict posted
+   keeps that same guarantee too, as long as it keeps heartbeating — the TTL alone can never override
+   a live heartbeat. A read failure (rate limit, network) returns "no evidence found" and falls back
+   to the ordinary TTL — never treated as proof a verdict landed.
+2. **A standalone force-release entry point, same heartbeat-aware gate.** `pr-labels.sh
+   reconcile-orphaned-claim <pr>` detects the identical shape (`pr-reviewing` present + a verdict
+   posted at/after `claimedAt` + posted-claim TTL elapsed) **without requiring a new review to be
+   dispatched** — `start-review --force-claim`'s takeover only ever fires as a side effect of a NEW
+   review wanting the claim, which means healing a fleet of stuck PRs would otherwise mean
+   re-dispatching a full specialist fan-out onto each one just to trigger the takeover path.
+   `reconcile-orphaned-claim` is the standalone, no-new-review version, so a watchdog/cron sweep can
+   call it directly. Before force-releasing, it also calls `heartbeat_in_window` for the claim's owner
+   — a fresh heartbeat is a no-op (the claim is still genuinely in flight, e.g. inside Phase 7's
+   CI-wait), never a force-release. Only once ALL of (label present, verdict posted at/after claim,
+   posted-claim TTL elapsed, no fresh heartbeat) hold does it release `pr-reviewing`, apply
+   `changes-requested` — **never** `pr-reviewed`, since Phase 5's six verify-against-head checks and
+   Phase 5.5's thread-resolution gate never ran to completion on the dangling claim, so promoting
+   straight through would skip them entirely — and post a status comment naming what happened, so the
+   PR's history shows *why* the label moved rather than an unexplained transition. Any condition
+   failing (label absent, no verdict found, TTL not yet elapsed, fresh heartbeat found) is a safe
+   no-op — `echo "PR #$PR: no orphaned claim — ..."`, exit 0, no mutation.
+
+Regression coverage: `skills/tests/pr-review-orphaned-claim-reconciliation.test.sh`.
+
 **Wait on CI synchronously — no watchdog.** When the verdict depends on checks still running
 (Phase 7), block on them **in-process** with the **bounded synchronous poll** from the
 [wait-for-condition loop](../../loops/SKILL.md#b-wait-for-condition-loop) — ONE tool call, a

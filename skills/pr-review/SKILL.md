@@ -331,7 +331,7 @@ Then promote as in Phase 6 (`pr-labels.sh pass $PR $AUTOMERGE_FLAG --expect-head
 
 ## Phase 9: Termination & cleanup
 
-### Termination contract — never exit holding `pr-reviewing` (#855)
+### Termination contract — never exit holding `pr-reviewing` (#855, #2401)
 
 Claiming the gate (`start-review` applies `pr-reviewing`) creates a **binding exit obligation**: **this skill MUST NOT return, stop, or terminate for any reason while the PR still carries `pr-reviewing`** — released ONLY by completing the state machine (`pr-labels.sh pass`/`fail`, or a blocked/abandon swap); **no standby/watchdog exit path**, **no deferred-completion exit path**. [`gate-and-termination.md`](references/gate-and-termination.md#termination-contract--never-exit-holding-pr-reviewing-issue-855).
 
