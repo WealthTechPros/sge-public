@@ -217,6 +217,7 @@ recommendation: APPROVE | REQUEST_CHANGES | COMMENT
 pr: <number>
 commit: <HEAD_SHA reviewed>
 reviewed_at: <ISO-8601 UTC>
+plugin_ref: <sge plugin version this reviewing environment has installed> # SPEC-121 Phase 2 — see sge-verdict-block.md
 mode: full | delta | phase5-passthrough | advisory
 blockers: <count>
 majors: <count>
