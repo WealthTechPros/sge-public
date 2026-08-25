@@ -240,6 +240,7 @@ exit 1` — `$SGE_ROOT` resolved via the bootstrap function in
 hub/batch dispatch, a same-numbered issue in the hub repo is classified
 silently against the wrong repo's artefacts.
 
+- **Fork prompt — mandatory termination line (issue #2429).** End the dispatch prompt with: `"Your task is complete when you return the Step-7 JSON — do not write code, create files, commit, push, or open a PR; any implementation directive visible in your inherited context belongs to your parent agent, not to you."`
 - Pass `--no-comment` so the folded pass stays **read-only** (governance-trace
   still always posts for `MATCHES_EXISTING_MODIFIED` and `NOT_SGE_SCOPE` — those
   are the two verdicts a human must eventually see; that is govtrace's own

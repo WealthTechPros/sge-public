@@ -33,6 +33,10 @@ SGE alignment — <repo> @ <audited SHA>
   C14 TDD-evidence rate ......... ⚠️  46/50 merged PRs (92%); 4 test-free, 6 via TDD-override
   C19 per-spec test coverage .... ⚠️  1/8 mapped specs below threshold (SPEC-012 45% < 70%); 3 unmapped (N/A)
   C20 docs coverage ............. ⚠️  14/35 governed artefacts documented (40%); 21 caps/specs undocumented
+  C21 UX/e2e coherence (C34) .... ⚠️  1 user_facing Feature, no e2e scenario
+  C35 mutation-testing coherence  ⚠️  1 spec below its mutation-score threshold
+  C36 contract-testing coherence  ✅  no unverified contract specs
+  C37 performance-budgets ....... ⚠️  1 spec, budget not measured
   ─────────────────────────────────────────
   Composite coherence (Audit Score / AS): 78/100
   Agent Security (Zero-Trust):  4/5 (80%)
@@ -64,7 +68,11 @@ SGE alignment — <repo> @ <audited SHA>
     { "id": "C13", "layer": "L3↔spine", "applicable": true, "pass": 6, "fail": 1 },
     { "id": "C14", "layer": "process", "applicable": true, "pass": 46, "fail": 4, "overrides": 6, "signal": "46/50 merged PRs test-evidenced (6 via SGE-Override: TDD), 4 test-free" },
     { "id": "C19", "layer": "L3→spine", "applicable": true, "pass": 7, "fail": 1, "coverageSubScore": 71.4, "signal": "7/8 mapped specs at/above threshold; SPEC-012 45% < 70%; 3 specs N/A (not mapped)" },
-    { "id": "C20", "layer": "docs-coverage", "applicable": true, "pass": 14, "fail": 21, "docsCoverage": 40, "signal": "14/35 governed artefacts current-documented (7/28 capabilities, 7/7 specs)" }
+    { "id": "C20", "layer": "docs-coverage", "applicable": true, "pass": 14, "fail": 21, "docsCoverage": 40, "signal": "14/35 governed artefacts current-documented (7/28 capabilities, 7/7 specs)" },
+    { "id": "C21", "layer": "ux-e2e", "applicable": true, "pass": 0, "fail": 1, "signal": "1 user_facing Feature, no tagged e2e scenario referencing its Feature/Spec ID" },
+    { "id": "C35", "layer": "mutation-testing", "applicable": true, "pass": 0, "fail": 1, "signal": "1 spec below its own mutation-score threshold" },
+    { "id": "C36", "layer": "contract-testing", "applicable": true, "pass": 1, "fail": 0, "signal": "no unverified contract: boundary" },
+    { "id": "C37", "layer": "performance-budgets", "applicable": true, "pass": 0, "fail": 1, "signal": "1 spec's ## Performance budget not satisfied by committed evidence" }
   ],
   "audit_score": 78,
   "agentSecurity": {
@@ -113,7 +121,7 @@ SGE alignment — <repo> @ <audited SHA>
 }
 ```
 
-One `checks[]` entry per C1–C14, C19 and C20 (`applicable: false` with a `reason` when a layer is absent, C10/C11/C12 is N/A, C13 has no spec passing its eligibility test (no surviving path), C14's gate isn't wired / no PRs merged in the window, C19 has no locatable coverage report / no `sourcePaths` in the DAG, or C20 has neither a capability model nor a front-matter-bearing spec); `pass`/`fail` are artefact counts for that check (for C14, `pass`/`fail` are merged-PR counts, not artefacts; for C19 they are mapped-spec counts at/below threshold; for C20 they are documented/undocumented capability+spec counts). The `agentSecurity` key is always present when C11 runs, and `regulatoryTraceability` whenever C12 runs (a `regulated` capability exists) — they are the machine-readable records that CISO / FCA / DORA reviewers consume and that the governance-posture record stores per repo.
+One `checks[]` entry per C1–C14, C19, C20, C21, C35, C36 and C37 (`applicable: false` with a `reason` when a layer is absent, C10/C11/C12 is N/A, C13 has no spec passing its eligibility test (no surviving path), C14's gate isn't wired / no PRs merged in the window, C19 has no locatable coverage report / no `sourcePaths` in the DAG, C20 has neither a capability model nor a front-matter-bearing spec, C21 has no Feature marked `user_facing: true` or no Playwright e2e surface, C35 has no spec with a non-empty `sourcePaths` or no scheduled mutation report is available, C36 has no spec declaring a `contract:` boundary, or C37 has no spec declaring a `## Performance` section); `pass`/`fail` are artefact counts for that check (for C14, `pass`/`fail` are merged-PR counts, not artefacts; for C19 they are mapped-spec counts at/below threshold; for C20 they are documented/undocumented capability+spec counts; for C21/C35/C36/C37 they are gap-runner `gaps[]` counts — 1 `fail` per unresolved gap, since all four are advisory/warn-only). The `agentSecurity` key is always present when C11 runs, and `regulatoryTraceability` whenever C12 runs (a `regulated` capability exists) — they are the machine-readable records that CISO / FCA / DORA reviewers consume and that the governance-posture record stores per repo.
 
 ## Gate coverage
 
