@@ -313,7 +313,9 @@ Repeat per acceptance criterion.
 
 ## Phase 4: Verify
 
-**All must pass before review.** Run the repo's full quality suite (commands per repo CLAUDE.md): type-checking / static analysis (zero errors), linting (zero warnings), tests (all pass). Fix any failures before proceeding.
+**All must pass before review.** Run the repo's quality suite (commands per repo CLAUDE.md): type-checking / static analysis (zero errors), linting (zero warnings), tests (all pass). Fix any failures before proceeding.
+
+**Run in the foreground — never a backgrounded full suite** (#2433). Full suite stays the default; a scoped run is only a fallback when it would exceed a stated time budget, per the fail-closed `test-scope:` convention. [`phase4-verify-scope.md`](references/phase4-verify-scope.md).
 
 ---
 
@@ -392,7 +394,7 @@ This is the [bounded refinement loop](../loops/SKILL.md#c-bounded-refinement-loo
 **Fix every Blocker and Major** (plus any trivially-correct Minor):
 1. Apply the smallest root-cause fix in the worktree. **Never** suppress a check, weaken an assertion, or delete a failing test to make a finding "pass".
 2. Keep TDD discipline: if the finding is a missing or weak test, write the failing test first, then fix.
-3. Re-run the full quality suite (Phase 4) — green.
+3. Re-run the quality suite (Phase 4) — green.
 4. Commit + push each fix via **`/sge:commit`** (plain — it pushes so the PR updates; carries the trailer).
 5. Reply to each addressed inline comment with the resolving commit SHA, then **re-run `/sge:pr-review`** for a fresh verdict.
 

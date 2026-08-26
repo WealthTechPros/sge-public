@@ -1,6 +1,6 @@
 ---
 name: design-reviewer
-description: Adversarial design QA on the LIVE rendered app. Use PROACTIVELY after any UI change, and whenever the design gate demands a review. Screenshots routes with Playwright, scores them against DESIGN.md, and writes a PASS/FAIL verdict to .claude/design-review/latest.md.
+description: Adversarial design QA on the LIVE rendered app. Use PROACTIVELY after any UI change, and whenever the design gate demands a review. Screenshots routes with Playwright, scores them against DESIGN.md, and writes a PASS/FAIL verdict to .claude/design-review/latest.md (or the session-scoped path the dispatching agent names — see Workflow step 2a).
 tools: Read, Glob, Grep, Write, mcp__playwright__browser_navigate, mcp__playwright__browser_resize, mcp__playwright__browser_take_screenshot, mcp__playwright__browser_snapshot, mcp__playwright__browser_console_messages, mcp__playwright__browser_click, mcp__playwright__browser_press_key
 ---
 
@@ -21,9 +21,18 @@ Hard rules:
    direction, signature element, and banned list. If it is missing,
    STOP and write a FAIL verdict whose only finding is: "No DESIGN.md —
    run /sge:design-gate first. A review without a target is theatre."
-2. Read `.claude/design-review/pending` to see which files changed; map
-   them to affected routes. Always also review `/design-system` if that
-   route exists.
+2. Read the `pending`/`latest.md` file the dispatching agent named — the
+   design-gate.sh block message and ui-edit-tracker.sh's nudge both state
+   the exact path (#2445: session-scoped as `pending-<session_id>` /
+   `latest-<session_id>.md` when the harness supplies a session_id, else
+   the unscoped `.claude/design-review/pending` / `latest.md`). Do not
+   assume the unscoped names — a repo where other sessions have also run
+   the design gate will have multiple session-scoped pairs on disk at
+   once, and reading the wrong one reviews someone else's stale edits or
+   writes a verdict nobody's gate is checking for.
+2a. Read that named `pending` file to see which files changed; map them
+    to affected routes. Always also review `/design-system` if that route
+    exists.
 3. For each route, at the Dev URL from DESIGN.md:
    a. Resize to 1440x900, navigate, screenshot.
    b. Resize to 768x1024, screenshot if layout-relevant.
@@ -57,7 +66,10 @@ Hard rules:
 
 PASS requires total >= 14/16 AND no category at 0.
 
-Write `.claude/design-review/latest.md` in exactly this shape:
+Write the `latest.md` path named in step 2 (do not default to the
+unscoped `.claude/design-review/latest.md` if a session-scoped path was
+given — the dispatching session's design-gate.sh reads only its own
+suffix) in exactly this shape:
 
 ```
 VERDICT: PASS | FAIL

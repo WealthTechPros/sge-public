@@ -33,10 +33,14 @@ Install the design-quality enforcement loop's per-repo taste contract
 1. Extracts `DESIGN.md` at `.claude/design-review/DESIGN.md` from 2-3
    reference sites the operator names (or seeds from the repo's `brand/`
    directory for WTP-branded repos) — see "Extraction" below.
-2. Adds `.claude/design-review/pending`, `.claude/design-review/latest.md`,
-   and `.claude/design-review/.nudged` to `.gitignore` (session scratch,
-   never repo content) — `DESIGN.md` itself IS committed, since it is the
-   per-repo taste decision this loop enforces against.
+2. Adds `.claude/design-review/pending*`, `.claude/design-review/latest*.md`,
+   and `.claude/design-review/.nudged*` to `.gitignore` — the glob covers
+   both the unscoped names and the session-scoped
+   `pending-<session_id>`/`latest-<session_id>.md`/`.nudged-<session_id>`
+   variants ui-edit-tracker.sh and design-gate.sh write when the harness
+   supplies a session_id (#2445) — all session scratch, never repo content.
+   `DESIGN.md` itself IS committed, since it is the per-repo taste decision
+   this loop enforces against.
 3. Appends the design-contract section to the repo's `CLAUDE.md`.
 4. Proposes (does not build unless asked) a `/design-system` route that
    renders every primitive and component in all states on one page.
@@ -102,13 +106,16 @@ mkdir -p .claude/design-review
 
 # 2. Write DESIGN.md per the "Extraction" workflow above (Write tool, not shown here)
 
-# 3. Add the gitignore entries (session scratch, not DESIGN.md itself)
+# 3. Add the gitignore entries (session scratch, not DESIGN.md itself).
+#    Globbed (#2445) to also cover the session-scoped
+#    pending-<session_id> / latest-<session_id>.md / .nudged-<session_id>
+#    variants, not just the unscoped names.
 cat >> .gitignore <<'EOF'
 
 # Design-quality enforcement loop scratch (SPEC-115) — never repo content
-/.claude/design-review/pending
-/.claude/design-review/latest.md
-/.claude/design-review/.nudged
+/.claude/design-review/pending*
+/.claude/design-review/latest*.md
+/.claude/design-review/.nudged*
 EOF
 
 # 4. Append the CLAUDE.md-snippet.md design-contract section to CLAUDE.md (Edit tool, not shown here)
