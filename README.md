@@ -19,17 +19,23 @@ check it against this list before renaming:
 
 - **Renames:** brand prose ("SGD" → "SGE" in docs/marketing copy), and any
   `/sgd:<command>` slash-command reference (the namespace is `/sge:` now).
+  As of #2319, this also includes the `sgd-init` npx package name — now
+  `@wealthtechpros/sge-init` (renamed 2026-08-26; the package had never been
+  published, so this was a clean rename, not a deprecation-shim migration).
 - **Stays `sgd`/`SGD` — do not rename:**
   - `SGD-NNN` spec IDs — historical identifiers, permanently retained (the
     forward-going convention mints `SGE-NNN` from here on; both forms are
     accepted by commit-trailer parsing).
   - The `SGD_AGENT_ID` environment variable.
-  - `docs/sgd/` directory paths in seeded repos.
-  - The `sgd-init` npx package name (`npx @wealthtechpros/sgd-init`).
+  - `docs/sgd/` directory paths in seeded repos (the *scaffolder's* generated
+    workflow filenames inside that directory tree were renamed to `sge-*`,
+    but the `docs/sgd/` directory name itself and `docs/sgd-build/`,
+    `SGD_BUILD.md` stay `sgd`-named).
   - Dated references to historical events (e.g. "SGD realignment",
     "SGD-seeded") describing things that happened under the old name.
 
-See #2208 for the rename-surfaces pass that established this list.
+See #2208 for the rename-surfaces pass that established this list, and #2319
+for the constant/package rename that superseded the `sgd-init` entry above.
 
 ## Skills
 
@@ -50,6 +56,7 @@ See #2208 for the rename-surfaces pass that established this list.
 | `implement-issue` | `/sge:implement-issue [N]` | Router — non-SGE issues now route into `/sge:sge-implement`, which handles both spec and no-spec issues |
 | `refactor` | `/sge:refactor [target]` | Systematic SOLID refactoring with quality gates |
 | `tidy-worktrees` | `/sge:tidy-worktrees [--force]` | **Safe** worktree/branch tidy — audits for uncommitted/unpushed work before removing anything; `--force` = audited fast sweep that executes one confirmed deletion plan |
+| `clean-root` | `/sge:clean-root [--dry-run] [path]` | Untracked-file hygiene — removes only files provably identical to `main`'s tracked version, or matching a repo-configured throwaway-pattern allowlist; everything else is reported, never deleted. Not for worktrees (`tidy-worktrees`) or processes (`cleanup`) |
 | `commit` | `/sge:commit [--no-push]` | Quality-gated commit and push — canonical owner of the SGE trailer convention; `--no-push` for slice commits |
 | `sge-ai-inventory` | `/sge:sge-ai-inventory [add\|review\|report]` | FS AI-governance register — machine-readable AI use-case inventory (risk tiering, EU AI Act, Consumer Duty, DORA fields) with vendor due-diligence template. Advisory, propose-only |
 | `team-pipeline` | `/sge:team-pipeline [--agents N] [--module <name>] [--dry-run]` | Parallel multi-agent pipeline — one PR monitor agent + N implementation agents + review agents per PR; continuously works issues from the queue until exhausted |

@@ -117,7 +117,7 @@ A PR from a **rescued or resumed worktree** may carry stale `tsc`/test claims. S
 
 Per-tier **wall-clock / token / tool-call budgets**; on exhaustion → report **partial**, record `budget_exceeded`: [`dispatch-scaling.md`](references/dispatch-scaling.md).
 
-**Investigation depth & pragmatism (#888).** Sets the investigation-depth tier up front: `high` → `max`/`ultra`; `low`/`medium` → **fewer, high-confidence findings scoped to the diff**, trusting the PR's own tests; deep verification reserved for `high`. Full guardrails (MSYS_NO_PATHCONV=1): [`dispatch-scaling.md`](references/dispatch-scaling.md).
+**Investigation depth & pragmatism (issue #888, #2456).** Sets the investigation-depth tier up front: `high` → `max`/`ultra`; `low`/`medium` → **fewer, high-confidence findings scoped to the diff**, trusting the PR's own tests; deep verification reserved for `high` (never a full-suite re-run). Guardrails (MSYS_NO_PATHCONV=1): [`dispatch-scaling.md`](references/dispatch-scaling.md).
 
 ### Claim the review (label gate)
 
@@ -322,7 +322,7 @@ A `pass` must not open the gate over red CI. After Phase 6.5 fixes (or a PR that
 
 > **If advisory → this phase does not run (issue #754).** A review-only dispatch never promotes/undrafts/arms auto-merge; guard: `[ "$REVIEW_MODE" = "advisory" ] && { echo "advisory: no promote/auto-merge"; exit 0; }` (exit 4 backstop). `--no-fix`/`--no-automerge` run Phase 8 normally (`AUTOMERGE_FLAG` per Phase 6).
 
-Run the **pre-merge verification checklist** — every box ticked before `pr-reviewed`: diff read + requirements met, no open security/logic blocker, type/lint/tests green on the promoted head, required CI GREEN + MERGEABLE, every unfixed finding commented, Phase 5 checks 1–6 pass, every follow-up references a tracking issue (#859). [`pre-merge-checklist.md`](references/pre-merge-checklist.md).
+Run the **pre-merge verification checklist**: [`pre-merge-checklist.md`](references/pre-merge-checklist.md).
 
 Confirm `gh pr view $PR --json mergeable` is `MERGEABLE` (else resolve conflicts).
 
