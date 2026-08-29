@@ -419,10 +419,11 @@ budget target, the full **Lean Agent Contract** (Rules 1–3), and these Steps
 
 1. Export `SGE_AGENT_ID="impl-<N>"`; cd to the worktree; read the issue (file-map
    + ACs = entire recon).
-2. **Governance-trace gate (MANDATORY — before writing any code):** adopt the
+2. **Governance-trace gate (MANDATORY, before writing any code):** adopt the
    front-loaded `SGE_GOVTRACE_VERDICT` (Phase 1.5) when it matches this issue,
-   else fork `/sge:governance-trace <N>` headlessly (#1266); branch on the verdict
-   per `/sge:sge-implement` Phase 0.5's *Headless completion contract*. MATCHES_EXISTING
+   else run `/sge:governance-trace <N>` via `Agent`, never `Skill(args=)`
+   (#2452); branch per `/sge:sge-implement` Phase 0.5's *Headless completion contract*
+   before Step 3's Implement the change. MATCHES_EXISTING
    / NO_SPEC_WARRANTED / NOT_ONBOARDED with `matchConfidence` not low → proceed.
    Any other verdict, or `matchConfidence` low → **do NOT build:** write
    `/tmp/team-pipeline-agent-<N>.json` (`"outcome":"blocked","prNumber":null`,

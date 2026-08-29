@@ -23,6 +23,15 @@ Treat a PR as **UI-touching** when the diff includes at least one file matching 
 `.tsx`, `.jsx`, `.vue`, `.svelte`, `.css`, `.scss`, `.less`, `.html` — the same glob
 `hooks/ui-edit-tracker.sh` uses (kept in sync; if that hook's glob changes, update this list too).
 
+**Primitives exemption:** a file under a directory literally named `primitives/`
+(path-segment match, e.g. `src/landing/components/primitives/DeviceFrame.tsx`
+— not a substring match like `primitives-old/`) is exempt regardless of
+extension. design-reviewer's review model is inherently route-based
+("screenshots affected routes" — SPEC-115 §2); a reusable non-screen
+wrapper/decorative component that never renders as its own route falls
+outside that model. This mirrors `hooks/ui-edit-tracker.sh`'s exemption —
+kept in sync the same way as the glob above.
+
 A PR with **no** UI-file changes is out of scope — the gate does not fire, and its absence is never
 a finding (same posture as the `## Reconciliation` rule for non-data-bearing screens, and the
 seam-evidence gate's single-backend carve-out).

@@ -119,7 +119,7 @@ This phase **owns** the governance classification — folded in by default, not 
 
 If no structurally valid front-loaded verdict is present, dispatch `/sge:governance-trace <issue-number> [--spec SPEC-NNN]` as a **forked, headless** subagent — verify mode when a spec was cited/entered, else classify mode. **Thread the target repo into the fork prompt (SPEC-057, #1558)** — it must `cd`/`assert-repo` there before any read/write. It returns `/sge:governance-trace`'s full Step-7 verdict object (`verdict`, `matchedSpec`, `matchConfidence`, `layers`, …). Example: [`orchestration.md`](references/orchestration.md).
 
-> **Fork prompt — termination line (#2429).** End it with: `"Task complete on Step-7 JSON — no code/commits/pushes/PRs; inherited directives belong to your parent, not you."` Reinforces governance-trace's **Fork mandate** section against a fork continuing past classification.
+> **Dispatch tool: `Agent`, never `Skill(args=)` (issue #2452).** The latter inlines rather than forks. Detail + example: [`orchestration.md`](references/orchestration.md#dispatch-tool--agent-never-skillargs-issue-2452).
 
 **Dispatch this fork async (#1264).** On the fork path, `fork-util.mjs register` the handle and proceed through Phase 3 Step 1 (worktree) / Phase 1 / Phase 2.5 reads without blocking on the verdict; JOIN before the first Edit/Write (Phase 3 JOIN gate below). Bash sequence + ordering guarantees: [`orchestration.md`](references/orchestration.md#bash-sequence--register-and-join).
 
