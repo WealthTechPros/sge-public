@@ -362,6 +362,35 @@ PR-body claim with no accompanying test). At every tier, strip the overhead that
   test suite mechanically proves needs no independent re-derivation. Escalate to
   vendor/third-party/upstream-source verification **only** when no test in the PR covers the
   claim.
+- **Never re-run the repo-wide test suite yourself — Phase 3 already runs it once, in
+  parallel, and that is the authoritative result (issue #2456).** This applies at **every**
+  tier, including `high`: "full deep pass" means deep verification of the diff's own claims —
+  tracing the changed logic, checking edge cases, reading what the PR's own tests actually
+  assert — never N independent copies of the whole project suite. If a lane needs to confirm a
+  specific behaviour itself, run only the *targeted* test(s) for the file(s) it is personally
+  verifying (`pytest path/to/test_x.py::test_y`, not a bare `pytest`); trust that Phase 3 already
+  covers the rest rather than re-deriving it — a dispatched lane has no channel to Phase 3's
+  actual result, so this is a rule not to duplicate it, not an instruction to go read it. Measured
+  cost of not doing this: one `high`-tier review of a well-tested, self-documented refactor ran
+  the full ~4800-test suite at least 4 times across 3 uncoordinated actors (Phase 3, plus 2 of the
+  3 dispatched lanes — the third scoped correctly on its own, see below),
+  ~500k subagent tokens and 40+ minutes for a review whose actual diff needed none of that
+  repetition — see [`troubleshooting.md`](troubleshooting.md#dispatched-lanes-redundantly-re-running-the-full-project-test-suite-issue-2456).
+- **Check the target repo's own documented dev-environment setup before running any test
+  command (issue #2456).** A repo using git-worktree isolation may require a per-worktree
+  virtualenv, lockfile install, or pinned interpreter path documented in its `CLAUDE.md`/README
+  specifically because a shared or wrong interpreter silently resolves imports against a
+  *different* worktree's tree and reports spurious failures. Follow the repo's documented setup
+  exactly before invoking a test command; if none is documented, say so rather than guessing at
+  one. See the incident in
+  [`troubleshooting.md`](troubleshooting.md#dispatched-lanes-redundantly-re-running-the-full-project-test-suite-issue-2456).
+- **Both guards above need their exact verbatim wording in every Layer 1–3 dispatch prompt that
+  may run tests — not a paraphrase, not a summary.** That wording lives in
+  [`reviewer-lanes.md`](reviewer-lanes.md#structured-findings-contract--why-silence-is-failure-issue-397),
+  matching the existing "Silence is a failure" pattern (issue #855): the rationale is documented
+  once here, the quotable instruction lives once there, and the dispatching agent copies it in —
+  a guard documented only as prose an orchestrator might read is exactly the failure this fix
+  exists to close, one layer up.
 - **Scope every grep/search to the diff's surface by default** — the files touched by the diff
   plus directly linked docs/issues, never a bare repo-wide sweep; always exclude vendored
   dependency trees (`node_modules`, `venv`/`site-packages`, `vendor`).

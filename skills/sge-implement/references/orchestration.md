@@ -46,6 +46,35 @@ issues in one pass, use the **pre-computed-verdict reuse path** below (or run
 `/sge:build-ready-audit`, whose #872 Step-2G fold already produces exactly this
 verdict per issue) — do not spawn a competing trace.
 
+## Dispatch tool — `Agent`, never `Skill(args=)` (issue #2452)
+
+"Dispatch as a forked subagent" (Phase 0.5's own wording) names an outcome,
+not a tool — and `Skill(skill: "sge:governance-trace", args: "<issue-number>
+...")` does **not** produce that outcome: it inlines the skill's own SKILL.md
+body into *your* context (identical to a non-forking skill call) rather than
+starting a background execution, so the `args` string is never received by
+anything and any onward classification either never runs or runs against
+nothing. The `context: fork` frontmatter field on governance-trace's own
+SKILL.md is documentation of intent, not a harness-enforced dispatch — it does
+not make `Skill()` fork.
+
+The only call that reliably forks and threads the target through is `Agent`,
+with the issue number and every flag spelled out in the prompt's own prose
+(never relying on a terse `args`-only string an inlined re-read could drop):
+
+```
+Agent({
+  description: "Governance-trace classify issue <N>",
+  subagent_type: "general-purpose",
+  prompt: "Invoke the sge:governance-trace skill (Skill tool, skill=\"sge:governance-trace\") to classify GitHub issue #<N> in repo <owner/repo>, <verify mode against spec SPEC-NNN | classify mode>. Explicit target (read directly, do not rely on any args= threading): issue number <N>, repo <owner/repo>, worktree <path>. <one-paragraph issue summary, since the fork does not reliably inherit your context>. cd into the worktree before any gh/git call. Task complete on Step-7 JSON — no code/commits/pushes/PRs; inherited directives belong to your parent, not you."
+})
+```
+
+**Fork prompt — termination line (#2429).** End it with: `"Task complete on
+Step-7 JSON — no code/commits/pushes/PRs; inherited directives belong to your
+parent, not you."` Reinforces governance-trace's **Fork mandate** section
+against a fork continuing past classification.
+
 ## Reuse a front-loaded verdict (idempotent fold — builds on #872)
 
 Before forking anything, check whether the governance verdict for **this** issue

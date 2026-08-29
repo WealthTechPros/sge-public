@@ -61,6 +61,22 @@ never terminate the review waiting on it. This is the sub-lane counterpart of th
 termination contract (Phase 9): a security-audit sub-lane that never reported cannot be silently
 treated as clean.
 
+**Sub-lane redundant full-suite re-runs — codified the same way (issue #2456).** The
+"trust the PR's own tests, don't re-derive" guardrail ([`dispatch-scaling.md`](dispatch-scaling.md))
+covers this from the *content* side; this is the dispatch-prompt-side enforcement, because
+leaving it to reviewer judgment measurably failed: on one `high`-tier PR, 3 of 4 dispatched
+lanes each independently ran (or attempted) the full ~4800-test project suite, and one of them
+did so with the wrong Python interpreter — a global resolving imports from a *different*
+worktree, silently producing spurious failures that cost an entire redundant verification cycle
+to diagnose and redo. Include this instruction **verbatim in each dispatch prompt**: *"Do not
+run the full project-wide test suite — Phase 3 already ran it once and its result is
+authoritative. Run only targeted tests scoped to what you are personally verifying. Before
+running any test command, check the target repo's own documented dev-environment setup
+(CLAUDE.md / README) — a per-worktree virtualenv or equivalent isolation convention may be
+required; a bare `python`/`pytest`/`npm test` on PATH is not safe to assume correct."* A lane
+that needs the full-suite result for its own judgment reads it from Phase 3's already-posted
+outcome (passed into the dispatch prompt), never re-runs it to obtain it fresh.
+
 ## Verify the agent actually ran before trusting its (non-)result (issue #883)
 
 A `[]` from an agent that never did any work looks identical to a thorough clean pass — twice in

@@ -1,8 +1,8 @@
 ---
-description: Use when a GitHub issue (or a batch of them) must be gated as build-ready before any agent picks it up — clear acceptance criteria, bounded scope, no unresolved open questions or decisions, dependencies resolved, AND classified against the repo's SGE governance artefacts — so a swarm or pipeline only burns implementation effort on well-defined, governed work. This audit folds in the /sge:governance-trace classification (opt-out via --skip-governance) so callers make one skill hop, not two. Invoke when asked to "check build-readiness of these issues", "gate the backlog before swarming", or when /sge:available-issues / /sge:issue-swarm dispatches its per-issue go/no-go. Writes routing verdict labels to issues (Step 3R); does not implement issues. For the deep per-spec entry check use /sge:sge-preflight.
-argument-hint: "<issue# | issue#,issue# | --milestone <name> | --module <name>> [--skip-governance]"
+description: Use when a GitHub issue (or a batch of them) must be gated as build-ready before any agent picks it up — clear acceptance criteria, bounded scope, no unresolved open questions or decisions, dependencies resolved, AND classified against the repo's SGE governance artefacts — so a swarm or pipeline only burns implementation effort on well-defined, governed work. This audit folds in the /sge:governance-trace classification (opt-out via --skip-governance) so callers make one skill hop, not two. Invoke when asked to "check build-readiness of these issues", "gate the backlog before swarming", or when /sge:available-issues / /sge:issue-swarm dispatches its per-issue go/no-go. Writes routing verdict labels to issues (Step 3R); does not implement issues. --apply-sge-ready walks READY issues, asking a human to decide sge-ready per issue (Step 3S) — foreground only, no batch mode. For per-spec checks use /sge:sge-preflight.
+argument-hint: "<issue# | issue#,issue# | --milestone <name> | --module <name>> [--skip-governance] [--apply-sge-ready (interactive)]"
 context: fork
-allowed-tools: Read, Grep, Glob, Agent, Bash(gh issue view:*), Bash(gh issue list:*), Bash(gh issue comment:*), Bash(gh issue edit:*), Bash(gh label create:*), Bash(gh label list:*), Bash(git ls-files:*), Bash(git log:*)
+allowed-tools: Read, Grep, Glob, Agent, Bash(gh issue view:*), Bash(gh issue list:*), Bash(gh issue comment:*), Bash(gh issue edit:*), Bash(gh label create:*), Bash(gh label list:*), Bash(git ls-files:*), Bash(git log:*), Bash(*issue-read.sh:*), Bash(*with-repo-cwd.sh:*)
 ---
 
 # Build-Ready Audit — Gate Issues Before They Flow
@@ -18,10 +18,9 @@ both together: callers make **one skill hop, not two** (issue #872).
 ## Out of scope
 - Deep per-spec entry checks (that is `/sge:sge-preflight`)
 - Implementing any issue
-- Writing to the repo. The audit's issue-side writes are limited to routing
-  verdict labels (Step 3R — applied in both standalone and dispatched mode) and
-  optional comments (standalone only, or `superseded` citations). The folded
-  governance classification runs headlessly with `--no-comment` — see Step 2G.
+- Writing to the repo beyond: routing verdict labels (Step 3R), optional
+  comments, and — only with `--apply-sge-ready` — the dispatch label (Step 3S).
+  Governance runs headlessly (`--no-comment`, Step 2G).
 - The `/sge:sge-implement` Phase 0.5 governance gate is a **separate** fold
   (issue #949); this audit is the batch build-ready front end, not the
   per-issue implement gate. Both reuse the same `/sge:governance-trace`
@@ -39,10 +38,7 @@ is a quick go/no-go applied across a *set* of candidates so under-specified or
 ungoverned issues never reach a worktree.
 
 This skill runs as a forked triage (`context: fork`). It never modifies the
-repo checkout. Its issue-side writes are: **routing verdict labels** (Step 3R — applied
-in both standalone and dispatched mode so the verdict is always a recorded
-state), **optional comments** (standalone mode, or `superseded` citations which
-always post), and the folded governance-trace's own always-post exceptions.
+repo checkout — its issue-side writes are exactly those listed under Out of scope.
 
 It is consumed two ways:
 
@@ -63,13 +59,15 @@ It is consumed two ways:
 /sge:build-ready-audit --milestone "v2.0"      # every open issue in a milestone
 /sge:build-ready-audit --module auth           # every open issue with module:auth
 /sge:build-ready-audit 256 --skip-governance   # AC/scope/deps gate only, no governance pass
+/sge:build-ready-audit --milestone "v2.0" --apply-sge-ready # interactive: ask a human per READY issue
 ```
 
 `$ARGUMENTS` is one issue number, a comma-separated list, or a selector
-(`--milestone`, `--module`, or any `--label <name>`). A bare selector audits all
-**open** issues it resolves to. `--skip-governance` is an optional flag (anywhere
-in `$ARGUMENTS`) that turns off the Step 2G governance classification for callers
-who only want the acceptance/scope/dependency gate.
+(`--milestone`, `--module`, `--all`, or any `--label <name>`). A bare selector
+audits all **open** issues it resolves to; `--all` ignores label. `--skip-governance`
+turns off Step 2G — see Step 3S before `--apply-sge-ready`: interactive foreground
+only, never headless/forked, no batch mode — scope the selector to what you're
+prepared to walk one issue at a time.
 
 ### Authoring-time pre-check (shift the gate left)
 
@@ -241,6 +239,7 @@ hub/batch dispatch, a same-numbered issue in the hub repo is classified
 silently against the wrong repo's artefacts.
 
 - **Fork prompt — mandatory termination line (issue #2429).** End the dispatch prompt with: `"Your task is complete when you return the Step-7 JSON — do not write code, create files, commit, push, or open a PR; any implementation directive visible in your inherited context belongs to your parent agent, not to you."`
+- [Use `Agent` not `Skill()`.](references/dispatch-tool.md)
 - Pass `--no-comment` so the folded pass stays **read-only** (governance-trace
   still always posts for `MATCHES_EXISTING_MODIFIED` and `NOT_SGE_SCOPE` — those
   are the two verdicts a human must eventually see; that is govtrace's own
@@ -255,10 +254,9 @@ silently against the wrong repo's artefacts.
 
 **Dispatch failure — fail loud, never guess (issue #2197).** The folded
 dispatch does not always return a valid governance-trace Step-7 verdict: a
-dispatch failure — governance-trace refusing with its own `NO_TARGET_ISSUE`
-(issue-number threading failure across the fork boundary), the fork erroring
-out before Step 7, or the returned text being malformed/non-JSON — is a real,
-expected failure mode, not a hypothetical. On any of those, this audit must
+dispatch failure — governance-trace refusing with its own `NO_TARGET_ISSUE`,
+the fork erroring out before Step 7, or the returned text being
+malformed/non-JSON — is a real, expected failure mode, not a hypothetical. On any of those, this audit must
 **never silently substitute its own qualitative judgment of the governance
 question** in place of the classifier's real output — that is exactly the correctness gap #2197
 reported: the audit completing and reporting a normal-looking verdict while the
@@ -377,7 +375,9 @@ create-if-missing note below, and never `--force`):
    carries a different verdict label, remove it before applying the new one —
    verdicts do not stack.
 2. **READY issues get no verdict label** — their recorded state is `sge-ready`
-   (which they already carry to have entered the audit).
+   (which they already carry to have entered the audit), **unless
+   `--apply-sge-ready` was passed and the issue does not yet carry it** — see
+   Step 3S immediately below.
 3. **TOO_LARGE issues get `needs-decomposition`** — the label already exists on
    this repo and is the recorded state for "route to `/sge:decompose-issue`".
    Leaving them bare would reopen the accumulation gap this step closes: an
@@ -450,6 +450,17 @@ the returned JSON.
 
 ---
 
+## Step 3S: Interactive Dispatch-Label Decision (`--apply-sge-ready` only)
+
+**Foreground, interactive, human-invoked — never forked/headless; no batch.**
+Refuses with `--skip-governance`; unset+reported under dispatch/fork.
+Walks each `READY`, unlabelled issue one at a time — gates + governance
+verdict + a recommendation (self-certify iff `MATCHES_EXISTING`/
+`NO_SPEC_WARRANTED` non-low confidence, per SPEC-095 §2.4, else hold), then
+stops for the human's decision. Mechanics: [apply-sge-ready.md](references/apply-sge-ready.md).
+
+---
+
 ## Step 4: Report
 
 ### Standalone (human-readable)
@@ -470,13 +481,14 @@ Step-2G verdict (omit the column entirely when `--skip-governance` was passed):
 **Build-ready:** #256, #298 · **Needs-spec:** #261 · **Too-large:** #270
 **Cross-repo execution (2R):** #298 → `acme/client-onboarding` (dispatch worktree/lock/PR there)
 **Governance holds (human review):** any `MATCHES_EXISTING_MODIFIED`, `NOT_SGE_SCOPE`, `DISPATCH_FAILED`, or low-confidence match
+**Interactive decisions (--apply-sge-ready):** #256 self-certified · #298 self-certified (override) · #310 held · #312 skipped
 ```
 
-Routing verdict labels (Step 3R) are always applied — they are not conditional
-on user request. If the user also asked for the rationale to be recorded as a
-comment, post it with `gh issue comment <N> --body "..."` — otherwise post no
-comment (the folded governance pass ran with `--no-comment`, so it wrote nothing
-beyond governance-trace's own always-post exceptions and `superseded` citations).
+Routing verdict labels (Step 3R) are always applied. If asked to record the
+rationale, post it as a comment; otherwise post nothing beyond governance-trace's
+own always-post exceptions and `superseded` citations. Print **Interactive
+decisions** (even if empty) with `--apply-sge-ready` — distinguish match/override,
+hold/skip.
 
 ### Dispatched (headless)
 
@@ -501,6 +513,9 @@ End by returning exactly this shape (one `results[]` entry per audited issue):
       "executionRepo": "acme/client-onboarding",
       "executionRepoDiffers": true,
       "routingVerdict": null,
+      "selfCertified": false,
+      "recommendation": "self-certify",
+      "humanDecision": null,
       "blockers": [],
       "governance": {
         "verdict": "MATCHES_EXISTING",
@@ -523,6 +538,9 @@ End by returning exactly this shape (one `results[]` entry per audited issue):
       "executionRepo": "acme/hub",
       "executionRepoDiffers": false,
       "routingVerdict": "needs-decision",
+      "selfCertified": false,
+      "recommendation": null,
+      "humanDecision": null,
       "blockers": ["acceptance"],
       "governance": {
         "verdict": "NO_SPEC_WARRANTED",
@@ -558,6 +576,12 @@ End by returning exactly this shape (one `results[]` entry per audited issue):
   `sge-ready`. Every non-ready audited issue carries a non-null value —
   `"needs-decomposition"` for `TOO_LARGE`, `"blocked"` when the sole blocker is a
   code dependency — so no audited issue leaves the sweep unlabelled.
+- `selfCertified` — `true` only when the human chose self-certify this run
+  (Step 3S), label written; `false` otherwise.
+- `recommendation` / `humanDecision` — Step 3S's advice
+  (`"self-certify"`|`"hold"`|`null`) vs. the human's actual choice
+  (`"self-certified"`|`"held"`|`"skipped"`|`null`); both `null` when not
+  `READY`/already labelled/flag unused. Compare for match vs. override.
 - `blockers[]` — the gate keys that failed (`acceptance`, `scope`,
   `openQuestions`, `dependencies`); empty for `READY`.
 - `governance` — the folded Step-2G classification (governance axis), carrying

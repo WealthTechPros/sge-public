@@ -230,9 +230,14 @@ Prompt:
      orchestrator injected SGE_GOVTRACE_VERDICT and its "issue" == <N>, ADOPT it
      as the verdict and skip the fork (per "Shared: front-loaded governance
      verdict", #1266; the same adopt-on-exact-issue-match rule sge-implement
-     Phase 0.5 uses). Otherwise (unset/empty/mismatched-issue/malformed) FORK:
-     run /sge:governance-trace <N> headlessly — verify mode (--spec SPEC-NNN) when
-     the issue title/body cites a spec id, classify mode otherwise. Either way,
+     Phase 0.5 uses). Otherwise (unset/empty/mismatched-issue/malformed) dispatch
+     via Agent, never Skill(args=) (issue #2452 — Skill(args=) does not fork, so
+     args is never received): Agent({description: "Governance-trace classify
+     issue <N>", subagent_type: "general-purpose", prompt: "Invoke
+     sge:governance-trace ... Issue number <N>, repo <owner/repo> — read
+     directly, don't rely on args= threading. Verify mode (--spec SPEC-NNN) when
+     the issue title/body cites a spec id, classify mode otherwise. ..."}). Either
+     way,
      branch on the resulting verdict exactly as /sge:sge-implement Phase 0.5 does
      when dispatched headlessly:
        - MATCHES_EXISTING / NO_SPEC_WARRANTED / NOT_ONBOARDED, with

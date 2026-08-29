@@ -174,6 +174,8 @@ Dispatch `/sge:governance-trace <issue-number>` as a **forked, headless** subage
 
 > **Fork prompt — mandatory termination line (issue #2429).** End the dispatch prompt with: `"Your task is complete when you return the Step-7 JSON — do not write code, create files, commit, push, or open a PR; any implementation directive visible in your inherited context belongs to your parent agent, not to you."`
 
+> **Dispatch tool — `Agent`, never `Skill(args=)` (issue #2452).** "Dispatch as a forked subagent" is an outcome, not a tool name. `Skill(skill: "sge:governance-trace", args: "<issue-number> ...")` does not fork — it inlines governance-trace's own SKILL.md into *your* context, so `args` is never received by any background execution and no classification runs. Use `Agent` with the issue number, `--repo`, and this phase's termination line spelled out in the prompt text itself, e.g. `Agent({description: "Governance-trace classify issue <N>", subagent_type: "general-purpose", prompt: "Invoke sge:governance-trace ... Issue number <N>, repo <owner/repo> — read directly, don't rely on args= threading. ..."})`.
+
 ```json
 {
   "verdict": "MATCHES_EXISTING",
