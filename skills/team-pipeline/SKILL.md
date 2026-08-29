@@ -116,10 +116,10 @@ file-map, read ≤ 5 files to locate the surface, then build.
 
 **Rule 2 — Draft PR on first commit.** After the **first commit** (even if
 partial), immediately `git push origin "${SGE_BRANCH_PREFIX:-fix/issue-}<N>"` and
-`gh pr create --draft --title "<title>" --body "Part of #<N>"` — do NOT wait for
+`gh pr create --draft --base "${SGE_BASE_BRANCH:-main}" --title "<title>" --body "Part of #<N>"` — do NOT wait for
 completion (the draft is the progress signal; no-draft-after-first-commit is the
-stall signal). Keep working; push each commit. Commit via `/sge:commit --no-push` — it derives the mandatory `Spec:`/`SGE-Override:` trailer itself (its step 5). The branch prefix is
-`SGE_BRANCH_PREFIX` (default `fix/issue-`); set it to `claude/issue-` for Routine
+stall signal). Keep working; push each commit. Commit via `/sge:commit --no-push` — it derives the mandatory `Spec:`/`SGE-Override:` trailer (its step 5). Branch prefix
+`SGE_BRANCH_PREFIX` (default `fix/issue-`); `claude/issue-` for Routine
 runs — see [dispatch-prompts](references/dispatch-prompts.md#branch-prefix).
 
 **Rule 3 — Cheap inline quality gates only.** Before the final push run ONLY
@@ -268,12 +268,13 @@ Set at argument-parse time:
 
 - **`agentMax`** (when `--agents` omitted): `max(1, int(nproc x 0.80 / 3))`, then
   the **hard ceiling** `min(agentMax, 15)` always — `--agents 100` resolves to
-  **15** (log `agentMax clamped 100 -> 15`); unbounded fan-out trips the Anthropic
-  rate limit. Core→agentMax + model routing: [rationale](references/rationale.md).
+  **15** (log `agentMax clamped 100 -> 15`); unbounded fan-out trips the rate
+  limit. Core→agentMax + model routing: [rationale](references/rationale.md).
 - **`waveSize`**: `--wave-size` else `min(agentMax, 5)`, then `min(waveSize, 5)`
   (never > 5). Caps lanes **live simultaneously**; the next wave waits until the
   current produces observable output (≥1 draft PR, or ≥1 lane stale/hard-killed).
-  Log `wave_size=<N>`.
+  Log `wave_size=<N>`. **Then run `resolve-limits.sh`, use its output for
+  both** (#2488) — [commands](references/mechanisms.md#phase-0--cap-file-2488).
 - **`staleKillMinutes`**: `--stale-kill` (minutes, default 20). A lane with no
   draft PR within the window is **stale** (Phase 4); NOT auto-requeued. Log
   `stale_kill_window=<N>m`.
@@ -348,6 +349,7 @@ blocking gate. **Opt-out/fallback:** any issue the batch can't classify (dropped
 errored, `--skip-governance`) arrives with no `SGE_GOVTRACE_VERDICT` and its lane
 falls through to a per-lane fork exactly as before — the gate is never skipped,
 only its fork front-loaded away. Full contract: [dispatch-prompts](references/dispatch-prompts.md).
+**Same pass, run `resolve-tier.sh` per issue, store the result** (#2488) — [commands](references/mechanisms.md#per-lane-model-tier-2488).
 
 ---
 
@@ -417,8 +419,7 @@ per the *Stoppable-Only Fan-Out Rule*). Its prompt carries the 250 000-token
 budget target, the full **Lean Agent Contract** (Rules 1–3), and these Steps
 (full template: [dispatch-prompts](references/dispatch-prompts.md)):
 
-1. Export `SGE_AGENT_ID="impl-<N>"`; cd to the worktree; read the issue (file-map
-   + ACs = entire recon).
+1. Export `SGE_AGENT_ID=impl-<N>` + `SGE_UNATTENDED=1` if unattended (#2487); cd worktree; read issue.
 2. **Governance-trace gate (MANDATORY, before writing any code):** adopt the
    front-loaded `SGE_GOVTRACE_VERDICT` (Phase 1.5) when it matches this issue,
    else run `/sge:governance-trace <N>` via `Agent`, never `Skill(args=)`
@@ -619,31 +620,30 @@ A **carve-out** PR (lockfiles, shared config, CI workflows, codegen/migrations,
 or bot-authored) has global blast radius: partial test runs are **not**
 evidence of green — **never consider it green until the full suite passes on
 CI**, enforced by pr-monitor, the Phase 4 monitor, and the Phase 3d agent.
-Detector + detail: [`pr-monitor` Appendix A](../pr-monitor/SKILL.md#appendix-a--global-blast-radius-carve-outs).
+Detector: [`pr-monitor` Appendix A](../pr-monitor/SKILL.md#appendix-a--global-blast-radius-carve-outs).
 
 ---
 
 ## Troubleshooting
 
-Recovery for "No issues found", "Worktree already exists" (incl. cross-repo),
-"Agent stalled", "CI gate blocking", "PR stuck as DRAFT":
-[troubleshooting](references/troubleshooting.md).
+Recovery for "No issues found", "Worktree already exists", "Agent stalled",
+"CI gate blocking", "PR stuck as DRAFT": [troubleshooting](references/troubleshooting.md).
 
 ---
 
 ## Related commands
 
-- `/sge:issue-swarm` (router stub to Duration Mode) · `/sge:issue-loop` (serial queue-drain, full `/sge:sge-implement`)
-- `/sge:available-issues`, `/sge:build-ready-audit`, `/sge:decompose-issue` — Duration Mode discover → gate → decompose front end
-- `/sge:tidy-worktrees` — Phase 0.5's non-flush candidates hand-off (never pushed)
-- `/sge:sge-implement [N]` — single issue end-to-end (interactive; fix path for governance-blocked lanes)
-- `/sge:governance-trace [N]` — the pre-build classification gate; batch-run up front (Phase 1.5), front-loaded per lane as `SGE_GOVTRACE_VERDICT` (#1266)
-- `/sge:pr-monitor`, `/sge:pr-review [PR]`, `/sge:pr-fix [PR]` — PR shepherd / single-PR review / drive one PR green
-- `/sge:cleanup`, `/sge:reap-orphans` — dev-box reset + orphan reaper (`/loop 30m …` for hygiene)
+- `/sge:issue-swarm` (router stub) · `/sge:issue-loop` (serial, full `/sge:sge-implement`)
+- `/sge:available-issues`, `/sge:build-ready-audit`, `/sge:decompose-issue` — discover/gate/decompose
+- `/sge:tidy-worktrees` — Phase 0.5 non-flush hand-off (never pushed)
+- `/sge:sge-implement [N]` — single issue end-to-end (blocked-fix path)
+- `/sge:governance-trace [N]` — pre-build gate; batched (Phase 1.5) as `SGE_GOVTRACE_VERDICT` (#1266)
+- `/sge:pr-monitor`, `/sge:pr-review [PR]`, `/sge:pr-fix [PR]` — shepherd/review/drive green
+- `/sge:cleanup`, `/sge:reap-orphans` — dev-box reset+reaper (`/loop 30m` hygiene)
 
-Shared references (canonical — cited above): [`worktrees`](../worktrees/SKILL.md) ·
+Shared refs (canonical, cited above): [`worktrees`](../worktrees/SKILL.md) ·
 [`gh-repo`](../gh-repo/SKILL.md) · [`exit-report`](../exit-report/SKILL.md).
-Bundled reference material: [budget-model](references/budget-model.md) ·
+Bundled: [budget-model](references/budget-model.md) ·
 [dispatch-prompts](references/dispatch-prompts.md) ·
 [mechanisms](references/mechanisms.md) · [rationale](references/rationale.md) ·
 [troubleshooting](references/troubleshooting.md)

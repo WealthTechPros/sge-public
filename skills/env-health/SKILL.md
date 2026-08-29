@@ -98,6 +98,17 @@ Any single failure → leave it alone:
    be a test-server an agent just legitimately started; only a long-lived one
    with a dead owner is a zombie.
 
+**Platform detect (shared with B2 below — one flag, not two idioms, issue
+#2489 review).** Set once per invocation and reused everywhere a Windows
+branch is needed:
+
+```bash
+IS_WINDOWS=0
+case "$(uname -s 2>/dev/null || echo unknown)" in
+  MINGW*|MSYS*) IS_WINDOWS=1 ;;
+esac
+```
+
 ```bash
 # Stack-agnostic-ish sketch (POSIX/Linux ps; adapt field names per platform).
 # ZOMBIE_NAME_RE and PROTECT_RE come from CLAUDE.md (defaults below).
@@ -105,17 +116,46 @@ ZOMBIE_NAME_RE="${ZOMBIE_NAME_RE:-playwright.*(test-server|test server)|(next|vi
 PROTECT_RE="${PROTECT_RE:-mcp|claude|anthropic|tsserver|eslint_d|gopls|language-server}"
 GRACE_MIN="${GRACE_MIN:-30}"
 
-SELF_TREE=$(pstree -p $$ 2>/dev/null | grep -oE '[0-9]+' | sort -u)  # never kill self/ancestors
+if [ "$IS_WINDOWS" = "1" ]; then
+  # `pstree`/`ps -eo` don't exist under Git-Bash/MSYS -- reap via PowerShell
+  # directly instead of forcing POSIX ps semantics onto a platform that
+  # doesn't have them (issue #2489 review: a permanent SKIP_REAP with no
+  # working fallback silently disables the reaper on every Windows run
+  # forever, which is its own throughput-collapse risk).
+  #
+  # Self/ancestor safety here comes from Get-CimInstance's own ParentProcessId
+  # chain (walked in PowerShell, not shelled through grep), so there is no
+  # SELF_TREE-emptiness hazard to fail closed on.
+  powershell.exe -NoProfile -Command '
+    $graceSec = 1800
+    $reapableName = "next|vite|webpack|nuxt|remix|playwright|test-server"
+    $self = $PID
+    $ancestors = @($self)
+    $p = Get-CimInstance Win32_Process -Filter "ProcessId=$self" -ErrorAction SilentlyContinue
+    while ($p -and $p.ParentProcessId -and $p.ParentProcessId -ne 0) {
+      $ancestors += $p.ParentProcessId
+      $p = Get-CimInstance Win32_Process -Filter "ProcessId=$($p.ParentProcessId)" -ErrorAction SilentlyContinue
+    }
+    Get-CimInstance Win32_Process | Where-Object {
+      $_.CommandLine -match $reapableName -and
+      $ancestors -notcontains $_.ProcessId -and
+      $_.CommandLine -notmatch "mcp|claude|anthropic|tsserver|eslint_d|gopls" -and
+      (Get-Date) - $_.CreationDate -gt (New-TimeSpan -Seconds $graceSec)
+    } | ForEach-Object { "REAPABLE pid=$($_.ProcessId) :: $($_.CommandLine)" }
+  ' 2>/dev/null | tr -d '\r'
+else
+  SELF_TREE=$(pstree -p $$ 2>/dev/null | grep -oE '[0-9]+' | sort -u)  # never kill self/ancestors
 
-# etimes = elapsed seconds; ppid = parent; comm/args = name
-ps -eo pid=,ppid=,etimes=,args= | while read -r pid ppid etimes args; do
-  printf '%s' "$args" | grep -qiE "$PROTECT_RE" && continue          # allowlist
-  printf '%s\n' "$SELF_TREE" | grep -qx "$pid" && continue           # self/ancestor
-  printf '%s' "$args" | grep -qiE "$ZOMBIE_NAME_RE" || continue      # heuristic 1
-  [ "$ppid" -eq 1 ] || ! kill -0 "$ppid" 2>/dev/null || continue     # heuristic 2: orphaned
-  [ "$etimes" -ge $(( GRACE_MIN * 60 )) ] || continue                # heuristic 3: aged
-  echo "REAPABLE pid=$pid age=${etimes}s ppid=$ppid :: $args"
-done
+  # etimes = elapsed seconds; ppid = parent; comm/args = name
+  ps -eo pid=,ppid=,etimes=,args= | while read -r pid ppid etimes args; do
+    printf '%s' "$args" | grep -qiE "$PROTECT_RE" && continue          # allowlist
+    printf '%s\n' "$SELF_TREE" | grep -qx "$pid" && continue           # self/ancestor
+    printf '%s' "$args" | grep -qiE "$ZOMBIE_NAME_RE" || continue      # heuristic 1
+    [ "$ppid" -eq 1 ] || ! kill -0 "$ppid" 2>/dev/null || continue     # heuristic 2: orphaned
+    [ "$etimes" -ge $(( GRACE_MIN * 60 )) ] || continue                # heuristic 3: aged
+    echo "REAPABLE pid=$pid age=${etimes}s ppid=$ppid :: $args"
+  done
+fi
 ```
 
 ### Reap procedure — graceful, then verify
@@ -171,19 +211,99 @@ Past the machine's core count, extra parallelism **inverts** — total PR output
 *drops* and the afternoon ramp never happens. Align with the existing
 `team-pipeline` resource model rather than inventing a new one:
 
+**Windows / Git-Bash (MSYS/MINGW) pitfall (issue #2489).** `nproc`, `free`,
+and `pstree` are absent (or wrong) under Git-Bash on Windows. `nproc` there
+silently falls through to the `echo 4` default regardless of the box's real
+core count, and `free` returns nothing — the memory comparison then evaluates
+against an empty string and never throttles. The result isn't a loud failure,
+it's a **wrong verdict**: on 2026-08-29 this let 7 lanes fan out on a 16-core
+Windows host with zero throttling. **Detect the platform first and branch —
+never let a missing Linux tool fall through to a guessed constant:**
+
 ```bash
-CORES=$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
-LOAD=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null \
-  || sysctl -n vm.loadavg 2>/dev/null | awk '{print $2}' || echo 0)
-LOAD_INT=${LOAD%.*}
-LOAD_LIMIT=$(( CORES * 80 / 100 ))
+# IS_WINDOWS set once, shared with Component A's reaper (above).
+if [ "$IS_WINDOWS" = "1" ]; then
+  # Git-Bash/MSYS on Windows: nproc/free/pstree are absent or unreliable —
+  # shell out to PowerShell for ground truth instead of guessing. One
+  # process, one call, all four numbers on one pipe-delimited line — not
+  # four separate powershell.exe spawns (each ~100-300ms of process-creation
+  # overhead on Windows; four serial calls measurably slow every preflight).
+  PS_OUT=$(powershell.exe -NoProfile -Command '
+    $os = Get-CimInstance Win32_OperatingSystem
+    $cs = Get-CimInstance Win32_ComputerSystem
+    $sessions = (Get-Process -ErrorAction SilentlyContinue |
+      Where-Object { $_.ProcessName -match "^(claude|node)$" } |
+      Measure-Object).Count
+    "$($cs.NumberOfLogicalProcessors)|$($os.FreePhysicalMemory)|$($os.TotalVisibleMemorySize)|$sessions"
+  ' 2>/dev/null | tr -d '\r')
+  # One atomic snapshot from Get-CimInstance -- no separate free/total reads
+  # to race against each other (no TOCTOU window).
+  IFS='|' read -r CORES FREE_KB TOTAL_KB SESSIONS <<EOF
+$PS_OUT
+EOF
 
-# Count live agent/session processes across ALL repos on this box, not just this one.
-SESSIONS=$(ps -eo args= | grep -ciE 'claude( |$)' )
+  # Validate every field is actually numeric before trusting it -- a stray
+  # PowerShell warning/banner line on stdout must not reach bash arithmetic
+  # (that throws a syntax error, not a graceful degrade) or a silently wrong
+  # "successful" read (issue #2489 review). `printf %d` fails loudly on a
+  # non-numeric string, which is exactly the fail-closed signal we want here.
+  is_num() { [ -n "$1" ] && printf '%d' "$1" >/dev/null 2>&1; }
 
-# RAM headroom (Linux): refuse if available memory is under ~10%.
-MEM_FREE_PCT=$(free 2>/dev/null | awk '/Mem:/{printf "%d", $7*100/$2}')
+  if is_num "$CORES" && is_num "$FREE_KB" && is_num "$TOTAL_KB" \
+     && is_num "$SESSIONS" && [ "$TOTAL_KB" -gt 0 ]; then
+    MEM_FREE_PCT=$(( FREE_KB * 100 / TOTAL_KB ))
+    FREE_GB=$(( FREE_KB / 1024 / 1024 ))
+    # Issue #2489's proposed absolute floor: THROTTLE below 8 GB free
+    # regardless of percentage (a 64GB box at 12% free is still 7.7GB --
+    # fine; a 16GB box at 12% free is 1.9GB -- not fine). Fold the floor into
+    # the percentage signal so the verdict table below stays one comparison.
+    [ "$FREE_GB" -lt 8 ] && MEM_FREE_PCT=5
+    # No POSIX loadavg on Windows -- RAM + session count carry the
+    # saturation signal on this branch, not CPU load.
+    LOAD_INT=0
+    LOAD_LIMIT=$(( CORES * 80 / 100 ))
+  else
+    # powershell.exe unavailable, blocked, or returned garbage -- this is a
+    # DEGRADED signal, not "everything's fine": THROTTLE, never silently
+    # PASS. (The original bug this PR fixes was exactly this shape: a
+    # missing tool quietly producing a safe-looking default that let the
+    # REFUSE/THROTTLE branches never fire.) Force the THROTTLE row by
+    # landing load in the 60-80%-of-cores band and clamping RAM below the
+    # REFUSE floor but above the "actually starving" range, then rely on
+    # every downstream re-check (heartbeat, next preflight) to recover a
+    # real reading once the probe starts working again.
+    CORES=${CORES:-4}; is_num "$CORES" || CORES=4
+    LOAD_LIMIT=$(( CORES * 80 / 100 ))
+    LOAD_INT=$(( LOAD_LIMIT * 70 / 100 ))   # ~70% of cores -> lands in THROTTLE band
+    MEM_FREE_PCT=15                          # above the 10% REFUSE floor
+    SESSIONS=0
+    echo "ENV_HEALTH_DEGRADED: powershell.exe probe failed or returned non-numeric output; forcing THROTTLE (never silent PASS) until the next successful probe"
+  fi
+else
+  CORES=$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
+  LOAD=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null \
+    || sysctl -n vm.loadavg 2>/dev/null | awk '{print $2}' || echo 0)
+  LOAD_INT=${LOAD%.*}
+  LOAD_LIMIT=$(( CORES * 80 / 100 ))
+
+  # Count live agent/session processes across ALL repos on this box, not just this one.
+  SESSIONS=$(ps -eo args= | grep -ciE 'claude( |$)' )
+
+  # RAM headroom (Linux): refuse if available memory is under ~10%.
+  MEM_FREE_PCT=$(free 2>/dev/null | awk '/Mem:/{printf "%d", $7*100/$2}')
+fi
 ```
+
+**Never REFUSE solely because a Linux tool is missing** — a missing `nproc`/
+`free`/`pstree` is a platform-detection problem, not a saturation signal.
+Route it to the Windows branch above; if `powershell.exe` itself is
+unavailable or its output can't be parsed as numbers, that branch forces
+**THROTTLE** (never a silent PASS, never a REFUSE-on-a-guess) so the gate
+always produces a real, safe verdict instead of defaulting to "can't
+throttle" or "can't fan out at all". On total probe failure the fallback
+values are deliberately chosen to land in the THROTTLE row of the table
+below on every path (load, memory, *and* session-saturation), not just one —
+a degraded reading must never fall through to PASS.
 
 Verdict logic:
 

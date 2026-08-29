@@ -45,6 +45,31 @@ state; the convention's proposed extensions are wired separately.
 
 ---
 
+## Phase 0 — cap file (#2488)
+
+After computing `agentMax`/`waveSize` per core SKILL.md's formulas (and
+applying any explicit `--agents`/`--wave-size` overrides, which still take
+precedence), run `resolve-limits.sh` and **use its output** for the values
+written into `/tmp/team-pipeline-state.json` — do not skip this even when no
+cap file exists, since it also enforces the hard ceilings:
+
+```bash
+LIMITS_JSON=$(bash "${CLAUDE_PLUGIN_ROOT:-.}/skills/team-pipeline/assets/resolve-limits.sh" "$agentMax" "$waveSize")
+agentMax=$(printf '%s' "$LIMITS_JSON" | jq -r .agentMax)
+waveSize=$(printf '%s' "$LIMITS_JSON" | jq -r .waveSize)
+CAPPED=$(printf '%s' "$LIMITS_JSON" | jq -r .capped)
+[ "$CAPPED" = "true" ] && echo "[Cap] repo .claude/sge-limits.json lowered agentMax=$agentMax waveSize=$waveSize"
+```
+
+The script reads `.claude/sge-limits.json` at the repo root by default (or
+`$CAP_FILE` if set) — `{"maxAgents":N,"maxWaveSize":N}`, either key optional —
+and only ever **lowers** `agentMax`/`waveSize`, never raises them past the
+computed defaults or the hard ceilings (15 agents / 5 wave). Absent,
+unreadable, or malformed → the computed defaults pass through unchanged
+(`capped:false`), so this step is always safe to run unconditionally.
+
+---
+
 ## Phase 0.5 — Flush unpushed worktrees (two-gate reconcile)
 
 Context: never flush landed work. In the 2026-07-06 run, 27 of 28 unpushed
@@ -53,9 +78,10 @@ squash merges (which leave no shared ancestry, so "unpushed" heuristics lie);
 flushing verbatim would have opened ~27 garbage draft PRs and burned a CI run +
 review-lane dispatch on each. A candidate is flushed only if **both** gates pass:
 
-1. **Novelty gate** — `git cherry origin/main` shows commits whose patches are
-   not already on main (patch-id equivalence, robust to *single-commit* squash
-   merges, which collapse to an identical patch-id).
+1. **Novelty gate** — `git cherry origin/<base-branch>` (`main` by default;
+   `$SGE_BASE_BRANCH` if set, issue #2486) shows commits whose patches are not
+   already on the base branch (patch-id equivalence, robust to *single-commit*
+   squash merges, which collapse to an identical patch-id).
 2. **Open-issue gate** — the linked issue is still **open**. A branch for a
    closed issue is presumed landed, not lost. This gate catches the
    *multi-commit* squash false-positive that slips past gate 1.
@@ -69,12 +95,18 @@ emits JSON — `candidates[]` with a per-worktree `decision` of `"flush"` or
 `"tidy"` plus the reason, and a `summary.{flush,tidy}` count.
 
 ```bash
-git fetch origin main --quiet    # git cherry needs a current origin/main
+# Base branch (issue #2486): honour SGE_BASE_BRANCH here too, not just at
+# worktree-creation time — a repo whose integration branch isn't `main` (e.g.
+# `uat`) needs its flush-candidate classification and draft PRs based off the
+# same ref the lanes themselves branched from.
+BASE_BRANCH="${SGE_BASE_BRANCH:-main}"
+git fetch origin "$BASE_BRANCH" --quiet    # git cherry needs a current origin/$BASE_BRANCH
 
 # Classify every flush candidate (both layouts) through the #856 two-gate
 # reconcile. WORKTREE_BASE/SIBLING_BASE drive discovery; BASE defaults to
-# origin/main. Exit 2 = harness error (not in a repo / missing base ref).
-report=$(BASE=origin/main WORKTREE_BASE="$WORKTREE_BASE" SIBLING_BASE="$SIBLING_BASE" \
+# origin/main but now follows SGE_BASE_BRANCH. Exit 2 = harness error (not in
+# a repo / missing base ref).
+report=$(BASE="origin/$BASE_BRANCH" WORKTREE_BASE="$WORKTREE_BASE" SIBLING_BASE="$SIBLING_BASE" \
   bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/team-pipeline/assets/reconcile-flush.sh")
 
 # Push + draft-PR the decision:"flush" candidates only; report the rest as
@@ -98,7 +130,7 @@ printf '%s' "$report" \
       # `Part of`, never `Fixes` (#2241): this flush opens PRs for stranded
       # branches with NO knowledge of whether the work is complete, so it must
       # never emit a keyword that auto-closes the issue on merge.
-      gh pr create --head "$branch" --base main --draft \
+      gh pr create --head "$branch" --base "$BASE_BRANCH" --draft \
         --title "$commit_msg" --body "Part of #${issue}" 2>/dev/null \
         && echo "[Flush] PR created for #$issue"
     done
@@ -257,6 +289,48 @@ GOVTRACE_VERDICT=$(node -e "
 # GOVTRACE_VERDICT is empty string when not in map — the lane falls through to its own fork.
 ```
 
+### Per-lane model tier (#2488)
+
+**Same Phase 1.5 pass, after the governance batch above** (or before it —
+order doesn't matter, the two are independent): resolve each queued issue's
+model tier and merge it into the same state file, so the map exists before
+Phase 3c dispatches any lane:
+
+```bash
+TIER_MAP="{}"
+for N in $(cat /tmp/team-pipeline-queue.json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).join("\n")))'); do
+  TIER=$(bash "${CLAUDE_PLUGIN_ROOT:-.}/skills/team-pipeline/assets/resolve-tier.sh" "$N" 2>/dev/null) || TIER="sonnet"
+  TIER_MAP=$(printf '%s' "$TIER_MAP" | node -e "
+    let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+      const m = JSON.parse(s); m['$N'] = '$TIER'; process.stdout.write(JSON.stringify(m));
+    })")
+done
+
+node -e "
+  const fs = require('fs');
+  const f = '/tmp/team-pipeline-state.json';
+  const st = JSON.parse(fs.readFileSync(f,'utf8'));
+  st.tierMap = $(printf '%s' "$TIER_MAP");
+  fs.writeFileSync(f, JSON.stringify(st, null, 2));
+"
+echo "[Phase 1.5] Resolved model tier for $(printf '%s' "$TIER_MAP" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(Object.keys(JSON.parse(s)).length))') issues"
+```
+
+**Look up at dispatch time (Phase 3c), alongside `GOVTRACE_VERDICT` above:**
+
+```bash
+TIER=$(node -e "
+  const st = require('/tmp/team-pipeline-state.json');
+  process.stdout.write((st.tierMap || {})['$N'] || 'sonnet');
+")
+# TIER defaults to "sonnet" when Phase 1.5 didn't cover this issue (e.g. a
+# single-issue run that skipped the >= 2-issue batch gate above) — never
+# leave the Agent() dispatch call's model parameter unset.
+```
+
+Pass `$TIER` as the `model` argument on the lane's `Agent(name: "impl-<N>",
+model: $TIER)` dispatch (SKILL.md Phase 3c / [dispatch-prompts](dispatch-prompts.md)).
+
 Include `GOVTRACE_VERDICT` in the lane Task prompt as:
 
 ```
@@ -361,8 +435,49 @@ gh issue edit "$ISSUE" --add-label "agent-lock" 2>/dev/null \
 # common same-repo case). Record EXEC_ROOT/EXEC_REPO on the lane's state entry
 # so Phase 4/6 cleanup removes the tree from the right checkout.
 BRANCH_PREFIX="${SGE_BRANCH_PREFIX:-fix/issue-}"   # default preserves fix/issue-<N>
-git -C "$EXEC_ROOT" worktree add \
-  "$EXEC_WT_BASE/issue-${ISSUE}" -b "${BRANCH_PREFIX}${ISSUE}" origin/main
+
+# Base branch (issue #2486): a raw hardcoded `origin/main` is wrong for a repo
+# whose integration branch isn't `main` (e.g. `uat`) — lanes would start from
+# the wrong ref. Honour SGE_BASE_BRANCH (default `main`) for BOTH the worktree
+# base here and the PR base in Rule 2's `gh pr create` (dispatch-prompts.md) —
+# EXPORT it so the dispatched lane subagent inherits it too, since a separate
+# agent invocation does not see this shell's local variables.
+export BASE_BRANCH="${SGE_BASE_BRANCH:-main}"
+# EXEC_ROOT may be a different checkout than the one that fetched BASE_BRANCH
+# above (cross-repo execution, SPEC-057/#1024) — fetch it here too so the
+# worktree-add fallback below always has a current origin/$BASE_BRANCH.
+git -C "$EXEC_ROOT" fetch origin "$BASE_BRANCH" --quiet
+
+# Worktree-creation hook (issue #2486): a raw `git worktree add` bypasses any
+# repo-owned worktree script — e.g. a repo that junctions node_modules from the
+# main checkout and warms a build cache to avoid a cold install per lane
+# (measured: ~1s vs 10-13 min, and on Windows a raw tree can land deep enough to
+# exceed MAX_PATH and break the toolchain). Prefer, in order:
+#   1. SGE_WORKTREE_CMD — an explicit command/script the caller sets. May be a
+#      multi-word invocation (e.g. `node scripts/new-worktree.js`); it is
+#      word-split intentionally, so a path containing spaces is unsupported.
+#   2. scripts/new-worktree.sh <path> <branch> <base> — the conventional
+#      in-repo hook, if the execution repo ships one.
+#   3. Fall back to raw `git worktree add`, now parameterised by BASE_BRANCH
+#      instead of hardcoded to `origin/main`.
+WT_HOOK_ARR=()
+if [ -n "${SGE_WORKTREE_CMD:-}" ]; then
+  read -ra WT_HOOK_ARR <<< "$SGE_WORKTREE_CMD"
+elif [ -x "$EXEC_ROOT/scripts/new-worktree.sh" ]; then
+  WT_HOOK_ARR=("$EXEC_ROOT/scripts/new-worktree.sh")
+fi
+
+if [ "${#WT_HOOK_ARR[@]}" -gt 0 ]; then
+  "${WT_HOOK_ARR[@]}" "$EXEC_WT_BASE/issue-${ISSUE}" "${BRANCH_PREFIX}${ISSUE}" "$BASE_BRANCH" \
+    || { echo "[Skip] #$ISSUE — worktree hook failed (${WT_HOOK_ARR[*]})"; continue; }
+  # A hook that exits 0 without creating the worktree is a silent failure
+  # (issue #2486 review) — verify the path actually exists before continuing.
+  [ -d "$EXEC_WT_BASE/issue-${ISSUE}" ] \
+    || { echo "[Skip] #$ISSUE — worktree hook exited 0 but did not create $EXEC_WT_BASE/issue-${ISSUE}"; continue; }
+else
+  git -C "$EXEC_ROOT" worktree add \
+    "$EXEC_WT_BASE/issue-${ISSUE}" -b "${BRANCH_PREFIX}${ISSUE}" "origin/$BASE_BRANCH"
+fi
 ```
 
 Record on the lane's state entry (for Phase 4/6 cleanup + age tracking):
