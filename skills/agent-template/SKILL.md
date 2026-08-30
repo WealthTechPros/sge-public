@@ -161,6 +161,25 @@ must not skip the memory of the work. Write shape + closed vocabulary:
 
 ---
 
+## SGE_UNATTENDED env propagation (#2487)
+
+If your custom orchestrator runs unattended (`--unattended`, or
+`SGE_UNATTENDED=1` already set in its own environment), export
+`SGE_UNATTENDED=1` as an early step in **every** dispatched lane's prompt —
+same convention as `SGE_GOVTRACE_VERDICT` injection and `SGE_AGENT_ID`
+above. `hooks/design-gate.sh` and `hooks/ui-edit-tracker.sh` (SPEC-115) read
+this var from their own process environment; those hooks are fresh
+processes spawned per hook event for the *lane's own* session, so they never
+see a var the orchestrator merely `export`ed in its own, separate session.
+Without this, a lane that edits a UI file gets nudged and then blocked at
+Stop with no human to produce the required design-reviewer verdict, and runs
+to its hard-kill timeout instead of terminating cleanly. This does not
+loosen the merge gate — `/sge:pr-review`'s design-evidence check still
+requires a passing verdict for UI-touching PRs regardless of
+`SGE_UNATTENDED`.
+
+---
+
 ## Stoppable-only fan-out rule (reminder)
 
 Every agent your custom orchestrator spawns **MUST be stoppable via `TaskStop`**.
@@ -182,6 +201,7 @@ gate's decision strands a worktree.
 [ ] Stoppable-only: every spawned agent is a named Task (not remote/detached)
 [ ] Per-Task budget ceiling stated in every Task prompt
 [ ] Draft PR after first commit (lane Rule 2); stale-lane kill on no-PR timeout
+[ ] Unattended orchestrator: export SGE_UNATTENDED=1 in every dispatched lane's prompt (#2487)
 ```
 
 ---

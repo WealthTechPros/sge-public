@@ -143,11 +143,21 @@ simultaneously), so `agentMax = max(1, int(nproc x 0.80 / 3))`:
 **Model routing (lowest-safe tier per agent):** route each spawned agent to the
 cheapest model that is safe for its task, per
 [`agents/agent-registry.md`](../../../agents/agent-registry.md). Implementation
-agents run at **sonnet**; review agents at **sonnet** (escalating to **opus** on
-security-globbed diffs); the PR monitor's triage / CI-check / label work is
+agents were flat-routed to **sonnet** for every issue until #2488: every lane —
+a dead-file deletion and a schema migration alike — inherited the same tier
+(worse, prior to #2488 no `model` was even passed to the spawn, so a lane
+silently inherited whatever model the orchestrator's own session happened to be
+running, e.g. a 1M-context Opus-class model for a mechanical rename). Phase 1.5
+now resolves a **per-issue** `tier` (`resolve-tier.sh`, #2488) — mechanical/
+docs/rename ≤ 50 lines → `haiku`; the sonnet default is unchanged for
+ordinary implementation work; migration/cross-package-schema/UI-design-
+judgement → `opus` — and Phase 3c passes it as `Agent(name:, model: <tier>)`.
+Review agents still run at **sonnet** (escalating to **opus** on
+security-globbed diffs); the PR monitor's triage / CI-check / label work stays
 **haiku**-tier. The registry's CRITICAL escalation rule is absolute — anything
 touching security/auth, DB migrations, or multi-tenant isolation runs at
-**opus** regardless of how mechanical it looks.
+**opus** regardless of how mechanical it looks, and `resolve-tier.sh` applies
+that override last, after any haiku/opus signal match.
 
 ---
 

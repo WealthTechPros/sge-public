@@ -78,9 +78,13 @@ always win over the mix.
   agent file pins; for the native `/code-review` engine it scales *effort*
   (low → ultra) to risk, which is the same lowest-safe principle applied to a
   non-agent engine.
-- **`/sge:team-pipeline`** spawns implementation agents (sonnet) and review
-  agents (sonnet/opus per escalation); its monitor/triage/discovery work is
-  haiku-tier.
+- **`/sge:team-pipeline`** resolves a **per-issue** tier for each implementation
+  lane (`skills/team-pipeline/assets/resolve-tier.sh`, issue #2488) instead of
+  a flat sonnet default — haiku for mechanical/docs/rename work, sonnet for the
+  ordinary default, opus for migration/cross-package-schema/UI-design work, with
+  the CRITICAL escalation rule always winning — and passes it as
+  `Agent(name:, model: <tier>)`; review agents run sonnet/opus per escalation;
+  its monitor/triage/discovery work is haiku-tier.
 - **A spawn may pin a tier explicitly** when it knows the task is cheaper than
   the agent's default — e.g. dispatching a discovery-only pass on the
   `@code-reviewer` agent at haiku. The registry tells the orchestrator which

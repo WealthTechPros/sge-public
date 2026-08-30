@@ -76,6 +76,36 @@ keeping the blocking gate intact for every branch.
 
 ---
 
+## Shared: unattended env propagation (#2487)
+
+**`SGE_UNATTENDED=1` does not reach a dispatched lane's hooks on its own.**
+`hooks/design-gate.sh` and `hooks/ui-edit-tracker.sh` (SPEC-115, the design-
+quality Stop/PostToolUse hooks force-installed via `hooks/hooks.json`) stand
+down only when `SGE_UNATTENDED=1` is present in *their own* process
+environment. Those hooks are fresh processes the harness spawns per hook
+event for the lane's own session — they inherit whatever the **lane**
+exported via its own Bash tool calls, never a var the orchestrator merely
+`export`ed in its own, separate session. (This is the identical mechanism
+`SGE_AGENT_ID` already relies on for token-meter attribution — see "Steps"
+Step 0 in the impl-lane prompt below.)
+
+**So:** whenever the orchestrator dispatching a lane is itself running
+unattended (`--unattended` was passed to it, or `SGE_UNATTENDED=1` was
+already set in its own environment), every dispatched lane's prompt — impl,
+review, and pr-monitor alike — must include an explicit `export
+SGE_UNATTENDED=1` as an early step, exactly as it already includes `export
+SGE_AGENT_ID=...`. Omit it entirely (do not export `SGE_UNATTENDED=0` or
+leave it blank) when the orchestrator itself is attended — attended lanes
+keep the design-gate enforcement active, which is correct.
+
+**This does not weaken the merge gate.** `SGE_UNATTENDED=1` PRs are NOT
+exempt from `/sge:pr-review`'s design-evidence check (`references/design-
+evidence.md`) — only the mid-run session hooks stand down; the PR-level gate
+is the sole enforcement point left for an unattended UI-touching lane, by
+design.
+
+---
+
 ## PR monitor (Phase 2) — Task name `"pr-monitor"`
 
 ```
@@ -95,6 +125,14 @@ Prompt:
   `gh api rate_limit` before REST bursts; on a REST 403/429 rate-limit, switch
   to GraphQL for the rest of the run and log the stall distinctly. You share
   ONE REST bucket with every sibling lane.
+
+  <IF the orchestrator dispatching you is itself running unattended
+  (--unattended was passed, or SGE_UNATTENDED=1 was already set in its own
+  environment), run this FIRST, before anything else, and keep it exported
+  for your whole run (#2487 — see "Shared: unattended env propagation"
+  above; this stands down hooks/design-gate.sh and hooks/ui-edit-tracker.sh
+  for any file edit you make, e.g. via a dispatched /sge:pr-fix):>
+    export SGE_UNATTENDED=1
 
   Run /sge:pr-monitor continuously until the orchestrator signals you to stop.
 
@@ -120,8 +158,16 @@ Phase 6. **Do NOT spawn this as a detached background Agent or with
 
 ## Implementation lane (Phase 3c) — Task name `"impl-<N>"`
 
+Dispatched via `Agent(name: "impl-<N>", model: <tier>)` — `<tier>` is the
+queue entry's Phase 1.5-resolved model tier (`haiku`/`sonnet`/`opus`, #2488;
+resolved via `resolve-tier.sh`, looked up from `tierMap` —
+[commands](mechanisms.md#per-lane-model-tier-2488)). Naming it `"impl-<N>"`
+keeps it a stoppable "named Task" per the Stoppable-Only Fan-Out Rule —
+`model` changes which model the lane runs on, not its stoppability.
+
 ```
 Task name: "impl-<N>"
+Model tier: <tier>   # haiku | sonnet | opus — Phase 1.5 batch resolution (#2488)
 Prompt:
   Implement GitHub issue #<N> (tracked in <TRACKING_REPO>).
   Execution repo: <EXEC_REPO>  (where the branch + PR live; == the tracking
@@ -133,6 +179,9 @@ Prompt:
     issue, injected by the orchestrator's Phase 1.5 batch pre-classification;
     absent when the batch could not classify this issue — see Step 3 / "Shared:
     front-loaded governance verdict", #1266>
+  SGE_UNATTENDED: <"1" when the orchestrator dispatching you is itself running
+    unattended (--unattended or SGE_UNATTENDED=1 in its own environment), else
+    absent — see Step 0 below and "Shared: unattended env propagation", #2487>
 
 
   ## Budget contract (self-discipline — see team-pipeline's "Per-Task
@@ -173,13 +222,18 @@ Prompt:
   tracking issue when it merges in another repo.
   Use `Part of`, NEVER `Fixes`/`Closes` (issue #2241): this PR is opened on your
   FIRST commit and is incomplete by construction, so a closing keyword would
-  auto-close the tracking issue on merge while ACs remain. The closing keyword is
-  decided at completion, not here:
+  auto-close the tracking issue on merge while ACs remain. Pass `--base`
+  EXPLICITLY (issue #2486) — an omitted `--base` silently falls through to the
+  repo's GitHub default branch instead of the base your worktree was actually
+  branched from. `SGE_BASE_BRANCH` (default `main`) is exported once in the
+  shared pipeline environment the same way `SGE_BRANCH_PREFIX` is (see [Branch
+  prefix](#branch-prefix)) — every lane, including yours, inherits it; do not
+  hardcode `main`. The closing keyword is decided at completion, not here:
     git push origin "${SGE_BRANCH_PREFIX:-fix/issue-}<N>"
     # same-repo:
-    gh pr create --draft --title "<conventional title>" --body "Part of #<N>"
+    gh pr create --draft --base "${SGE_BASE_BRANCH:-main}" --title "<conventional title>" --body "Part of #<N>"
     # cross-repo (execution repo != tracking repo), e.g. Part of owner/repo#<N>:
-    gh pr create --draft --title "<conventional title>" --body "Part of <TRACKING_REPO>#<N>"
+    gh pr create --draft --base "${SGE_BASE_BRANCH:-main}" --title "<conventional title>" --body "Part of <TRACKING_REPO>#<N>"
   Do NOT wait until all work is done to open the PR. Opening it early surfaces
   the branch to CI and lets the orchestrator detect you are making progress.
 
@@ -220,7 +274,21 @@ Prompt:
      orchestrator's real token accounting — #857; do NOT self-report a token
      count anywhere):
        export SGE_AGENT_ID="impl-<N>"
-     Keep this exported for the whole lane so every metered turn carries it.
+     <IF the orchestrator dispatching you is itself running unattended
+     (--unattended was passed, or SGE_UNATTENDED=1 was already set in its own
+     environment), ALSO run:>
+       export SGE_UNATTENDED=1
+     <#2487 — hooks/design-gate.sh and hooks/ui-edit-tracker.sh (SPEC-115) are
+     fresh processes spawned per hook event; they only see this if YOU export
+     it in your own session, not because the orchestrator has it set. Without
+     it, editing a UI file (.tsx/.jsx/.vue/.svelte/.css/.scss/.less/.html)
+     mid-lane triggers a nudge and then a Stop-hook block waiting on a design-
+     reviewer verdict nobody unattended can produce, and the lane runs to the
+     45-minute hard-kill instead of terminating cleanly. The pr-review merge
+     gate (design-evidence.md) still enforces design evidence for these PRs —
+     SGE_UNATTENDED only stands down the mid-run session hooks, not the gate.>
+     Keep both exported for the whole lane so every metered turn — and every
+     hook invocation — carries them.
   1. cd to the worktree (<EXEC_WT_BASE>/issue-<N>, in the EXECUTION repo's
      checkout) and verify pwd — every `gh`/`git` call then targets the
      execution repo, per SPEC-057 (docs/skill-authoring-repo-context.md)
@@ -360,6 +428,12 @@ Prompt:
   log the stall distinctly. (/sge:pr-review's own libs already do this
   internally per #1147/#1149.)
 
+  <IF the orchestrator dispatching you is itself running unattended
+  (--unattended was passed, or SGE_UNATTENDED=1 was already set in its own
+  environment), run this FIRST and keep it exported for your whole run
+  (#2487 — see "Shared: unattended env propagation" above):>
+    export SGE_UNATTENDED=1
+
   Steps:
   1. gh pr diff <PR_NUMBER>
   2. Run /sge:pr-review #<PR_NUMBER>
@@ -398,3 +472,14 @@ that prefix lets the pipeline run without switching off the repo's "allow
 unrestricted branch pushes" guardrail — the safety net stays intact for the
 highest-blast-radius (fully autonomous, no interactive approval) execution
 context. Export it once in the Routine's environment; every lane inherits it.
+
+## Base branch (issue #2486)
+
+`SGE_BASE_BRANCH` (default `main`) is the same kind of pipeline-wide setting as
+`SGE_BRANCH_PREFIX` above: export it once before the pipeline starts (a repo
+whose integration branch isn't `main` — e.g. `uat` — needs it set), and every
+lane inherits it. It drives Phase 3c's worktree base
+(`skills/team-pipeline/references/mechanisms.md`) and every lane's
+`gh pr create --base "${SGE_BASE_BRANCH:-main}"` (Rule 2 above), so a lane's PR
+always targets the ref its worktree was actually branched from instead of
+silently falling through to the repo's GitHub default branch.
