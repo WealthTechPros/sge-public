@@ -75,4 +75,68 @@ finding the verdict must carry. Downgraded to advisory under `.sge/test-map.yml`
 A commit carrying `SGE-Override: MUTATION; <≥10-char reason>` (mirrors SPEC-070's `FIDELITY;` trailer)
 passes-with-audit-log for a provably-equivalent mutant.
 
+## When no engine is reachable — the manual fallback (issue #2511)
+
+**`mutation_gate: not-run` is not a pass.** It records that nothing was checked. Treated as a
+clean result it becomes the very defect this gate exists to catch, one level up: absence of
+coverage rendering as absence of problems. So `not-run` obliges the reviewer to fall back to the
+manual check below, and the verdict must say which of the two produced the score.
+
+This is not a rare path. The wiring above is `sge`-internal — `scripts/mutation-diff-gate.mjs`
+hardcodes `MUTATABLE_DIRS` to `platform/app/backend/` and `platform/app/frontend/`, and the
+published plugin does not carry the script. **The reason is the reference form, not `.claude-plugin`
+scope** (#2514 review): `publish-public.yml` harvests any sibling a *`SKILL.md`* references as
+`${CLAUDE_PLUGIN_ROOT}/<path>` and fails the publish if it is missing, but it scans SKILL.md files
+only and matches that form only — the invocation above is plain `node scripts/mutation-diff-gate.mjs`
+inside a reference doc, which the workflow calls its own "DELIBERATE limitation … plain-form-only".
+So every other WTP repo consuming `/sge:pr-review` gets the pointer and no engine, and the gate
+records `mutation_gate: not-run`. **`not-run` is the default outside this repo, not the exception.**
+
+Worth knowing if the wiring is ever fixed: that makes the "other half" smaller than a packaging
+redesign — a `${CLAUDE_PLUGIN_ROOT}`-form reference from a SKILL.md plus per-repo `MUTATABLE_DIRS`
+(and a Node dependency in the consumer repo). The manual fallback stays useful even then: no engine
+mutates the prose assertions that motivated this, such as `#328`'s error message.
+
+### When the manual fallback is required
+
+The diff touches a **guard, gate, error path, or security control** — and the automated gate
+recorded `not-run` or `not-applicable`. Four moves, applied to exactly what the test claims to
+protect:
+
+| Move | What it corrupts |
+|---|---|
+| **Gut** | replace a message/payload the consumer reads with a placeholder |
+| **Invert** | flip the condition the guard turns on |
+| **Drop the discriminator** | remove the field/code that distinguishes one case from another |
+| **Neutralise** | make the guard a no-op for the duration of the check |
+
+Then: **confirm the suite fails, and that the failure names the right thing.** A suite that goes
+red for an unrelated reason proves nothing about the guard — read the assertion message, not just
+the exit code. Restore, and confirm green.
+
+### Why manual mutation catches what reading does not
+
+`trust-fabric#328` added a `PermissionInsufficientError` naming the missing Graph permission, with
+two tests that looked like coverage. Gutting the production message to `"something went wrong"`
+left **330/330 green**. The assertions watched channels the consumer never sees: one asserted
+`missingPermission`, a field `classifyError` structurally discards before publication; the other
+supplied its *own* hand-written message, so it could not observe production's. The README promised
+that permission was named, and the prose was the only channel carrying it to an auditor.
+
+**Corollary — assert on the published surface.** A field a serialiser, classifier, or DTO boundary
+discards is not what the consumer reads. Ask what the auditor, caller, or log line *actually
+receives*, and assert there.
+
+### Guard rails
+
+- **Assert the anchor was found.** Anchor each mutation by content match and check the match
+  succeeded (`assert old in s`) — a mutation that silently no-ops is indistinguishable from a
+  killed mutant. This misfired once during the `#328` investigation and only the assertion caught it.
+- **Restore via `git checkout -- <path>` and verify `git status` is clean** before moving on. Never
+  leave a mutation in the tree.
+- **Never commit a mutation.** It is a verification step, not an artefact.
+
+A surviving mutant found manually carries the same finding shape and `major`/`test-fidelity`
+severity as the automated path above.
+
 Full design: [`SPEC-120`](../../../docs/specs/SPEC-120-pr-review-mutation-gate.md).

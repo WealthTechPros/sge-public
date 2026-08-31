@@ -169,7 +169,7 @@ Run the repo's quality suite (commands in CLAUDE.md) **as background tasks in th
 
 **Suite-order gate (#2255/#2339, SPEC-119).** `DIFF_RISK` low/medium/high (else skip, `suite_order: not-run`): re-run under native shuffle (Vitest `sequence.shuffle`; never hand-roll a shuffler; no native → `not-run`). Default order pass, randomized order fail → `major`/`test-isolation`. [`suite-order-gate.md`](references/suite-order-gate.md).
 
-**Mutation gate (#2252/SPEC-120):** [`mutation-gate.md`](references/mutation-gate.md).
+**Mutation gate (#2252/SPEC-120):** [`mutation-gate.md`](references/mutation-gate.md). `mutation_gate: not-run` is **not a pass** — no engine wired (the default outside this repo) → apply that doc's manual fallback on any guard/gate/error-path change (#2511).
 
 ## Phase 4: Issue Validation, Traceability & QA Evidence
 

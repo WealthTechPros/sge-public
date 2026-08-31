@@ -207,7 +207,27 @@ zt5_agent="$(printf '%s\n' "$log" | awk -F'\t' '$1 ~ /^[0-9a-f]+$/ && $2 != "" {
 if [ "$zt5_total" = 0 ]; then
   add_control ZT-5 "Agent Identity" pass "no commits found (empty history) — nothing to attribute"
 elif [ "$zt5_agent" = 0 ]; then
-  add_control ZT-5 "Agent Identity" pass "all ${zt5_total} of ${scope} are human (0 Agent-Id trailers) — pass per control definition"
+  # THE ZERO-TRAILER FORK (#2510). "0 trailers" has two readings and they are not
+  # equally safe: a genuinely all-human history, or an attribution hook that never
+  # fires. Passing both made this the audit that cannot detect the thing it audits
+  # (trust-fabric#331: hook read CLAUDE_SESSION_ID, Claude Code exports
+  # CLAUDE_CODE_SESSION_ID, 0/30 trailers -- and ZT-5 passed). So gate the pass on
+  # whether the machinery is installed: no hook wired => nothing was expected to
+  # emit => genuinely human. Hook wired but silent => it is broken.
+  zt5_hookpath="$(git -C "$ROOT" config --get core.hooksPath 2>/dev/null || true)"
+  zt5_hook=""
+  if [ -n "$zt5_hookpath" ] && [ -f "$ROOT/$zt5_hookpath/prepare-commit-msg" ]; then
+    zt5_hook="$zt5_hookpath/prepare-commit-msg"
+  elif [ -f "$ROOT/.githooks/prepare-commit-msg" ]; then
+    # Vendored but not wired: the repo ships the hook, so trailers ARE expected of
+    # anyone who ran the installer. Still evidence the machinery is meant to run.
+    zt5_hook=".githooks/prepare-commit-msg"
+  fi
+  if [ -n "$zt5_hook" ]; then
+    add_control ZT-5 "Agent Identity" fail "0/${zt5_total} of ${scope} carry an Agent-Id: trailer, but the attribution hook IS installed (${zt5_hook}) — it is not firing (commonly the session-id env var -- the hook must read CLAUDE_CODE_SESSION_ID, not only CLAUDE_SESSION_ID; also check it is executable, its shebang, and that core.hooksPath points where you think)"
+  else
+    add_control ZT-5 "Agent Identity" pass "0/${zt5_total} of ${scope} carry an Agent-Id: trailer and no attribution hook is installed — genuinely unattributed history, nothing was expected to emit"
+  fi
 else
   pct=$((100 * zt5_agent / zt5_total))
   if [ "$pct" -ge 80 ]; then
