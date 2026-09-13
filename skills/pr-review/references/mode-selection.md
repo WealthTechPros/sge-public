@@ -45,6 +45,27 @@ auto-merge). Three flags narrow it — mechanically enforced (prompt-prose restr
 **Mechanical backstop:** `--advisory` MUST `export SGE_REVIEW_ADVISORY=1` before any
 `pr-labels.sh` call (top of Phase 1) — `pass` then refuses with **exit 4**.
 
+### Prose is not a control (sge#2508)
+
+A dispatch brief telling the agent "don't apply `pr-reviewed`" or "don't merge" is not
+equivalent to `--advisory`. On a clean verdict this skill's own pass path applies
+`pr-reviewed` — which is what arms auto-merge on any repo that wires it — and an
+instruction telling the dispatched agent to skip that does not change what the skill's
+own code does when it reaches `pass`.
+
+Proven live on `trust-fabric#328`: a review agent was dispatched with an explicit brief
+not to apply `pr-reviewed` and not to merge. It applied `pr-reviewed` anyway, arming
+auto-merge for 16 seconds before the dispatching lane caught it, removed the label, and
+applied `hold`. Contained only because a human/lane was watching in real time.
+
+**If a dispatch must not be able to label or merge, pass `--advisory`.** That is
+mechanically enforced (`pr-labels.sh pass` refuses with exit 4); prose is not. This
+composes with `sge-implement`'s own `hold`-first convention
+([`hold-first.md`](../../sge-implement/references/hold-first.md)): a review dispatched
+while `hold` is still present is automatically forced to advisory by Stage 0's hold gate
+([`hold-handling.md`](hold-handling.md)) regardless of dispatch flags or prose, so a
+lane that isn't sure which mode to request can just leave `hold` on.
+
 ## Invocation notes
 
 Extracted from `SKILL.md`'s *Review modes* section under the same 35 KB budget;

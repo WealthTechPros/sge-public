@@ -298,12 +298,13 @@ The inner loop is owned by `/sge:tdd-workflow` — follow it for every acceptanc
 ```bash
 git push -u origin <branch>
 gh pr create --draft --title "<conventional title>" --body "Part of #<issue-number>"
+gh pr edit --add-label hold
 # then, per green cycle:  /sge:commit ... && git push
 ```
 
 > `Part of`, not `Closes`. Non-GitHub tracker: [close-on-merge](references/alm-close-on-merge.md).
 
-The early PR **stays a draft** and is **never undraft**ed or labelled here (issue #699; full rule in Phase 6). Phase 6 **reuses this PR**; a "PR already exists" from `gh pr create` is expected.
+`hold` goes on immediately (#2509, hold-first.md). PR **stays a draft**, no other label here (#699; full rule Phase 6). Phase 6 reuses it; "PR already exists" is expected.
 
 Repeat per acceptance criterion.
 
@@ -373,10 +374,11 @@ The PR is **not yet mergeable** — the `pr-reviewed` branch-protection gate (`.
 
 ### 7.1 Pre-check (do NOT manage labels here)
 
-`/sge:pr-review` **owns** the gate labels — it creates `pr-reviewing`/`pr-reviewed` idempotently, claims `pr-reviewing` first, swaps to `pr-reviewed` on a clean pass. Don't duplicate that here. Just confirm the PR is real first:
+`/sge:pr-review` **owns** the gate labels — it creates `pr-reviewing`/`pr-reviewed` idempotently, claims `pr-reviewing` first, swaps to `pr-reviewed` on a clean pass. Don't duplicate that here. Confirm the PR is real, remove `hold` (#2509):
 
 ```bash
 gh pr view <PR_NUMBER> --json number,isDraft,state --jq '{number, draft: .isDraft, state}'
+gh pr edit <PR_NUMBER> --remove-label hold
 ```
 
 The PR **should be a draft here** — Phase 6 opens it as one (issue #699); leave it draft. `/sge:pr-review` Phase 8 marks it ready on a clean pass; never `gh pr ready` from this skill.
