@@ -81,6 +81,15 @@ re-deciding, so it can never be looser than the classifier:
 So the inline path is only ever reached for genuinely low-risk, docs/config/test-only
 work; anything ambiguous or dangerous forks as it did before.
 
+**Also risk-map-gated (proportional-governance proposal).** Before accepting an inline
+verdict, additionally run `resolve-governance-tier.mjs`'s risk map (PII, `docs/compliance/**`,
+trust-fabric evidence, regulatory-trace — a superset of `resolve-context-depth.mjs`'s
+CRITICAL_RE) over the same predicted paths. A risk-map hit forks unconditionally even when
+`resolve-context-depth.mjs` alone would have said `trivial` — closes the gap where a
+`docs/compliance/ai-policy.md` edit, `trivial` by extension alone, previously qualified for
+the cheap inline path despite being a compliance artefact. Full rationale:
+[`governance-tier.md`](governance-tier.md#phase-05--fork-skip-and-why-it-stays-narrower-than-t0).
+
 ### Inline verdict contract
 
 The inline path must be a drop-in for the fork — Phase 0.5 branches on the **same**

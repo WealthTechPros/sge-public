@@ -65,6 +65,10 @@ fail-loud from team-pipeline's pre-flight — do not swallow it here.
 /sge:team-pipeline --duration <Nm|Nh> [--agents N] [--module <name>] [--milestone <name>] [--dry-run] [...]
 ```
 
+This includes team-pipeline's **default 3-lane concurrency cap** (solo/small-org
+safe; `--agents N` raises it, up to the unchanged hard ceiling) — this skill
+defines no concurrency default of its own to drift out of sync with it.
+
 Token budgets, wave/agent clamps, CI capacity (`--ci-limit`), pool sizing,
 worktree placement and the Phase 0.5 flush, and stall/kill thresholds are all
 team-pipeline guarantees — nothing is redefined here.

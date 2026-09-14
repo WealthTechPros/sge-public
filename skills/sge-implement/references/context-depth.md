@@ -59,6 +59,16 @@ with the updated path set before editing them.
 
 ## Trivial-tier verification cap (#1267)
 
+> **Superseded as Phase 5's gating condition by the T0/T1/T2 governance tier
+> (proportional-governance proposal) — this section's mechanics stay in force
+> for a `T2` change that also happens to be context-depth-`trivial` (e.g. a
+> risk-path docs edit).** Phase 5 itself now branches on `SGE_GOVERNANCE_TIER`
+> (skip entirely on `T0`/`T1`, unchanged on `T2`); see
+> [`governance-tier.md`](governance-tier.md#phase-5--review-skip-t0-and-t1).
+> The inline-verification procedure below (steps 1–4) is still the correct
+> mechanics whenever Phase 5 actually runs and the change is context-depth-
+> `trivial`.
+
 The Phase 5 "independent local review" step normally spawns a **forked,
 fresh-context subagent** (`/sge:sge-review`) to verify the change. That fork is
 valuable on real code changes — a reviewer with no memory of writing the diff

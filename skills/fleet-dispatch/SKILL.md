@@ -55,6 +55,13 @@ Claude acts as the fleet orchestrator directly — **no external services requir
 | `--milestone <name>` | all | Scope to a milestone **per repo** (same name in each). |
 | `--dry-run` | off | Print the repo→issue lane plan and stop — claim nothing, dispatch nothing. |
 
+**Consistent with team-pipeline's solo/small-org lane cap.** These defaults
+(`--repo-agents 2`, `--wave-size 3`) already sit at or under team-pipeline's
+own default 3-lane cap per repo, for the same reason: an unmeasured fan-out
+default should be conservative, and an operator who has validated more
+headroom raises it explicitly rather than inheriting a bigger number by
+default. See team-pipeline's [rationale](../team-pipeline/references/rationale.md#lane-cap-vs-ceiling).
+
 ---
 
 ## Fleet membership — from the argument only (MANDATORY guardrail)

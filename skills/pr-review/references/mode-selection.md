@@ -28,6 +28,18 @@ Before claiming the gate, check whether `/sge:sge-implement` Phase 5 already rev
 
 Any mismatch/absent field → normal full/delta review; pass-through holds only for the same SHA.
 
+### Governance-tier caps (T0/T1 — proportional governance proposal)
+
+A third, independent signal, checked alongside delta/pass-through: `/sge:sge-implement`
+leaves an `sge-governance-tier` marker on the PR body naming the T0/T1/T2 tier it resolved
+in its own Phase 2. `/sge:pr-review` **re-derives** the tier from the live diff before
+honouring it — never trusts the marker outright (Inherited Claims, #2212) — and a `T0`/`T1`
+result **caps** Phase 2 dispatch and Phase 4's evidence-gate depth below what they would
+otherwise run, never above, and never over a `DIFF_RISK: high` diff. `--tier0` is the
+explicit-override form for a caller with no marker to read. Full detection/re-derivation
+algorithm, the effect table per phase, and the composability rule with `DIFF_RISK`:
+[`tier-scaling.md`](tier-scaling.md).
+
 ## Mode flags (issue #754) — `--no-automerge` per SPEC-090
 
 Extracted from `SKILL.md`'s *Usage* section under the same 35 KB budget; content unchanged.
@@ -44,6 +56,10 @@ auto-merge). Three flags narrow it — mechanically enforced (prompt-prose restr
 
 **Mechanical backstop:** `--advisory` MUST `export SGE_REVIEW_ADVISORY=1` before any
 `pr-labels.sh` call (top of Phase 1) — `pass` then refuses with **exit 4**.
+
+**`--tier0` is orthogonal to this table** (governance-tier caps *how much review runs*; this
+table governs *who owns fixes/labels/merge*) — combine freely, e.g. `--tier0 --advisory`.
+See the "Governance-tier caps" section above.
 
 ### Prose is not a control (sge#2508)
 

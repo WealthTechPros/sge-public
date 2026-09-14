@@ -31,13 +31,13 @@ Claude orchestrates directly — no external services. One dedicated agent runs
 concurrent lanes; review agents run per-PR without occupying impl slots.
 
 > **Wave model (core safety constraint):** dispatch at most `WAVE_SIZE` lanes
-> (default **5**, hard ceiling) at once; watch each wave **land** before the next
+> (**default 3**, ceiling 5) at once; watch each wave **land** before the next
 > begins (full rule in Phase 3). Rationale: [rationale](references/rationale.md).
 
 ## Usage
 
 ```bash
-/sge:team-pipeline                            # Auto agent count (~80% CPU), wave-size 5
+/sge:team-pipeline                            # Auto agent count, default-capped at 3
 /sge:team-pipeline --agents 3 --ci-limit 10   # Override agent/wave count; max open PRs
 /sge:team-pipeline --duration 2h --agents 3   # Duration Mode: time-boxed swarm, clean stop
 /sge:team-pipeline --duration 30m --dry-run   # Preview queue + budget arithmetic only
@@ -256,7 +256,7 @@ row): `RUN_ID="team-pipeline-$(date -u +%Y%m%dT%H%M%SZ)-$$"`. Create
 
 ```json
 {
-  "startedAt": "<ISO>", "agentMax": 3, "waveSize": 5, "staleKillMinutes": 20, "ciLimit": 25,
+  "startedAt": "<ISO>", "agentMax": 3, "waveSize": 3, "staleKillMinutes": 20, "ciLimit": 25,
   "safetyGate": { "checkedAt": "<ISO>", "q1_stoppable": true, "q2_reconciled": true, "q3_leanContract": true, "q4_waveLeq5": true, "q5_timebox": true, "passed": true },
   "activeAgents": {}, "pendingReviews": {}, "completedIssues": [], "reviewedPRs": [],
   "failedIssues": [], "staleLanes": [], "governanceBlockedIssues": [],
@@ -266,15 +266,16 @@ row): `RUN_ID="team-pipeline-$(date -u +%Y%m%dT%H%M%SZ)-$$"`. Create
 
 Set at argument-parse time:
 
-- **`agentMax`** (when `--agents` omitted): `max(1, int(nproc x 0.80 / 3))`, then
-  the **hard ceiling** `min(agentMax, 15)` always — `--agents 100` resolves to
-  **15** (log `agentMax clamped 100 -> 15`); unbounded fan-out trips the rate
-  limit. Core→agentMax + model routing: [rationale](references/rationale.md).
-- **`waveSize`**: `--wave-size` else `min(agentMax, 5)`, then `min(waveSize, 5)`
-  (never > 5). Caps lanes **live simultaneously**; the next wave waits until the
-  current produces observable output (≥1 draft PR, or ≥1 lane stale/hard-killed).
-  Log `wave_size=<N>`. **Then run `resolve-limits.sh`, use its output for
-  both** (#2488) — [commands](references/mechanisms.md#phase-0--cap-file-2488).
+- **`agentMax`** (when `--agents` omitted): `max(1, int(nproc x 0.80 / 3))`,
+  **default-capped `min(agentMax, 3)`** (solo/small-org-safe; `--agents N`
+  raises it), then the **hard ceiling** `min(agentMax, 15)` always
+  (`--agents 100` -> **15**, log `agentMax clamped 100 -> 15`); unbounded
+  fan-out trips the rate limit.
+- **`waveSize`**: `--wave-size` else `min(agentMax, 5)`, then `min(waveSize,
+  5)` (never > 5). Caps lanes **live simultaneously**; the next wave waits
+  until the current produces observable output (≥1 draft PR, or ≥1 lane
+  stale/hard-killed). Log `wave_size=<N>`. **Then run `resolve-limits.sh`, use
+  its output for both** (#2488) — [commands](references/mechanisms.md#phase-0--cap-file-2488).
 - **`staleKillMinutes`**: `--stale-kill` (minutes, default 20). A lane with no
   draft PR within the window is **stale** (Phase 4); NOT auto-requeued. Log
   `stale_kill_window=<N>m`.
@@ -603,7 +604,7 @@ candidates; the issue carries the gate's comment; a human re-runs
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--duration <Nm\|Nh>` | off | Duration Mode: wall-clock master stop (see that section) |
-| `--agents N` | auto (nproc x 0.8/3) | Max parallel impl agents (hard-clamped 15) |
+| `--agents N` | auto, capped at 3 | Max parallel impl agents (hard-clamped 15) |
 | `--wave-size N` | min(agentMax, 5) | Max lanes/wave; **hard-capped at 5** |
 | `--stale-kill Xm` | 20m | Kill no-draft-PR lanes after X min; → `staleLanes`, not requeued |
 | `--session-budget <tokens>` | 2 000 000 | Cap cumulative output, then stop spawning |

@@ -25,7 +25,7 @@ allowed-tools: Read, Grep, Glob, Edit, Write, Bash, Agent, Task, mcp__plugin_sge
 ## Usage
 
 ```
-/sge:pr-review <pr-number> [--advisory | --no-fix | --no-automerge]
+/sge:pr-review <pr-number> [--advisory | --no-fix | --no-automerge] [--tier0]
 ```
 
 `$ARGUMENTS` is the PR number; if omitted, resolve from the branch.
@@ -91,7 +91,7 @@ ACTIVE_LANE=$(rl_lane_manifest_active "$PR" review)
 
 ### Mode selection (delta / Phase 5 pass-through)
 
-Before claiming the gate, pick the review mode: a prior `sge-verdict` on **this head** re-asserts the label state; **new commits** since the last verdict scope a **delta** re-review; and a clean `/sge:sge-implement` Phase 5 verdict on this exact SHA is a **pass-through** (skip Phase 2; still run Phases 3, 4 and 5.5). Absent or mismatched -> full review. **Run it here** - the reviews-endpoint query, the pass-through preconditions and the `mode:` values: [`mode-selection.md`](references/mode-selection.md).
+Before claiming the gate, pick the review mode: a prior `sge-verdict` on **this head** re-asserts the label state; **new commits** since the last verdict scope a **delta** re-review; a clean `/sge:sge-implement` Phase 5 verdict on this exact SHA is a **pass-through** (skip Phase 2; still run Phases 3, 4, 5.5); a re-derived tier `T0`/`T1` **caps** Phase 2/4 depth. Absent/mismatched -> full review. **Run it here**: [`mode-selection.md`](references/mode-selection.md), [`tier-scaling.md`](references/tier-scaling.md).
 
 **Detect existing bot-reviewer signal — Copilot/CodeQL/Dependabot/Semgrep/`[bot]` (issue #688 — Stage 1).** `BOT_SIGNAL=$(rl_bot_signal "$PR")` produces `BOT_FINDINGS` fed to Phase 2/4/5; `rl_diff_risk` (Stage 3) consumes it, resolving first.
 
@@ -107,7 +107,7 @@ A PR from a **rescued or resumed worktree** may carry stale `tsc`/test claims. S
 
 ### Diff risk classification & dispatch scaling (drives cost — #688)
 
-`DIFF_RISK=$(rl_diff_risk "$PR" <bot_hot>)` — tier (`prose`/`trivial`/`generated`/`low`/`medium`/`high`): **low risk + clean bot review can skip fresh specialist dispatch**; **high risk (auth/payments/migrations/data-isolation) always gets full treatment** regardless of bot signal; never downgrade `high`-risk on bot review alone; all gates fail closed; Phase 5 pass-through wins. Tier table, security-path glob, mechanics (#984, #973, #1757, #2215): [`dispatch-scaling.md`](references/dispatch-scaling.md).
+`DIFF_RISK=$(rl_diff_risk "$PR" <bot_hot>)` — tier (`prose`/`trivial`/`generated`/`low`/`medium`/`high`): **low risk + clean bot review can skip fresh specialist dispatch**; **high risk (auth/payments/migrations/data-isolation) always gets full treatment** regardless of bot signal; never downgrade `high`-risk on bot review alone; all gates fail closed; Phase 5 pass-through wins. Tier table, security-path glob, mechanics (#984, #973, #1757, #2215): [`dispatch-scaling.md`](references/dispatch-scaling.md). `GOVERNANCE_TIER` `T0`/`T1` additionally caps dispatch below this table, never above/over `high`: [`tier-scaling.md`](references/tier-scaling.md).
 
 `CONTROL_BEARING=$(rl_diff_control_bearing "$PR")` (#2211): selected tier, dispatches `/sge:qa-audit --adversarial`: [details](references/behavioral-verification-tier.md).
 
@@ -135,7 +135,7 @@ Run review in three layers — **native floor → bundled specialists → repo s
 
 **Layer 1 — native engine (always; the floor).** `/code-review <effort>` (correctness/bugs), `/security-review` (when `rl_security_files "$PR"` non-empty). `<effort>`: `low`/`medium` (≤ ~150 lines), `high` (typical), `max` (large/security), `ultra` (release-critical).
 
-**Layer 2 — bundled specialists (ship with the SGE plugin, every repo).** **@code-reviewer** (quality pass; verify implementation matches the linked issue) and **@security-auditor** (OWASP-style; on a security-path match **or** any `medium`/`high` full-dispatch tier). A repo MAY override either via `.claude/agents/<name>.md`. **Never route a security review below opus**; full model tiers: [`reviewer-lanes.md`](references/reviewer-lanes.md).
+**Layer 2 — bundled specialists (ship with the SGE plugin, every repo).** **@code-reviewer** (quality pass; matches implementation to the linked issue) and **@security-auditor** (OWASP-style; security-path match **or** any `medium`/`high` dispatch tier). Repo MAY override via `.claude/agents/<name>.md`. **Never route security below opus**; model tiers: [`reviewer-lanes.md`](references/reviewer-lanes.md).
 
 **Layer 3 — repo-specific specialists.** Same batch, only when the repo ships the agent AND the trigger matches. Skip undefined agents silently. Roster + triggers: [`reviewer-lanes.md`](references/reviewer-lanes.md).
 
@@ -173,6 +173,8 @@ Run the repo's quality suite (commands in CLAUDE.md) **as background tasks in th
 
 ## Phase 4: Issue Validation, Traceability & QA Evidence
 
+**`governance_tier: T0` caps this phase** — 4.1/4.2 only, 4.3–4.6 skipped regardless of trigger: [`tier-scaling.md`](references/tier-scaling.md).
+
 **4.1 Requirements from the linked issue.** Build a table `| Requirement from Issue | Implemented? ✅/❌ | Evidence (file:line) |` covering every requirement and acceptance criterion. **Any unimplemented one is a BLOCKER.** Closure integrity: [`closure-integrity.md`](references/closure-integrity.md).
 
 **4.2 SGE spec traceability (SM-1 at the gate).** Does the diff trace to governance — a `SPEC-NNN` reference (PR body/branch/commit trailers) or a capability in the repo's model (`CLAUDE.md`)? Traces → `traceability: SPEC-NNN`; else emit **advisory** `{severity:"minor", category:"traceability", finding:"untraceable — no SPEC-NNN/capability linkage"}`, record `traceability: untraceable`. Advisory only, never a Blocker — non-SGE repos/chores legitimately don't.
@@ -183,9 +185,9 @@ Run the repo's quality suite (commands in CLAUDE.md) **as background tasks in th
 
 **4.3b Oracle-derivation review (#2222).** `ORACLE_BEARING=1`: apply three-question oracle-derivation lens (→ `major` on fail): [details](references/oracle-derivation-review.md).
 
-**4.4 Seam-evidence gate (dual-backend surfaces — #1228, SPEC-102).** Diff touches a surface with **≥2 backends** (demo/mock store + real/warehouse), flagged by the governing spec's `## Seam evidence` section or a mock+real pair in the diff → verify that spec names a parity/seam test (real-state E2E or shared-fixture parity) AND the test is present in the tree; unnamed/absent → `{severity:"major", category:"traceability", finding:"dual-backend surface: no present parity/seam test"}` (advisory `minor` with no governing spec). [`seam-evidence.md`](references/seam-evidence.md).
+**4.4 Seam-evidence gate (dual-backend surfaces — #1228, SPEC-102).** A surface with **≥2 backends** (demo/mock store + real/warehouse) needs a named, present parity/seam test; unnamed/absent → `{severity:"major", category:"traceability", finding:"dual-backend surface: no present parity/seam test"}` (advisory `minor`, no governing spec). [`seam-evidence.md`](references/seam-evidence.md).
 
-**4.5 Design evidence (UI-touching PRs — #2235, SPEC-115).** Diff touches a UI-file glob (`.tsx`/`.jsx`/`.vue`/`.svelte`/`.css`/`.scss`/`.less`/`.html`, same glob `ui-edit-tracker.sh` uses) → verify a `design-reviewer` verdict artifact exists for the reviewed commit and reads `VERDICT: PASS`; missing/stale/FAIL → `{severity:"major", category:"traceability", finding:"UI-touching PR with no passing design-reviewer verdict"}`. `SGE_UNATTENDED=1` PRs are NOT exempt — session-time hooks stand down under that flag, so this gate is the only enforcement left for them. [`design-evidence.md`](references/design-evidence.md).
+**4.5 Design evidence (UI-touching PRs — #2235, SPEC-115).** A UI-file glob diff (`ui-edit-tracker.sh`'s glob) needs a `design-reviewer` `VERDICT: PASS` for the reviewed commit; missing/stale/FAIL → `{severity:"major", category:"traceability", finding:"UI-touching PR with no passing design-reviewer verdict"}`. `SGE_UNATTENDED=1` is NOT exempt. [`design-evidence.md`](references/design-evidence.md).
 
 **4.6 Invariants (#2253, SPEC-118).** `## Invariants` with no matching property test → `major`/`traceability`. [`invariants-gate.md`](references/invariants-gate.md).
 
@@ -218,7 +220,8 @@ pr: <number>
 commit: <HEAD_SHA reviewed>
 reviewed_at: <ISO-8601 UTC>
 plugin_ref: <sge plugin version this reviewing environment has installed> # SPEC-121 Phase 2 — see sge-verdict-block.md
-mode: full | delta | phase5-passthrough | advisory
+mode: full | delta | phase5-passthrough | tier0 | advisory
+governance_tier: T0 | T1 | T2 | absent # proportional governance — see tier-scaling.md
 blockers: <count>
 majors: <count>
 minors: <count>
