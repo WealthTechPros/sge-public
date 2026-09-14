@@ -208,7 +208,7 @@ EOF
 
 (Swap the `Spec:` line for `SGE-Override: <STEP>; <reason>` when that's the chosen trailer; omit it entirely in non-SGE repos. The `Agent-Id:` line is emitted only when `AGENT_ID` is non-empty after the validation above — never interpolate `SGE_AGENT_ID` into the heredoc directly. The `${AGENT_ID:+…}` expansion drops the whole line, newline included, when it is empty, so the heredoc is no longer single-quoted: keep the message body free of unescaped `$`, backticks, and `\`.)
 
-**If the commit-msg hook rejects the commit:** the message is wrong — fix the message (usually a missing or malformed trailer) and commit again. **The temptation will be to re-run with `--no-verify`. Never do that.** The hook is the audit chain's enforcement point; bypassing it is exactly the silent-governance-hole the trailer exists to prevent. Same rule for pre-commit hooks: fix the cause, re-commit clean.
+**If the commit-msg hook rejects the commit:** the message is wrong — fix the message (usually a missing or malformed trailer) and commit again. **The temptation will be to re-run with `--no-verify`. Never do that.** The hook is the audit chain's enforcement point; bypassing it is exactly the silent-governance-hole the trailer exists to prevent. Same rule for pre-commit hooks: fix the cause, re-commit clean. This is absolute at every tier, including `T0` — there is no hygiene-only or whitespace-only exception; a whitespace-aware diff being empty is not proof of zero semantic change (whitespace-significant languages, and whitespace changes inside string literals, can both defeat it), so no diff-shape check is ever grounds for `--no-verify`.
 
 ### 7. Push (default mode only)
 
@@ -237,7 +237,7 @@ git rev-parse --abbrev-ref --symbolic-full-name @{upstream} >/dev/null 2>&1 \
 
 ## Never
 
-- Skip or bypass hooks (`--no-verify`, `--no-gpg-sign` workarounds, editing the hook) — fix the message or the code instead.
+- Skip or bypass hooks (`--no-verify`, `--no-gpg-sign` workarounds, editing the hook) — fix the message or the code instead. No exceptions, at any tier including `T0`.
 - Push to `main`/`master`/the default branch, or force-push shared branches.
 - Commit on a red quality suite, or skip the gates in `--no-push` mode.
 - Commit secrets, `.env` files, or client data; auto-stage untracked files.

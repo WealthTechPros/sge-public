@@ -31,12 +31,33 @@ TIER=$(echo "$TIER_JSON" | jq -r '.tier // "standard"')
 If the command fails, `TIER` is empty, or `ISSUE_PATHS` is empty: set `TIER=standard` and
 proceed to Step 1 (full-fork path). Log nothing — this is the safe fallback.
 
+**Also risk-map-gated (proportional-governance proposal).** A `trivial` result from
+`resolve-context-depth.mjs` alone is not enough to take the inline path — additionally run
+the risk map from `resolve-governance-tier.mjs` (PII, `docs/compliance/**`, trust-fabric
+evidence, regulatory-trace, plus `resolve-context-depth.mjs`'s own CRITICAL_RE) over the same
+`ISSUE_PATHS`:
+
+```bash
+RISK_JSON=$(node "${CLAUDE_PLUGIN_ROOT:-.}/scripts/resolve-governance-tier.mjs" \
+  --paths "$(printf '%s\n' "${ISSUE_PATHS[@]}" | paste -sd, -)" --lane no-spec 2>/dev/null || echo '{}')
+RISK=$(echo "$RISK_JSON" | jq -r '.risk.level // "unknown"')
+```
+
+A `trivial` context-depth tier with `RISK` = `high` (or `unknown`) is **not** eligible for the
+inline path even though `resolve-context-depth.mjs` alone would have allowed it — this closes
+a real gap: a `docs/compliance/ai-policy.md` edit is `trivial` by extension alone (it is a
+`.md` file under no CRITICAL_RE pattern) but is a compliance artefact, not a documentation
+change a lightweight heuristic should wave through. `RISK != "low"` forces `TIER=standard` for
+0.6c's purposes, overriding whatever `resolve-context-depth.mjs` returned. Rationale:
+[`governance-tier.md`](../../sge-implement/references/governance-tier.md#phase-05--fork-skip-and-why-it-stays-narrower-than-t0).
+
 ### 0.6c  Branch on tier
 
-| `TIER` value | Action |
-|---|---|
-| `standard` or `critical` | Proceed to Step 1 (full-fork path). No log entry needed. |
-| `trivial` | Run **Step 0.6L** (lightweight inline classification) below. |
+| `TIER` value | `RISK` | Action |
+|---|---|---|
+| `standard` or `critical` | (any) | Proceed to Step 1 (full-fork path). No log entry needed. |
+| `trivial` | `high` or `unknown` | Proceed to Step 1 (full-fork path) — risk map overrides. Log: `[tier-gate] trivial paths but risk-map hit — full-fork classification`. |
+| `trivial` | `low` | Run **Step 0.6L** (lightweight inline classification) below. |
 
 ### Step 0.6L: Lightweight inline classification (trivial tier only)
 

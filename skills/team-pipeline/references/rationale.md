@@ -27,10 +27,11 @@ Phase 2 PR monitor MUST all use the named `Task` form so they are stoppable when
 
 ## Wave model — why waves exist
 
-The orchestrator dispatches at most `WAVE_SIZE` lanes (default 5, hard ceiling)
-at once and watches each wave land before the next begins. This prevents the
-observed pattern of 8+ lanes dispatched simultaneously with no observability. An
-unbounded fan-out also trips the Anthropic rate limit and kills in-flight agents
+The orchestrator dispatches at most `WAVE_SIZE` lanes (default 3, ceiling 5 —
+see [Lane cap vs ceiling](#lane-cap-vs-ceiling) below) at once and watches
+each wave land before the next begins. This prevents the observed pattern of
+8+ lanes dispatched simultaneously with no observability. An unbounded
+fan-out also trips the Anthropic rate limit and kills in-flight agents
 (observed in a live session), which is why `agentMax` is hard-clamped at 15.
 
 ### Wave-cap ceiling — why the number, and its history
@@ -63,6 +64,36 @@ regardless of what `--wave-size`/`--agents` an operator passes.
 Note: this is a different knob from `fleet-dispatch`'s `--repo-agents` (per-repo
 build concurrency across a fleet) and its own `--wave-size` (repo-lanes per wave);
 raising this team-pipeline cap does not touch those.
+
+---
+
+## Lane cap vs ceiling
+
+The **hard ceiling** (5 for `--wave-size`, 15 for `--agents`) answers "how far
+can an operator who has deliberately validated headroom push this?" — see the
+history above. The separate **default** — what runs when `--agents`/
+`--wave-size` are simply left off — answers a different question: "what is
+safe to run before anyone has measured anything?" Those are not the same
+number, and conflating them let an unmeasured session fan out further than
+its evidence supported.
+
+**Why a default below the ceiling, for solo/small orgs specifically:**
+observed in a real engagement, a single day of ~10 parallel implementation
+agents produced +19,000 lines of code that was closed unmerged the same day —
+replaced by an ~880-line script that did the actual job. Nothing about that
+day validated Anthropic rate-limit headroom or reviewer capacity for 10
+concurrent lanes; it just used the number that was available. A smaller
+default forces that validation to be an explicit, visible choice
+(`--agents N` past 3) rather than an accident of core count or habit.
+
+**The fix is additive, not a rollback of the 3→5 ceiling raise.** That raise
+(above) was made deliberately, with a throughput audit and explicit operator
+approval, for operators who had already measured their headroom — it is
+unaffected. This change only lowers what happens when nobody has specified a
+number at all: `agentMax` now default-caps at `min(computed, 3)` instead of
+`min(computed, 15)`. An operator who knows their environment can support more
+still gets it, on request, via `--agents N` (up to the unchanged hard
+ceiling) — the default just stops assuming that on their behalf.
 
 ---
 

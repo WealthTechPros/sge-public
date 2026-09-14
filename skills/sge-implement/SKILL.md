@@ -12,6 +12,7 @@ Implement a GitHub issue end-to-end — entry-criteria preflight through TDD, in
 
 ## Out of scope
 - Investigating unclear issues (use `/sge:deep-dive` first)
+- An unproven architecture bet (new extraction approach, pipeline, adapter/integration layer) — spike it first via `/sge:spike`, then implement the kept approach here
 - Decomposing oversized issues (use `/sge:decompose-issue`)
 - Owning the merge-gate label (`pr-reviewed`) — that is `/sge:pr-review`
 - Classifying the issue against capabilities/specs/non-goals — that logic lives in `/sge:governance-trace` (dispatched from Phase 0.5); this skill only branches on its verdict
@@ -40,7 +41,7 @@ Pipeline: governance-trace (0.5) → entry criteria (`/sge:sge-preflight`) → c
 /sge:sge-implement [issue-number]
 ```
 
-> **Target repo — cross-repo / control-session invocation.** Apply the shared [`gh-repo`](../gh-repo/SKILL.md) convention first: this skill acts on the repo in the **current working directory** (issue context, every `gh` call, the Phase 3 worktree). From a non-target directory, resolve + `cd` via `cd "$("$SGE_ROOT/scripts/with-repo-cwd.sh" resolve owner/repo)" || exit 1` — the `cd`, not a bare `export GH_REPO`, is required (Phase 3 writes code in a worktree). **`$SGE_ROOT` here is NOT already resolved** — run `bash scripts/resolve-sge-root.sh` (or `"${CLAUDE_PLUGIN_ROOT}/scripts/resolve-sge-root.sh"` — same resolution this skill's "Issue context" step below performs) before this line; never a bare `${CLAUDE_PLUGIN_ROOT}`, which is empty whenever unset. Same-repo: leave `GH_REPO` unset. Backend routing: [issue-read routing](references/alm-issue-read-routing.md) — self-hosted Forgejo/Gitea needs `SGE_FORGEJO_HOSTS` declared (ADR-0010) or it fails loud.
+> **Target repo — cross-repo / control-session invocation.** Apply the shared [`gh-repo`](../gh-repo/SKILL.md) convention first: this skill acts on the repo in the **current working directory** (issue context, every `gh` call, the Phase 3 worktree). From a non-target directory, resolve + `cd` via `cd "$("$SGE_ROOT/scripts/with-repo-cwd.sh" resolve owner/repo)" || exit 1` (`cd` required — Phase 3 writes in a worktree; a bare `export GH_REPO` is not enough). **`$SGE_ROOT` here is NOT already resolved** — run `bash scripts/resolve-sge-root.sh` (or `"${CLAUDE_PLUGIN_ROOT}/scripts/resolve-sge-root.sh"`, same as the "Issue context" step below) first; never a bare `${CLAUDE_PLUGIN_ROOT}`, empty whenever unset. Same-repo: leave `GH_REPO` unset. Backend routing: [issue-read routing](references/alm-issue-read-routing.md) — self-hosted Forgejo/Gitea needs `SGE_FORGEJO_HOSTS` declared (ADR-0010) or it fails loud.
 
 > **Orchestrator dispatch — do not duplicate the review.** When dispatched (Tier-0 fan-out, `/sge:team-pipeline`, `/sge:issue-swarm`, one-off `Agent()`), this skill's Phase 7 already drives the PR through `/sge:pr-review` — the orchestrator must **not** independently invoke `/sge:pr-review` on the same PR while this skill runs (a second reviewer races its fix commits). Wait for it to report back. Rationale: [`orchestration.md`](references/orchestration.md).
 
@@ -48,17 +49,13 @@ Pipeline: governance-trace (0.5) → entry criteria (`/sge:sge-preflight`) → c
 
 **Issue context — fetched as your first action (issue #226, #2266 security review):**
 
-> A `!`-preload injection line cannot safely carry `$ARGUMENTS` into executable
-> Bash — the harness substitutes `$ARGUMENTS` as raw, unescaped text into the
-> command string *before* any shell parses it, so any quoting scheme is
-> breakable by an adversarial issue number/argument (confirmed live against
-> this exact call site: a payload containing a bare `"` breaks out of the
-> `bash -c '...' _ "$ARGUMENTS"` positional-passing pattern and executes
-> arbitrary commands, even though `bash -c` itself is injection-safe when
-> invoked with a real argv — the harness never gives it one; see
-> [`no-positional-args-in-injection.test.sh`](../tests/no-positional-args-in-injection.test.sh)
-> and upstream anthropics/claude-code#16163). There is no in-band fix: fetch
-> the issue as a **real Bash tool call you issue yourself**, not a preload.
+> A `!`-preload injection line cannot safely carry `$ARGUMENTS` into Bash — the
+> harness substitutes it as raw, unescaped text before any shell parses it, so
+> no quoting scheme is safe (confirmed live: a bare `"` breaks
+> `bash -c '...' _ "$ARGUMENTS"` and executes arbitrary commands; see
+> [`no-positional-args-in-injection.test.sh`](../tests/no-positional-args-in-injection.test.sh),
+> anthropics/claude-code#16163). No in-band fix: fetch the issue as a **real
+> Bash tool call you issue yourself**, not a preload.
 >
 > Resolve the plugin root, then fetch the issue, exactly as written below —
 > `<ISSUE-NUMBER>` is the number you parsed from the user's invocation, passed
@@ -221,11 +218,13 @@ Non-backend work: map the signals analogously (stores/schemas ≈ models, compon
 
 ### Splitting into child issues (score > 30)
 
-A Large issue splits into an **enabler** (foundation — model/types/service shell) then independently-mergeable **story** issues (one vertical slice each, strict TDD), with `Parent:`/`BlockedBy:` links, implemented sequentially (enabler first, each in its own worktree). Prefer `/sge:decompose-issue`. The Phase 0.5 size pre-score (#1265) routes a likely-Large issue here before any fork.
+A Large issue splits into an enabler plus independently-mergeable story issues (strict TDD), implemented sequentially in worktrees via `/sge:decompose-issue`; the Phase 0.5 size pre-score (#1265) can route here before any fork.
 
 **Gate the fan-out on `/sge:build-ready-audit` before dispatching children** — implement only `READY` children, skip and report `NOT_READY`/`TOO_LARGE` rather than dispatching blindly.
 
 Full taxonomy, child-creation templates, the build-ready gating mechanics, and `$SGE_GOVTRACE_VERDICT` reuse: [`child-splitting.md`](references/child-splitting.md).
+
+**Tier resolution (T0/T1/T2 — proportional governance).** Resolve via `resolve-governance-tier.mjs` (paths/score/lane), export `SGE_GOVERNANCE_TIER`, log it — never silent. Phase 0.5/5, commit, pr-review read it. Mechanics: [`governance-tier.md`](references/governance-tier.md).
 
 ---
 
@@ -250,7 +249,7 @@ It returns a `depth` (and the `tier` + per-path `classifications` for the audit 
 | **standard** | any code change | `scoped` | Digest **+** the path-scoped specs/ADRs from `resolve-context-scope.mjs` (items 1–3). |
 | **critical** | a **CRITICAL path** — security/auth, DB migrations, or multi-tenant / data-isolation (the same list `agents/agent-registry.md` escalates to `opus`) | `full` | The digest **and the full L0–L8 artefact stack**. Scoping is **deliberately bypassed**. |
 
-> **Non-goal guard — CRITICAL context is never thinned.** CRITICAL wins over every signal — even a one-line auth tweak or "small" migration reads the full stack; never run `resolve-context-scope.mjs` to thin a `critical` read.
+> **Non-goal guard — CRITICAL context is never thinned.** CRITICAL wins over every signal; never run `resolve-context-scope.mjs` to thin a `critical` read.
 
 ### Step B — read to that depth
 
@@ -322,7 +321,7 @@ Repeat per acceptance criterion.
 
 ## Phase 5: Independent Local Review (forked sge-review, pre-PR)
 
-**Trivial-tier verification cap (#1345).** On the **`trivial`** tier (Phase 2.5's `resolve-context-depth.mjs` signal), the forked verification subagent is **off by default** — run inline verification (≤ 5 000 tokens), escalating to a forked `/sge:sge-review` on any out-of-path side-effect. Full procedure + `verification_mode` contract: [`context-depth.md`](references/context-depth.md#trivial-tier-verification-cap-1267).
+**Tiered skip (T0/T1).** `SGE_GOVERNANCE_TIER` `T0`/`T1` → skip this phase **entirely**, no inline substitute; Phase 4 + `/sge:pr-review` cover it. `T2`: unchanged (forked review below; context-depth-`trivial` inline cap applies underneath). Mechanics: [`governance-tier.md`](references/governance-tier.md); procedure: [`context-depth.md`](references/context-depth.md#trivial-tier-verification-cap-1267).
 
 On `standard`/`critical`, delegate the review to a **forked, fresh-context subagent running `/sge:sge-review`** (it sees the diff with no memory of writing it) — pass it a starting map (touched files + your "audited, no change needed" notes) to verify, not trust; tell it to resolve its repo context first (SPEC-057) and to skip the quality suite (Phase 4 already ran it). A `verdict: "fail"` blocks the PR (fix every blocker TDD-first, re-run Phase 4, re-fork); on `pass`, capture the reviewer's `sha`/`verdict`/`blockers` for the Phase 6 PR body. Dispatch mechanics, the repo-context resolver, prompt template, and returned JSON shape: [`pre-pr-review.md`](references/pre-pr-review.md).
 
@@ -344,6 +343,7 @@ Ensure the PR body carries that reference and the two tracking comments (via `gh
 <Closes|Part of> #<issue-number> ...
 <!-- sge-cortex-stats: {"cortexHits": N, "cortexMisses": N} -->
 <!-- sge-phase5-verdict: {"sha": "<reviewer.sha>", "verdict": "<reviewer.verdict>", "blockers": <reviewer.blockers>, "verification": "<verification_mode>"} -->
+<!-- sge-governance-tier: {"tier": "<T0|T1|T2>", "reason": "<reason>"} -->
 ```
 
 Fill `sge-cortex-stats` from the Phase-0 hit/miss counts (ROI #522), `sge-phase5-verdict` from the Phase 5 reviewer's JSON (`sha`, `verdict`, `blockers`), and `verification` from the Phase 5 `verification_mode`.
