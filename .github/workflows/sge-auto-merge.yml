@@ -1,0 +1,49 @@
+# SGE Auto-Approve & Merge — caller stub.
+# ---------------------------------------
+# The gate itself lives ONCE, in wtp-org: .github/workflows/auto-merge-reusable.yml.
+# Do NOT copy gate logic in here. Before the fleet moved to a reusable workflow, 23
+# repos each vendored the gate and 22 shared one identical fail-open (wtp-org#777) —
+# an empty check set was read as "no CI configured" and merged on the label alone.
+# One file, one fix.
+#
+# Migrated from this repo's own inline sgd-auto-merge.yml (wtp-org#777) — renamed to
+# sge-auto-merge.yml per the org-wide SGD->SGE identifier rename (CLAUDE.md,
+# 2026-08-26). The inline copy this replaces predated both the pr_ci_expected()
+# fail-closed probe AND the SELF_WF context-derived fix — it hardcoded
+# SELF_WF="SGD Auto-Approve & Merge" as a string literal. The reusable gate fixes
+# both, plus the wtp-org#781 stale-hold-label-snapshot bug. This repo's only
+# required status check is "Publish integrity" — untouched by this change, no
+# collision risk with the renamed gate job.
+#
+# WHAT STAYS LOCAL, and why it is not just boilerplate:
+#   * `pull_request_target: types: [labeled]` — a reusable workflow cannot declare
+#     `on:`. `labeled` ONLY: `synchronize` is excluded so a push after labelling
+#     cannot silently re-trigger merge on stale approval.
+#   * The `pr-reviewed` label guard and draft check — this repo's own merge policy,
+#     not the gate's business.
+#   * `concurrency` — one in-flight run per PR number, so a rapid label churn
+#     can't race two gate evaluations against each other.
+#   * `secrets: inherit` — the reusable workflow needs this repo's own GH token
+#     scope to read/merge; it cannot be given secrets any other way.
+
+name: SGE Auto-Approve & Merge
+
+on:
+  pull_request_target:
+    types: [labeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: sge-auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    if: >-
+      github.event.pull_request.draft == false &&
+      contains(github.event.pull_request.labels.*.name, 'pr-reviewed')
+    uses: WealthTechPros/wtp-org/.github/workflows/auto-merge-reusable.yml@main
+    secrets: inherit
