@@ -624,9 +624,25 @@ fix_claim_status() {
   _read_label_state '"fixing=\(index("pr-fixing")!=null)"' fix_claim_status 'pr-fixing claim' 1174
 }
 
+# _post_label_attribution: best-effort one-line comment naming which agent
+# session made a label change, since every gh call in this script runs under
+# the operator's own token — the PR timeline alone cannot answer "which agent
+# did this?" (wtp-org#774). Owner is SGE_AGENT_ID if set, else the system
+# hostname — same fallback post_claim_comment already uses. Failure is logged
+# but never blocks the label action itself.
+_post_label_attribution() {
+  local action="$1" label="$2" owner _rf
+  owner="${SGE_AGENT_ID:-$(hostname 2>/dev/null || echo "unknown")}"
+  _rf="$(_claim_repo_full)"
+  [[ -n "$_rf" ]] || return 0
+  gh api "repos/$_rf/issues/$PR/comments" \
+    -f body="_agent \`$owner\` ${action} \`$label\`_" >/dev/null 2>&1 || true
+}
+
 add_label() {
   # gh tolerates re-adding an existing label; any other failure should surface.
   gh pr edit "$PR" --add-label "$1" >/dev/null
+  _post_label_attribution "added" "$1"
 }
 
 remove_label() {
@@ -638,6 +654,7 @@ remove_label() {
       echo "warning: failed to remove label '$1' from PR #$PR: $out" >&2
     fi
   fi
+  _post_label_attribution "removed" "$1"
 }
 
 # --- Rate-limit detection + fail-loud stall reporting (issue #1147) ---------

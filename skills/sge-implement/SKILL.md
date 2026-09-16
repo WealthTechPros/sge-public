@@ -368,9 +368,9 @@ Resolver snippet, config surface, the label-mutex race it fixes, and the pod-sid
 
 > **Skipped when `SGE_GATE_OWNER=pod`.** See Phase 6.5. This phase runs only in **self-drive mode** (gate owner unset or not `pod`).
 
-The PR is **not yet mergeable** — the `pr-reviewed` branch-protection gate (`.github/workflows/require-pr-reviewed-label.yml`, standard across WTP repos) blocks merge to `main` until review passes. Drive the PR to a clean, reviewed, auto-merging state yourself — never hand review off to the user.
+The PR is not yet in a clean, reviewed state. `pr-reviewed` drives auto-merge (`sge-auto-merge.yml`); the old `require-pr-reviewed-label.yml` branch-protection required check was removed org-wide 2026-09-16 (wtp-org#864). Drive the PR to a clean, reviewed, auto-merging state yourself — never hand review off to the user.
 
-> **Graceful degradation:** if that gate workflow is absent, the label is informational not enforced — run the review loop the same, but note in your summary that merge is not label-blocked.
+> **Graceful degradation:** merge is no longer label-blocked by branch protection — run the review loop the same, note this in your summary.
 
 ### 7.1 Pre-check (do NOT manage labels here)
 

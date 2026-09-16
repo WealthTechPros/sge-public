@@ -1614,6 +1614,10 @@ rl_app_jwt() {
     keyfile="$(mktemp)" || return 1
     cleanup="$keyfile"
     ( umask 077; printf '%s\n' "${SGE_REVIEW_APP_PRIVATE_KEY}" > "$keyfile" )
+    # Windows/MSYS: openssl is a native binary and cannot resolve a POSIX-style
+    # /tmp/... path from Git Bash's mktemp -- translate to a Windows path
+    # first (issue #2506). No-op (cygpath absent) on Linux/macOS.
+    command -v cygpath >/dev/null 2>&1 && keyfile="$(cygpath -w "$keyfile")"
   else
     echo "rl_app_jwt: no private key (set SGE_REVIEW_APP_PRIVATE_KEY or _PRIVATE_KEY_FILE)" >&2; return 1
   fi
