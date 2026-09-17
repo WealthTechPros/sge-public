@@ -40,9 +40,12 @@ applies `pr-reviewing`, this run owes the state machine a resolution: it **may n
 or terminate while the PR still holds `pr-reviewing`** — no "post analysis, arm a watchdog, stand
 by" path, no completion deferred to a later re-invocation. See the termination contract below.
 
-**Call shape and mode interaction (issue #754).** `pr-reviewed` is a **branch-protection merge
-gate** (`.github/workflows/require-pr-reviewed-label.yml`); this skill solely owns its
-transitions — never hand-roll `gh pr edit` on these labels. Advisory mode never claims:
+**Call shape and mode interaction (issue #754).** `pr-reviewed` drives auto-merge
+(`.github/workflows/sge-auto-merge.yml`) in every repo, and used to also be enforced as a
+branch-protection merge gate by `.github/workflows/require-pr-reviewed-label.yml` — that required
+check was removed org-wide 2026-09-16 (wtp-org#864) and the workflow deleted here. Either way,
+this skill solely owns the label's transitions — never hand-roll `gh pr edit` on these labels.
+Advisory mode never claims:
 
 ```bash
 [ "$REVIEW_MODE" = "advisory" ] || "$SGE_ROOT/skills/pr-review/pr-labels.sh" start-review $PR
