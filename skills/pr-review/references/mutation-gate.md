@@ -82,20 +82,25 @@ clean result it becomes the very defect this gate exists to catch, one level up:
 coverage rendering as absence of problems. So `not-run` obliges the reviewer to fall back to the
 manual check below, and the verdict must say which of the two produced the score.
 
-This is not a rare path. The wiring above is `sge`-internal — `scripts/mutation-diff-gate.mjs`
-hardcodes `MUTATABLE_DIRS` to `platform/app/backend/` and `platform/app/frontend/`, and the
-published plugin does not carry the script. **The reason is the reference form, not `.claude-plugin`
-scope** (#2514 review): `publish-public.yml` harvests any sibling a *`SKILL.md`* references as
-`${CLAUDE_PLUGIN_ROOT}/<path>` and fails the publish if it is missing, but it scans SKILL.md files
-only and matches that form only — the invocation above is plain `node scripts/mutation-diff-gate.mjs`
-inside a reference doc, which the workflow calls its own "DELIBERATE limitation … plain-form-only".
-So every other WTP repo consuming `/sge:pr-review` gets the pointer and no engine, and the gate
-records `mutation_gate: not-run`. **`not-run` is the default outside this repo, not the exception.**
+This is not a rare path. `scripts/mutation-diff-gate.mjs` no longer *hardcodes* `MUTATABLE_DIRS` —
+issue #2599 moved it to `loadMutatableDirs()`, which reads a `mutatable_dirs` key from the consuming
+repo's own `.sge/test-map.yml` (same per-repo-config convention as `production_paths` /
+`driver_boundary_paths` / `coverage_floor` in that file), falling back to sge's own two dirs only
+when the key is absent. **That fixes the scoping half, not the reachability half**: the published
+plugin still does not carry the script at all. **The reason is the reference form, not
+`.claude-plugin` scope** (#2514 review): `publish-public.yml` harvests any sibling a *`SKILL.md`*
+references as `${CLAUDE_PLUGIN_ROOT}/<path>` and fails the publish if it is missing, but it scans
+SKILL.md files only and matches that form only — the invocation above is plain
+`node scripts/mutation-diff-gate.mjs` inside a reference doc, which the workflow calls its own
+"DELIBERATE limitation … plain-form-only". So every other WTP repo consuming `/sge:pr-review` still
+gets the pointer and no engine to run, and the gate still records `mutation_gate: not-run`.
+**`not-run` is the default outside this repo, not the exception.**
 
-Worth knowing if the wiring is ever fixed: that makes the "other half" smaller than a packaging
-redesign — a `${CLAUDE_PLUGIN_ROOT}`-form reference from a SKILL.md plus per-repo `MUTATABLE_DIRS`
-(and a Node dependency in the consumer repo). The manual fallback stays useful even then: no engine
-mutates the prose assertions that motivated this, such as `#328`'s error message.
+Worth knowing if the packaging half is ever fixed: a `${CLAUDE_PLUGIN_ROOT}`-form reference from a
+SKILL.md, plus the consumer repo declaring its own `mutatable_dirs` (#2599, done) and a Node
+dependency in the consumer repo, is now the complete remaining list — no further script changes.
+The manual fallback stays useful even then: no engine mutates the prose assertions that motivated
+this, such as `#328`'s error message.
 
 ### When the manual fallback is required
 
@@ -126,6 +131,35 @@ that permission was named, and the prose was the only channel carrying it to an 
 **Corollary — assert on the published surface.** A field a serialiser, classifier, or DTO boundary
 discards is not what the consumer reads. Ask what the auditor, caller, or log line *actually
 receives*, and assert there.
+
+### A green sabotage run is inconclusive, not proof (issue #2507)
+
+**When a sabotage run comes back green, the first hypothesis is "my mutation did not apply", not
+"my tests are weak."** A silent no-op mutation and a genuinely weak test produce the identical
+observation — a passing suite — so a green run says nothing about test quality until the mutation
+is confirmed present. Treating it as proof either way (pass *or* fail) before that confirmation is
+the same mistake `not-run` already guards against above: absence of a real check rendering as
+absence of a problem.
+
+Confirm the mutation actually landed before drawing any conclusion:
+
+- `git diff` after patching, and check the hunk you intended is present; or
+- assert the sabotaged branch is reached (a throwaway `throw`/log in the mutated path); or
+- verify the anchor string matched — a `str.replace()` that finds nothing returns the original
+  silently, and a Python `assert old in s` guard turns that into a loud failure (see the guard
+  rail below).
+
+Only once the mutation is confirmed present is a green run evidence about the tests.
+
+Two occurrences this caught in the wild, both in mutation runs that *appeared* all-green on first
+pass:
+
+- **`suitability-engine#55`** — a path-only cache key mutation appeared all-green; the mutation was
+  actually a silent no-op (the anchor never matched), and once correctly applied, 4 tests failed.
+- **`file-checker#95`** — a merge-without-dedup mutation appeared to survive; once correctly
+  applied, 2 tests failed.
+
+Neither suite was weak. Both sabotage runs were not testing what they claimed to be testing.
 
 ### Guard rails
 

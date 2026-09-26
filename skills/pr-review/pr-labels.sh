@@ -648,13 +648,27 @@ add_label() {
 remove_label() {
   # Tolerate the label not being present (e.g. labelled out of band).
   # All other failures — auth, rate-limit, archived repo — surface as warnings.
-  local out
+  # Attribution is only posted when the removal actually succeeded, or hit the
+  # tolerated already-absent case (issue #2600) — gating on the real outcome
+  # instead of falling through unconditionally, so a genuine failure never
+  # produces a false "agent X removed label Y" audit-trail comment.
+  # add_label doesn't need this gate: `set -euo pipefail` makes it exit before
+  # reaching _post_label_attribution when `gh pr edit --add-label` genuinely
+  # fails. remove_label's explicit if/then error-handling block means `set -e`
+  # doesn't save it the same way, so the gate has to be made explicit here.
+  local out removed=true
   if ! out=$(gh pr edit "$PR" --remove-label "$1" 2>&1); then
-    if [[ "$out" != *"Label is not associated"* && "$out" != *"not found"* ]]; then
+    if [[ "$out" == *"Label is not associated"* || "$out" == *"not found"* ]]; then
+      removed=true   # tolerated: label was already absent
+    else
       echo "warning: failed to remove label '$1' from PR #$PR: $out" >&2
+      removed=false
     fi
   fi
-  _post_label_attribution "removed" "$1"
+  if [[ "$removed" == true ]]; then
+    _post_label_attribution "removed" "$1"
+  fi
+  return 0
 }
 
 # --- Rate-limit detection + fail-loud stall reporting (issue #1147) ---------

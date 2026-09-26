@@ -9,6 +9,10 @@
 #         post_claim_comment's existing owner-fallback pattern)
 #   AC-4: the underlying gh pr edit call still happens even if the
 #         attribution comment post fails (best-effort, non-blocking)
+#   AC-5: remove_label posts no attribution comment when the underlying
+#         `gh pr edit --remove-label` call genuinely fails (issue #2600) —
+#         the reverse, more consequential case: attribution must not be
+#         posted for a label change that never actually happened
 #
 # Only the function definitions (everything above the CMD dispatcher) are
 # sourced — the full script requires a subcommand + PR arg and ends in a
@@ -170,6 +174,38 @@ if grep -q "^exit_code=0$" "$CALL_LOG"; then
   pass "AC-4: add_label succeeds (exit 0) even when the attribution comment POST fails"
 else
   fail "AC-4: add_label should not fail when only the attribution comment fails — log: $(cat "$CALL_LOG")"
+fi
+
+# AC-5: remove_label must NOT post a false attribution comment when the
+# underlying `gh pr edit --remove-label` call fails for a genuine (non-
+# tolerated) reason -- issue #2600. Stub gh pr edit to fail with an error
+# that is neither "Label is not associated" nor "not found", then assert no
+# "issues/1/comments" call happened -- the attribution post must never fire.
+run_with_remove_failure() {
+  : > "$CALL_LOG"
+  (
+    PR=1; GH_REPO="WealthTechPros/sge"; SGE_AGENT_ID="x"
+    gh() {
+      echo "$*" >> "$CALL_LOG"
+      case "$1 $2" in
+        "pr edit") echo "HTTP 500: Internal Server Error" >&2; return 1 ;;
+        "api repos/"*) echo '{"id":123}'; return 0 ;;
+        "repo view") echo "WealthTechPros/sge" ;;
+      esac
+      return 0
+    }
+    set -- test 1
+    # shellcheck disable=SC1090
+    source "$FUNCS_ONLY"
+    remove_label "pr-reviewing" 2>/dev/null
+    echo "exit_code=$?" >> "$CALL_LOG"
+  )
+}
+run_with_remove_failure
+if grep -q "^exit_code=0$" "$CALL_LOG" && ! grep -q 'issues/1/comments' "$CALL_LOG"; then
+  pass "AC-5: remove_label posts no false attribution comment when the removal genuinely fails"
+else
+  fail "AC-5: remove_label should skip attribution on a genuine removal failure — log: $(cat "$CALL_LOG")"
 fi
 
 echo
