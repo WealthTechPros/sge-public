@@ -88,6 +88,8 @@ Pipeline: governance-trace (0.5) → entry criteria (`/sge:sge-preflight`) → c
 
 Track hits/misses as counters (`cortexHits`, `cortexMisses`) — appended to the PR body in Phase 6.
 
+**Reproduce-first (#2512).** Confirm on main before routing/coding; mismatch = stop + comment, no build. Detail: `references/reproduce-first.md`.
+
 **Route — spec or no spec?**
 
 Mechanical check: grep the issue title and body for a feature-spec id — `SPEC-[0-9]+` (or legacy `SGD-[0-9]+`).
