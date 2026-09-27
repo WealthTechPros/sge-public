@@ -80,3 +80,16 @@ exempt_paths:
   - '**/*.yml'
   - '**/*.yaml'
   - '**/*.lock'
+
+# ---- Mutation gate (SPEC-120) — dirs this repo has wired for Stryker -------
+# Read by scripts/mutation-diff-gate.mjs (invoked from /sge:pr-review Phase 3,
+# skills/pr-review/references/mutation-gate.md) to decide which changed files
+# are actually mutation-testable. Only declare a dir once it has a
+# `vitest.config.ts` plus the @stryker-mutator/core + @stryker-mutator/
+# vitest-runner devDependencies wired — declaring an unwired dir just adds a
+# path the gate will try and fail to run Stryker against.
+# No mutatable_dirs declared -> the gate stays inert for this repo
+# (`mutation_gate: not-run`, never a fabricated pass/fail — "absence is not a
+# gap", same posture as driver_boundary_paths above) until you add one.
+# mutatable_dirs:
+#   - 'src/'

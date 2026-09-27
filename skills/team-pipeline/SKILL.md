@@ -497,17 +497,17 @@ busy-loop on a foreground `sleep`).
 3. On stale/kill: see *Stale-lane kill procedure*.
 4. On clean completion (`success` + `prNumber`): `persist_lane_usage` **before**
    releasing the worktree (meter lives there — see *Durable token-usage
-   persistence*), then spawn the review agent, release worktree + lock, pull next
-   issue — marks wave landed.
+   persistence*), comment the finish notice on the issue, spawn the review
+   agent, release worktree + lock, pull next issue — marks wave landed.
 4a. On governance-blocked completion (`outcome == "blocked"`, `prNumber` null) —
-    the governance-trace gate pausing for a human decision (requirement change,
-    scope conflict, capability gap, or low-confidence match — not a stall/failure):
-    `persist_lane_usage` **before** releasing the worktree (a blocked lane still
-    spent measured tokens); release worktree + lock as a clean completion would;
-    append to `governanceBlockedIssues[]` (`{"issue":<N>, "notedAt":"<ISO>",
-    "note":"<note>"}`); log `[Blocked] Lane #<N> paused — <note>`; pull the next
-    issue (marks wave landed). Do **not** add to `staleLanes`/`failedIssues` — the
-    fix is a human decision on the issue, not a re-scope.
+    the governance-trace gate pausing for a human decision, not a stall/failure:
+    `persist_lane_usage` **before** releasing the worktree; comment the
+    needs-decision notice on the issue; release worktree + lock as a clean
+    completion would; append to `governanceBlockedIssues[]`
+    (`{"issue":<N>, "notedAt":"<ISO>", "note":"<note>"}`); log `[Blocked] Lane
+    #<N> paused — <note>`; pull the next issue (marks wave landed). Do **not**
+    add to `staleLanes`/`failedIssues` — the fix is a human decision on the
+    issue, not a re-scope.
 
 **Review agents:** read `/tmp/team-pipeline-review-<PR>.json`; > 10 min → stall
 (leave PR draft; pr-monitor handles it); on completion → `reviewedPRs` or log
@@ -532,7 +532,8 @@ checkout; (5) append to `staleLanes[]` (issue, killedAt, ageMinutes, lastCommit,
 issue itself** (state is /tmp, dies with the session); (7) log
 `[Kill] Lane #<N> stale after <M>min`; (8) do NOT re-queue — add to `failedIssues`
 (reason `stale-killed`); (9) mark wave landed. A human decides whether to
-decompose before re-dispatch. Commands + heredoc: [mechanisms](references/mechanisms.md).
+decompose before re-dispatch. All three templates:
+[mechanisms](references/mechanisms.md#lane-transition-issue-comments).
 
 ### Adaptive scale-up
 

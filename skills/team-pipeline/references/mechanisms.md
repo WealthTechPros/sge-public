@@ -559,6 +559,54 @@ Resource log each tick:
 echo "[Monitor] $(date -u +%T) impl=$(count activeAgents) reviews=$(count pendingReviews) load=$LOAD/$CORES wave_active=$(count activeAgents)/${waveSize}"
 ```
 
+### Lane-transition issue comments
+
+One shared pattern, three call sites (SKILL.md's *Lane-transition issue
+comments* section, #2613): a lane's `stalled` / `finished` / `needs-decision`
+transition each posts one `$IW comment` to the issue the lane worked, on the
+same `$IW` seam the stale-kill comment already used (SPEC-105 S3 — a
+Jira-tracked repo's comment lands on the item, `$IW comment` shells out to `gh
+issue comment` on GitHub). Only the template text differs.
+
+**Finished** (Phase 4 step 4 — `success` + `prNumber`; fires right after
+`persist_lane_usage`, before spawning the review agent):
+
+```bash
+"$IW" comment <N> "$(cat <<EOF
+**/sge:team-pipeline** finished this lane — draft PR #<PR> opened, handing off
+to review.
+EOF
+)"
+```
+
+**Needs-decision** (Phase 4 step 4a — `outcome == "blocked"`, the
+governance-trace gate pausing for a human call; fires right after
+`persist_lane_usage`, before releasing the worktree):
+
+```bash
+"$IW" comment <N> "$(cat <<EOF
+**/sge:team-pipeline** paused this lane — needs a human decision:
+
+<note>
+
+This issue was not re-queued. Once resolved, re-run \`/sge:sge-implement <N>\`
+(or re-dispatch it into the next pipeline run) to continue.
+EOF
+)"
+```
+
+**Stalled** — the pre-existing stale-kill comment (step 6 of the *Stale-lane
+kill procedure* immediately below); reproduced there rather than duplicated
+here since it is emitted as part of that ordered nine-step sequence, not
+standalone.
+
+Both new comments are best-effort — a comment-post failure logs
+`[Warn] issue comment failed for #<N> (<transition>)` and does **not** block
+the lane transition itself (worktree release, next-issue pull, wave-landing)
+from proceeding; the durable state (`governanceBlockedIssues[]` / the review
+agent spawn) is the primary record, the comment is the notification layer on
+top of it.
+
 ### Stale-lane kill procedure — exact commands
 
 Core lists the nine ordered actions; these are the concrete commands:

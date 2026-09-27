@@ -142,6 +142,28 @@ if SGE_GOVTRACE_VERDICT is set AND non-empty:
   else      → fall-through; dispatch per-lane fork as normal
 ```
 
+> **Dispatch tool for the per-lane fork — `Agent`, never `Skill(args=)`
+> (issue #2452).** "Dispatch per-lane fork as normal" above names an
+> outcome, not a tool call. `Skill(skill: "sge:governance-trace", args:
+> "<issue-number> ...")` does **not** fork — it inlines governance-trace's
+> own SKILL.md body into the caller's own context, so `args` is never
+> received by anything and the nested run reports `NO_TARGET_ISSUE` even
+> for a well-formed issue number. Use `Agent` instead, with the issue
+> number and target repo spelled out directly in the prompt text (never
+> relying on `args=` threading):
+> ```
+> Agent({description: "Governance-trace classify issue <N>",
+>        subagent_type: "general-purpose",
+>        prompt: "Invoke sge:governance-trace ... Issue number <N>, repo
+>          <owner/repo> — read directly, don't rely on args= threading.
+>          Verify mode (--spec SPEC-NNN) when the issue cites a spec,
+>          classify mode otherwise. ..."})
+> ```
+> This is the same tool-selection rule every other governance-trace caller
+> follows (`skills/tests/governance-trace-dispatch-tool.test.sh` checks it
+> repo-wide, not just for the callers known when that guard was written) —
+> a custom orchestrator built from this template must follow it too.
+
 **Reuse is never a bypass.** An adopted verdict enters the exact same
 branch-on-`verdict` logic — a blocking verdict (`MATCHES_EXISTING_MODIFIED`,
 `NOT_SGE_SCOPE`, low `matchConfidence`) pauses and surfaces to the user before
