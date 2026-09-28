@@ -147,6 +147,25 @@
 #                                                                             asserts coverage without proof)
 #                                             Also lists the intervening commits by
 #                                             SHA + message.
+#   pr-labels.sh shadow-pass <pr>              PR Warden shadow-mode terminal path (issue
+#                                             #2651, wtp-org ADR-0021): the review+fix work
+#                                             completed normally (start-review claimed as
+#                                             usual), but the dispatch must never be the
+#                                             reason a PR merges — sge-auto-merge.yml
+#                                             triggers on `labeled: pr-reviewed`, and `pass`
+#                                             is the ONLY place that label is applied (and
+#                                             the only place auto-merge is armed). Releases
+#                                             pr-reviewing (+changes-requested if present,
+#                                             the review passed) and applies `agent-reviewed`
+#                                             instead — never touches pr-reviewed, never
+#                                             calls `gh pr merge`. Deliberately a DISTINCT
+#                                             subcommand, not a `pass` flag, so "pr-labels.sh
+#                                             pass is never called" is structurally true for
+#                                             a shadow dispatch, not merely conventional.
+#                                             agent-reviewed carries no automation of its
+#                                             own — a later human-triggered `pass` applies
+#                                             pr-reviewed exactly as it does today, with no
+#                                             need to remove agent-reviewed first.
 #   pr-labels.sh status <pr>                  print "reviewing=<bool> reviewed=<bool> hold=<bool>
 #                                             changes-requested=<bool> excluded-reviewer=<bool>" (#2238)
 #                                             (Forgejo keeps the two-field form — #1419)
@@ -218,6 +237,12 @@
 #     hold state refuses. The remediation is 'pr-labels.sh held $PR' (review
 #     passed; release pr-reviewing, leave hold and no pr-reviewed) + instruct the
 #     operator; a new review cycle after hold removal promotes via delta fast-path.
+#   - when SGE_REVIEW_SHADOW=1 in the environment, `pass` refuses (exit 9,
+#     issue #2653 Bug 3a): the mechanical backstop for PR Warden shadow mode
+#     (#2651), same shape as the exit-4 advisory guard — a shadow dispatch must
+#     never apply pr-reviewed or arm auto-merge even if a future regression ever
+#     routed it to `pass` instead of `shadow-pass`. SKILL.md exports it alongside
+#     REVIEW_MODE=shadow.
 #   - rate-limit stalls fail LOUD, not silent (issue #1147): a PR #1144 dispatch
 #     ran 3+ hours and burned 268k tokens silently retrying rate-limited `gh`
 #     REST calls instead of failing or switching quota buckets. `label_status`
@@ -238,6 +263,11 @@ FIXING="pr-fixing"
 HOLD="hold"
 CHANGES_REQUESTED="changes-requested"
 EXCLUDED_REVIEWER="excluded-reviewer"
+# PR Warden shadow mode's terminal label (issue #2651, wtp-org ADR-0021): "an
+# autonomous agent reviewed this, unreviewed by a human yet". Carries no
+# automation of its own — nothing in this repo triggers on it — so it never
+# needs special-casing anywhere `pr-reviewed`'s own automation lives.
+AGENT_REVIEWED="agent-reviewed"
 
 usage() {
   # awk, not sed: BSD/macOS sed rejects the `{ /re/d; p }` one-liner address
@@ -587,6 +617,15 @@ ensure_hold_label() {
 ensure_excluded_reviewer_label() {
   gh label create "$EXCLUDED_REVIEWER" --color 0075CA \
     --description "Reviewer excluded — independence gate structurally could not satisfy (SGE #2293)" \
+    --force >/dev/null
+}
+
+# The agent-reviewed label is only created by the shadow-pass path (PR Warden,
+# issue #2651). A teal distinct from pr-reviewed's green (0E8A16) so the two
+# are visually distinguishable at a glance. Same idempotent shape.
+ensure_agent_reviewed_label() {
+  gh label create "$AGENT_REVIEWED" --color 2EC4B6 \
+    --description "Reviewed by an autonomous agent (PR Warden) — unreviewed by a human yet" \
     --force >/dev/null
 }
 
@@ -1433,6 +1472,71 @@ case "$CMD" in
       echo "Post the review verdict as a comment (mode: advisory) instead. To promote the gate, re-run without SGE_REVIEW_ADVISORY set in the environment." >&2
       exit 4
     fi
+    # Shadow-mode mechanical backstop (issue #2653 Bug 3a): same shape as the
+    # SGE_REVIEW_ADVISORY guard above — a `--shadow` dispatch exports
+    # SGE_REVIEW_SHADOW=1, and this refuses `pass` even if a future SKILL.md
+    # regression (like #2653 Bug 2) ever routed a shadow dispatch here instead
+    # of to `shadow-pass`. Distinct exit 9.
+    if [[ "${SGE_REVIEW_SHADOW:-}" == "1" ]]; then
+      echo "refusing: SGE_REVIEW_SHADOW=1 — shadow-mode dispatch: 'pass' must never apply $REVIEWED or arm auto-merge; use 'shadow-pass' (issue #2651, #2653)" >&2
+      exit 9
+    fi
+    # Verdict-laundering mechanical backstop (found by adversarial QA audit of
+    # #2653 round 2). The env-based guards above only stop THIS invocation's
+    # own flags/env from reaching pass — they say nothing about the TARGET
+    # PR's verdict history, so a caller who skips the orchestrating skill
+    # entirely (a bare `start-review` + `pass --auto-merge --expect-head
+    # <head>`, no --shadow, no special env) could promote a PR whose only
+    # posted verdict at the current head is a PR Warden `mode: shadow` one —
+    # applying $REVIEWED and arming auto-merge off zero real review content.
+    # mode-selection.md's prose telling a reviewing agent not to do this is
+    # not a control (sge#2508's own lesson, repeated). Fix: read the latest
+    # trusted sge-verdict posted at the CURRENT head; if it exists and its
+    # `mode:` field contains "shadow", refuse. A legitimate call always posts
+    # its OWN fresh (non-shadow) verdict via rl_post_verdict before ever
+    # calling pass, so the latest verdict at head is that fresh one — this
+    # only fires when no real review was actually posted at this head.
+    # Distinct exit 10. Same trusted-author filter as review-coverage/
+    # sync-check (issue #2294/#1941) so an outside, non-collaborator comment
+    # cannot forge a verdict to trip (or dodge) this check either way.
+    if [[ "${_PRL_HOST:-github}" != "forgejo" ]]; then
+      _PASS_HEAD=$(gh pr view "$PR" --json headRefOid --jq .headRefOid 2>/dev/null) || _PASS_HEAD=""
+      _PASS_REPO_FULL="${GH_REPO:-$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || true)}"
+      if [[ -n "$_PASS_HEAD" && -n "$_PASS_REPO_FULL" ]]; then
+        _PASS_TRUST='.user.login == "wtp-sge[bot]" or .user.login == "github-actions[bot]"
+             or (((.author_association // "") | ascii_upcase) as $assoc
+                 | $assoc == "OWNER" or $assoc == "MEMBER" or $assoc == "COLLABORATOR")'
+        _PASS_LAST=$(gh api "repos/$_PASS_REPO_FULL/pulls/$PR/reviews" --paginate \
+          --jq '[.[] | select(.body != null) | select('"$_PASS_TRUST"') | select(.body | test("```sge-verdict")) | .body] | last // empty' \
+          2>/dev/null) || _PASS_LAST=""
+        if [[ -n "$_PASS_LAST" ]]; then
+          # Fallbacks (found by adversarial re-verification, issue #2653): a
+          # trusted, fence-matching verdict whose body has no matchable
+          # commit/sha/head or mode line makes BOTH grep pipelines below exit
+          # non-zero (no match). Under this script's `set -euo pipefail`
+          # (top of file), an unguarded assignment from a failing pipeline
+          # aborts the WHOLE `pass` command with an undiagnosed exit 1 —
+          # colliding with the pre-existing is_draft refusal's exit 1 and
+          # giving no diagnostic, unlike every other guard in this file.
+          # Mirrors the `|| _PASS_HEAD=""` / `|| _PASS_LAST=""` fallbacks two
+          # statements above: an empty result here just means "this verdict
+          # doesn't match the shadow-laundering shape", which correctly
+          # falls through to a normal pass (fails closed either way; this
+          # only fixes the diagnosability, not a security gap).
+          _PASS_LAST_SHA=$(printf '%s' "$_PASS_LAST" | grep -Eio '^[[:space:]]*(commit|sha|head)[[:space:]]*:[[:space:]]*[0-9a-f]+' | head -1 | grep -Eio '[0-9a-f]+$') || _PASS_LAST_SHA=""
+          _PASS_LAST_MODE=$(printf '%s' "$_PASS_LAST" | grep -Eio '^[[:space:]]*mode[[:space:]]*:.*' | head -1) || _PASS_LAST_MODE=""
+          _PASS_LAST_SHA_NORM=$(printf '%s' "$_PASS_LAST_SHA" | tr '[:upper:]' '[:lower:]')
+          _PASS_HEAD_NORM=$(printf '%s' "$_PASS_HEAD" | tr '[:upper:]' '[:lower:]')
+          if [[ -n "$_PASS_LAST_SHA_NORM" && ${#_PASS_LAST_SHA_NORM} -ge 7 \
+                && "$_PASS_HEAD_NORM" == "$_PASS_LAST_SHA_NORM"* \
+                && "$_PASS_LAST_MODE" == *shadow* ]]; then
+            echo "refusing: PR #$PR — the latest trusted sge-verdict at the current head (${_PASS_HEAD:0:12}) is a PR Warden shadow-mode verdict ($_PASS_LAST_MODE). A shadow verdict is deliberately untrusted for gate purposes and cannot be promoted via 'pass' without a fresh, real review posted at this head (issue #2653)." >&2
+            echo "Run a real (non-shadow) /sge:pr-review at this head first — it will post its own fresh verdict before calling pass — or if this dispatch IS meant to be shadow mode, call 'shadow-pass' instead of 'pass'." >&2
+            exit 10
+          fi
+        fi
+      fi
+    fi
     # Mechanical subagent-execution gate (issue #883): rl_reviewer_ran is only
     # useful if it is actually consulted — twice a dispatched specialist returned
     # ZERO tool calls and the parent verdict trusted it as a clean pass. The
@@ -2001,6 +2105,58 @@ case "$CMD" in
     HOLD_ST="$(hold_status 2>/dev/null)" || HOLD_ST="(hold_status unavailable)"
     echo "PR #$PR: review passed — held for human sign-off ($HOLD_ST)"
     echo "Remove the '$HOLD' label once sign-off is obtained; the next review cycle will promote normally."
+    ;;
+
+  shadow-pass)
+    # PR Warden shadow-mode terminal path (issue #2651, wtp-org ADR-0021): the
+    # review+fix work completed exactly as a normal dispatch, but this dispatch
+    # must never be the reason a PR merges. sge-auto-merge.yml triggers on
+    # `labeled: pr-reviewed`, and `pass` (above) is the ONLY place that label
+    # is applied and the ONLY place auto-merge is armed — so this is a
+    # deliberately DISTINCT terminal command, not a `pass` flag, ensuring
+    # "pr-labels.sh pass is never called" holds structurally for a shadow
+    # dispatch, not merely by convention or prompt discipline. Never touches
+    # $REVIEWED and never calls `gh pr merge`.
+    #
+    # Guard (found in review, issue #2653): sge-auto-merge.yml's trigger is
+    # `on.pull_request_target.types: [labeled]` for ANY label, and its job
+    # `if:` checks only the CURRENT presence of `$REVIEWED` in the label list
+    # — not which label the event was for. So *adding* `$AGENT_REVIEWED` to a
+    # PR that already carries `$REVIEWED` fires a fresh `labeled` event that
+    # still satisfies that `if:`, spuriously re-running approve-and-merge
+    # against the (unchanged, already-legitimately-reviewed) head. A PR that
+    # already carries `$REVIEWED` also makes `$AGENT_REVIEWED` semantically
+    # false ("reviewed by an agent, unreviewed by a human yet") — skip the
+    # add entirely rather than either mislabel or risk the retrigger.
+    PRE_STATUS="$(label_status)" || PRE_STATUS=""
+    if [[ "$PRE_STATUS" == *"reviewed=true"* ]]; then
+      remove_label "$REVIEWING"
+      remove_label "$CHANGES_REQUESTED"
+      STATUS="$(label_status)" || STATUS="(label_status unavailable)"
+      echo "PR #$PR: shadow-mode review passed — '$REVIEWED' already present (a real review already gated this PR); '$AGENT_REVIEWED' NOT applied (would spuriously retrigger sge-auto-merge.yml's labeled-event trigger, issue #2653) ($STATUS)"
+    else
+      ensure_agent_reviewed_label
+      # Delete the claim comment before the label swap (mirrors pass/fail).
+      delete_claim_comment
+      remove_label "$REVIEWING"          # release the claim so future cycles can run
+      remove_label "$CHANGES_REQUESTED"  # review PASSED — must not still read as failed (#2238)
+      # Re-check immediately before the write (found by adversarial QA audit,
+      # issue #2653): the PRE_STATUS read above happened several statements
+      # ago (ensure_agent_reviewed_label/delete_claim_comment/two remove_label
+      # calls, each its own gh round-trip) — a concurrent `pass` landing
+      # $REVIEWED in that window would make the PRE_STATUS check stale (TOCTOU)
+      # and the add below would still fire on an already-$REVIEWED PR. Re-read
+      # right before the one call this guard exists to gate.
+      MID_STATUS="$(label_status)" || MID_STATUS=""
+      if [[ "$MID_STATUS" == *"reviewed=true"* ]]; then
+        STATUS="$(label_status)" || STATUS="(label_status unavailable)"
+        echo "PR #$PR: shadow-mode review passed — '$REVIEWED' landed concurrently just before the label write; '$AGENT_REVIEWED' NOT applied (issue #2653 TOCTOU guard) ($STATUS)"
+      else
+        add_label "$AGENT_REVIEWED"
+        STATUS="$(label_status)" || STATUS="(label_status unavailable)"
+        echo "PR #$PR: shadow-mode review passed — '$AGENT_REVIEWED' applied ($STATUS); '$REVIEWED' NEVER applied and 'pass' was never called (issue #2651)"
+      fi
+    fi
     ;;
 
   apply-hold)

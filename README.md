@@ -7,7 +7,7 @@ Versioned Claude Code plugin providing shared SGE methodology skills and workflo
 This repo is the home of **SGE** end-to-end — methodology first, platform second:
 
 - **`skills/`, `agents/`, `commands/`, `.claude-plugin/`** — the SGE methodology Claude Code plugin (what installs into other WTP repos). Unchanged; the plugin is scoped to these and is unaffected by `platform/`.
-- **`docs-site/`, `docs/`** — the SGE methodology docs (docs.sge.wealthtechpros.com).
+- **`docs-site/`, `docs/`** — the SGE methodology docs. The published docs site is not yet live: `docs.sge.wealthtechpros.com` currently returns 404, so read the Markdown sources in this repo until it serves.
 - **`platform/`** — the **SGE Platform** (the GitHub App + dashboard UI, formerly the standalone `repo-sentry` repo, merged in here with full history and then archived). The app lives under `platform/reposentry/{frontend,backend}`, infra under `platform/infra`, product docs under `platform/docs-site`. CI/CD and the RepoSentry→SGE brand/domain rename land in follow-up steps; `platform/` keeps deploying from its existing pipeline until then.
 
 ### Naming: `sgd` → `sge` — what renames and what doesn't
@@ -41,11 +41,11 @@ for the constant/package rename that superseded the `sgd-init` entry above.
 
 | Skill | Command | Purpose |
 |---|---|---|
-| `sge-init` | `/sge:init` | Interactive onboarding for a new product/repo — interviews the user, then proposes the SGE seed (Vision, capability model, anchor specs with Gherkin, ADR-0001, stakeholder questions) |
+| `sge-init` | `/sge:sge-init` | Interactive onboarding for a new product/repo — interviews the user, then proposes the SGE seed (Vision, capability model, anchor specs with Gherkin, ADR-0001, stakeholder questions) |
 | `sge-implement` | `/sge:sge-implement [N]` | End-to-end SGE feature implementation — entry criteria, complexity sizing, TDD, review, PR |
 | `sge-preflight` | `/sge:sge-preflight [SGD-NNN]` | Pre-implementation checklist — read spec, check deps, plan files |
 | `sge-review` | `/sge:sge-review [SGD-NNN]` | Review implementation against spec — acceptance criteria, degradation, patterns, quality gates |
-| `sge-align` | `/sge:align [--apply]` | Bidirectional cascade alignment: forward (Vision → Capability → Spec → Tests → Code) raises a GitHub issue per drift gap; reverse reconciles existing open issues against current scope, proposing (and with `--apply`, closing/updating) when scope moves — idempotent, advisory-first, never auto-mutates human issues |
+| `sge-align` | `/sge:sge-align [--apply]` | Bidirectional cascade alignment: forward (Vision → Capability → Spec → Tests → Code) raises a GitHub issue per drift gap; reverse reconciles existing open issues against current scope, proposing (and with `--apply`, closing/updating) when scope moves — idempotent, advisory-first, never auto-mutates human issues |
 | `atomic-audit` | `/sge:atomic-audit [path]` | Stack-agnostic atomic-design adoption audit — auto-detect the UI stack (web + mobile/native), score six dimensions (tokens, primitive layer, composition, catalog, testing, enforcement) to an L0–L3 maturity tier, and emit a remediation roadmap. Report-only, advisory |
 | `tdd-workflow` | `/sge:tdd-workflow` | Strict incremental TDD — one failing test, minimum green, refactor, repeat |
 | `qa-audit` | `/sge:qa-audit` | Verify PR against linked issue, post evidence comment |
@@ -128,7 +128,7 @@ Run these commands once per machine inside Claude Code.
 /plugin install sge
 ```
 
-On Claude Code CLI this installs at **user scope**, not per repo: the SGE commands (`/sge:init`, `/sge:sge-implement`, etc.) become available in every Claude Code session on your machine, whatever project you are working in. There is nothing to repeat per project and nothing to commit to a repo to make it work. On GitHub Copilot CLI the same command works, but skill loading can additionally be gated per repository — see [`docs/copilot-cli-install.md`](docs/copilot-cli-install.md).
+On Claude Code CLI this installs at **user scope**, not per repo: the SGE commands (`/sge:sge-init`, `/sge:sge-implement`, etc.) become available in every Claude Code session on your machine, whatever project you are working in. There is nothing to repeat per project and nothing to commit to a repo to make it work. On GitHub Copilot CLI the same command works, but skill loading can additionally be gated per repository — see [`docs/copilot-cli-install.md`](docs/copilot-cli-install.md).
 
 **Keep it up to date:**
 ```

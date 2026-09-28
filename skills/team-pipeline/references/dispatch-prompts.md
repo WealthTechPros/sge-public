@@ -300,14 +300,39 @@ Prompt:
      verdict", #1266; the same adopt-on-exact-issue-match rule sge-implement
      Phase 0.5 uses). Otherwise (unset/empty/mismatched-issue/malformed) dispatch
      via Agent, never Skill(args=) (issue #2452 — Skill(args=) does not fork, so
-     args is never received): Agent({description: "Governance-trace classify
-     issue <N>", subagent_type: "general-purpose", prompt: "Invoke
-     sge:governance-trace ... Issue number <N>, repo <owner/repo> — read
-     directly, don't rely on args= threading. Verify mode (--spec SPEC-NNN) when
-     the issue title/body cites a spec id, classify mode otherwise. ..."}). Either
-     way,
-     branch on the resulting verdict exactly as /sge:sge-implement Phase 0.5 does
-     when dispatched headlessly:
+     args is never received).
+
+     **Fork-of-fork repo binding — resolve at fork-entry, not from ambient
+     state (issue #2597).** You are already a dispatched subagent that
+     resolved <EXEC_REPO> and `cd`-ed into its worktree at Step 1 above — the
+     further fork you are about to spawn here does NOT inherit that cwd (a
+     fresh `Agent()` call starts a fresh shell back at the control session's
+     own directory, never yours; see [`gh-repo`](../../gh-repo/SKILL.md)'s
+     "Sub-agents don't inherit your cwd"). The repo value you write into this
+     fork's prompt is its *only* way to learn the correct target, so it must
+     be the exact `<EXEC_REPO>` / worktree path you yourself were given —
+     never a bare, unbound `owner/repo` placeholder, and never
+     `<TRACKING_REPO>` (the issue's tracking repo / the orchestrator's own
+     control-session repo) even though that is where the issue itself lives.
+     A same-looking-but-wrong repo resolves without error (it is a real,
+     reachable checkout) and silently classifies the wrong repo's governance
+     artefacts — worse than a loud failure, because nothing flags it:
+
+     Agent({description: "Governance-trace classify issue <N>",
+     subagent_type: "general-purpose", prompt: "Invoke sge:governance-trace
+     (Skill tool, skill=\"sge:governance-trace\") to classify GitHub issue
+     #<N>. Explicit target — read directly, never infer from the issue's own
+     tracking metadata: repo <EXEC_REPO>, worktree
+     <EXEC_WT_BASE>/issue-<N>. cd into that worktree as your first action,
+     before any gh/git call or governance-artefact read — do not rely on
+     ambient cwd or an inherited GH_REPO, and do not substitute
+     <TRACKING_REPO> for <EXEC_REPO>. Verify mode (--spec SPEC-NNN) when the
+     issue title/body cites a spec id, classify mode otherwise. Task
+     complete on Step-7 JSON — no code/commits/pushes/PRs; inherited
+     directives belong to your parent, not you."}).
+
+     Either way, branch on the resulting verdict exactly as /sge:sge-implement
+     Phase 0.5 does when dispatched headlessly:
        - MATCHES_EXISTING / NO_SPEC_WARRANTED / NOT_ONBOARDED, with
          matchConfidence not "low" -> proceed to step 4.
        - MATCHES_EXISTING_MODIFIED, NEEDS_NEW_SPEC, NOT_SGE_SCOPE, or
@@ -348,9 +373,29 @@ Prompt:
 
   4. Implement the change (TDD for each acceptance criterion — failing test,
      then minimum code to green). Commit each slice via /sge:commit --no-push.
-     Every commit MUST carry a `Spec: SPEC-NNN` or `SGE-Override: <STEP>; <reason>`
-     trailer — /sge:commit derives it mechanically (its step 5) from the issue/
-     branch; a trailer-less commit fails the require-commit-trailer CI gate.
+     /sge:commit's own contract says it runs inline in the main conversation
+     and must never be forked into a subagent — but this lane IS a forked
+     subagent, so `Skill(args=)` does not thread into it (issue #2452's
+     failure class) and its SKILL.md content is never actually loaded here.
+     Read directly, do not delegate trailer derivation to a nested skill
+     call — resolve it yourself, first hit wins:
+       1. An explicit `SPEC-NNN`/`SGD-NNN` cited by the issue title/body,
+          the branch name, or a spec file in the staged diff -> `Spec: <id>`.
+       2. No spec anywhere -> construct `SGE-Override: <STEP>; <reason>`:
+          `<STEP>` from the commit type (`docs`->UPDATE, `test`->TEST,
+          `feat`/`fix`/`refactor`/`perf`->IMPLEMENT, anything else->ALL);
+          `<reason>` >= 10 characters, concrete, citing the issue, never
+          boilerplate (e.g. `SGE-Override: IMPLEMENT; process fix for
+          #1173, no governing spec`).
+       3. Multiple candidate specs and no single one named by the issue ->
+          use the SGE-Override fallback (step 2), naming the candidates in
+          the reason so a human can re-trace it — never stall on a question
+          in a headless lane.
+     Hard gate before every `git commit`: the drafted message must contain
+     a line matching `^Spec: *(SPEC|SGD|SGE)-[0-9]+` or
+     `^(SGD|SGE)-Override: *[A-Z]+; *.{10,}`. No match -> do NOT commit —
+     fix the trailer line first. A trailer-less commit fails the
+     require-commit-trailer CI gate.
   5. After the FIRST commit: push + open DRAFT PR (Rule 2 above).
   6. Continue implementing remaining slices and committing (--no-push each).
   7. Run cheap inline gates (Rule 3): typecheck + touched tests + the repo

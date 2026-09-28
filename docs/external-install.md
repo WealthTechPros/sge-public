@@ -6,7 +6,7 @@ running locally. It assumes no prior knowledge of SGE or of WealthTech Pros.
 Read it end to end before your first install; it is short.
 
 SGE ships as a **plugin** for AI coding agents. Installing it adds a set of
-governance commands (`/sge:init`, `/sge:sge-implement`, and others) to your
+governance commands (`/sge:sge-init`, `/sge:sge-implement`, and others) to your
 agent sessions. There is no server to run, no account to create, and nothing
 to configure in your CI — the plugin is fetched from a public GitHub
 repository and cached on your machine.

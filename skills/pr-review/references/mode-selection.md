@@ -11,8 +11,9 @@ behaviour.
 
 ### Re-review delta mode
 
-`gh pr review` (Phase 6) **ALWAYS creates a PR REVIEW object** at `/pulls/$PR/reviews` (never a plain issue comment) — query it for the last `sge-verdict` body: `LAST_VERDICT=$(gh api "repos/$REPO/pulls/$PR/reviews" --jq '[.[].body // "" | select(contains("sge-verdict"))] | last')` (and `HEAD_SHA=$(rl_head_sha "$PR")`). Extract `commit:` (`LAST_SHA`), pick a mode:
+`gh pr review` (Phase 6) **ALWAYS creates a PR REVIEW object** at `/pulls/$PR/reviews` (never a plain issue comment) — query it for the last `sge-verdict` body: `LAST_VERDICT=$(gh api "repos/$REPO/pulls/$PR/reviews" --jq '[.[].body // "" | select(contains("sge-verdict"))] | last')` (and `HEAD_SHA=$(rl_head_sha "$PR")`). Extract `commit:` (`LAST_SHA`) and `mode:` (`LAST_MODE`), pick a mode:
 
+- **`LAST_MODE` contains `shadow`** → treat as **no prior verdict** (fall through to the next rule), regardless of `LAST_SHA`/`HEAD_SHA`. A shadow verdict is deliberately untrusted for gate purposes (issue #2651 ADR-0021 — "structurally, not just conventionally"); reasserting it via plain `pass` would promote `pr-reviewed`/auto-merge off review work no dispatch was ever allowed to label. This is the ONLY case where a same-SHA prior verdict does not short-circuit into a reassert (issue #2653 gap, found in review). **Exception:** a caller itself running `--shadow` may still reassert the SAME shadow verdict via `pr-labels.sh shadow-pass` (never `pass`) when `LAST_SHA == HEAD_SHA` — this never applies `pr-reviewed` either way, so it carries none of the risk above.
 - **No prior verdict** → check the Phase 5 pass-through below, else **full review**.
 - **`LAST_SHA == HEAD_SHA`** → nothing new. Re-assert the prior label state pinned to head: `pr-labels.sh pass $PR $AUTOMERGE_FLAG --expect-head "$HEAD_SHA"` (or `fail`); `$AUTOMERGE_FLAG` per Phase 6.
 - **New commits** → **delta mode**: `git fetch origin "$HEAD_REF"`, scope to `git diff --name-only "$LAST_SHA..$HEAD_SHA"`, re-check each prior Blocker/Major. Record `mode: delta`; severity/labels/auto-merge behave as a full review; set `REVIEWED_HEAD="$HEAD_SHA"`.
@@ -45,7 +46,7 @@ algorithm, the effect table per phase, and the composability rule with `DIFF_RIS
 Extracted from `SKILL.md`'s *Usage* section under the same 35 KB budget; content unchanged.
 
 Default = merge-gate owner (claims gate, moves labels, fixes safe issues inline, arms
-auto-merge). Three flags narrow it — mechanically enforced (prompt-prose restrictions fail):
+auto-merge). Four flags narrow it — mechanically enforced (prompt-prose restrictions fail):
 
 | Mode | Gate claim (P2) | Direct fixes (P6.5) | Label transitions (P6) | Auto-merge (P8) | Verdict `mode:` |
 |---|---|---|---|---|---|
@@ -53,9 +54,30 @@ auto-merge). Three flags narrow it — mechanically enforced (prompt-prose restr
 | **`--no-fix`** | yes | **no — findings become comments** | yes | yes | append ` (no-fix)` |
 | **`--no-automerge`** | yes | yes | yes | **no** | append ` (no-automerge)` |
 | **`--advisory`** | **no** | **no — findings become comments** | **no** | **no** | `advisory` |
+| **`--shadow`** | yes | yes (safe/in-scope) | **`agent-reviewed`, never `pr-reviewed`** | **no** | append ` (shadow)` |
 
 **Mechanical backstop:** `--advisory` MUST `export SGE_REVIEW_ADVISORY=1` before any
 `pr-labels.sh` call (top of Phase 1) — `pass` then refuses with **exit 4**.
+
+**`--shadow` (issue #2651, wtp-org ADR-0021 — PR Warden) is structurally, not just
+conventionally, enforced:** Phase 6/8 routes it to `pr-labels.sh shadow-pass` — a
+subcommand distinct from `pass`, which is the only place `pr-reviewed` is applied and
+auto-merge is armed — so a shadow dispatch cannot reach either even if a future
+"simplification" tried to fold the two paths together carelessly; the CI-locked
+distinction is that `shadow-pass` never calls `pass`, not that it calls `pass` with a
+flag. `agent-reviewed` carries no automation of its own, so it never needs
+special-casing anywhere `pr-reviewed`'s automation lives, and a later human `pass`
+promotes normally without removing it first.
+
+**Two shadow-mode gotchas fixed under #2653 (PR #2653):** (1) Stage 0's flag `case`
+checks `--shadow` before `--no-automerge`, because daemon.py's real dispatch always
+sends `--no-automerge --shadow` together and `case` takes the first match — checking
+`--no-automerge` first silently resolved every real shadow dispatch to `no-automerge`
+mode instead, running the normal `pass` path. (2) Phase 6's shadow substitution lives
+*inside* the pass branch of the pass/fail decision, never as an earlier unconditional
+gate — a shadow review that found real Blockers must still reach `pr-labels.sh fail`
+(never `shadow-pass`). Regression tests:
+`skills/tests/pr-review-shadow-mode-gates.test.sh`.
 
 **`--tier0` is orthogonal to this table** (governance-tier caps *how much review runs*; this
 table governs *who owns fixes/labels/merge*) — combine freely, e.g. `--tier0 --advisory`.
