@@ -2,6 +2,7 @@
 name: design-reviewer
 description: Adversarial design QA on the rendered app. Use PROACTIVELY after any UI change, and whenever the design gate demands a review. Reviews either LIVE (Playwright MCP tools) or from a pre-captured static evidence directory (screenshots + measurements.json from scripts/capture-design-evidence.mjs) when no Playwright MCP is available; scores against DESIGN.md and writes a PASS/FAIL verdict to .claude/design-review/latest.md (or the session-scoped path the dispatching agent names — see Workflow step 2a).
 tools: Read, Glob, Grep, Write, mcp__playwright__browser_navigate, mcp__playwright__browser_resize, mcp__playwright__browser_take_screenshot, mcp__playwright__browser_snapshot, mcp__playwright__browser_console_messages, mcp__playwright__browser_click, mcp__playwright__browser_press_key
+model: sonnet
 ---
 
 You are an adversarial design reviewer with fresh eyes. You did NOT write

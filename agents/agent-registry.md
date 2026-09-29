@@ -70,10 +70,17 @@ always win over the mix.
 ## How orchestration consumes this
 
 - **Bundled specialist agents** (`agents/code-reviewer.md`,
-  `agents/security-auditor.md`) carry a `model:` in their front-matter matching
-  their row above. `@code-reviewer` → `sonnet` (escalating to `opus` on
-  security-globbed diffs); `@security-auditor` → `opus`, because every security
-  review is a CRITICAL path under the escalation rule.
+  `agents/design-reviewer.md`, `agents/security-auditor.md`) carry a `model:`
+  in their front-matter matching their row above. `@code-reviewer` → `sonnet`
+  (escalating to `opus` on security-globbed diffs); `@design-reviewer` →
+  `sonnet` (pinned 2026-09-28 so it no longer inherits an opus session);
+  `@security-auditor` → `opus`, because every security review is a CRITICAL
+  path under the escalation rule.
+- **The review daemon** (`services/review-daemon-poc/`) routes each unattended
+  `/sge:pr-review` dispatch to a tier the same way (haiku for docs-only /
+  dependency-bot / small non-risky diffs, sonnet by default, opus for large
+  diffs or risky paths — risky always wins); see `skills/review-daemon/SKILL.md`
+  "Per-dispatch model routing".
 - **`/sge:pr-review`** dispatches its Layer-2 specialists at the tier their
   agent file pins; for the native `/code-review` engine it scales *effort*
   (low → ultra) to risk, which is the same lowest-safe principle applied to a
