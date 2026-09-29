@@ -372,7 +372,8 @@ re-queued PR is strictly better than a falsely-quarantined one.
 **Healthy-path parity.** When `is_github_degraded()` is false, all three points
 behave byte-identically to the pre-outage-aware daemon — the predicate is the
 only new branch and is inert while GitHub is operational. A dispatch that *raises*
-(vs. returns not-ok) is out of scope and still counts toward quarantine (#1436).
+(vs. returns not-ok) is a **transient** failure (see "Self-healing quarantine"
+below): backed off, never counted.
 
 **SessionStart-hook-terminate carve-out (issue #2502).** One sub-case of the
 healthy-GitHub AC3 cell is further split, independent of `is_github_degraded()`:
@@ -397,25 +398,21 @@ falls through to the original silent-no-op failure path.
 a SessionStart hook that fails on every dispatch, so the carve-out is capped:
 only the first `REVIEW_DAEMON_HOOK_TERMINATE_RETRY_CAP` (default **3**; `0`
 disables the carve-out) *consecutive* hook-terminates for a PR are
-retry-later. From the next one on, the dispatch is counted through
-`_track_failed_dispatch` (breadcrumb reason names the cap), so quarantine
-engages after `REVIEW_DAEMON_MAX_DISPATCH_ATTEMPTS` further attempts. Any other
+retry-later. From the next one on, the dispatch is a **transient** failure
+(self-healing quarantine, below): jittered exponential backoff, an uncounted
+`sge:dispatch-transient` breadcrumb naming the cap, and **never** quarantine
+(superseding #2652's count-then-quarantine, Rob 2026-09-29). Any other
 dispatch outcome breaks the streak. The streak counter is in-memory, so a
 daemon restart re-grants at most one cap's worth of retries. Every dispatch
 span carries `sge.dispatch.hook_terminate` (true/false) for fleet-wide
 alerting. **Job mode** (`REVIEW_DAEMON_SINGLE_PR`) does not apply the
 carve-out: a one-shot container has no next poll cycle, so returning
-retry-later would leave no trace at all — the attempt is counted, with the
-hook-terminate named in its breadcrumb reason.
+retry-later would leave no trace at all — the attempt is recorded as a
+transient failure (uncounted breadcrumb naming the hook-terminate).
 
-> ⚠️ Because the predicate does live network I/O with a fail-safe-to-degraded
-> contract, daemon behaviour tests that assert the **healthy** path pin
-> `daemon.is_github_degraded` to `False` for determinism; the outage-path
-> regressions (`daemon_outage.test.py`) pin it to `True`. Do not add un-pinned
-> failure/quarantine assertions — they flake to retry-later whenever the status
-> API is unreachable.
+## Self-healing quarantine (Rob, 2026-09-29)
 
----
+A failed dispatch is classified `transient` (infra/auth/transient: raised, hook-terminate, 0 turns, SDK error before any turn or a rate-limit/overload/auth SDK error) or `pr` (reached model turns and still failed). Only `pr` counts toward `pr-review-stalled`; `transient` backs off (jittered exponential, via `transient_policy()`) with an uncounted `sge:dispatch-transient` breadcrumb. A daemon quarantine records an `sge:quarantine-head` HTML-comment marker carrying the head SHA and is auto-released when the head moves. Full rules: [references/self-healing-quarantine.md](references/self-healing-quarantine.md).
 
 ## Token model and throughput tuning (issue #1324)
 
@@ -495,8 +492,9 @@ and PR #4 was quarantined before anyone noticed. Two guards now apply:
   line naming the fix.
 - **At runtime** a dispatch whose `ResultMessage` reports `num_turns == 0` is an
   immediate **INFRA** failure (named cause: skill not found), not an exit-0
-  candidate for artefact verification — no verdict is posted; it counts toward
-  quarantine like any other INFRA failure.
+  candidate for artefact verification — no verdict is posted; since the
+  self-healing quarantine (2026-09-29) it is a `transient` failure: backed off,
+  never counted toward quarantine.
 
 ## Dispatch run log — `runs.jsonl` (2026-09-28)
 
@@ -520,13 +518,15 @@ tools (wtp-mcp#888, MCP-031). Field names are a cross-repo contract:
 | `model` / `model_tier` | string | routed model and tier (`override` under `ANTHROPIC_MODEL`) |
 | `duration_s` | float | dispatch wall time, seconds |
 | `cost_usd` / `num_turns` | number or null | from the SDK `ResultMessage` (`total_cost_usd`, `num_turns`) |
+| `decision` | object | present when the failure classification drove an action: `{"order": <standing-order id or null>, "action": "transient-retry" \| "quarantine-released"}`. `order` is null for built-in default behaviour. A release is its own record (`kind: quarantine`, `outcome: released`, no `failure_class`) |
+| `failure_class` | string | non-`pass` records only: `transient` (infra/auth/transient — never counts toward quarantine) or `pr` (counts). Readers treat a legacy record without it as `transient` when `num_turns` is 0 or null |
 
 `outcome` is the **dispatch-execution** outcome, matching the supervisor's
 "failed attempt" semantics: `pass` = the review ran and left a verified
 artefact **whatever it concluded** (`verdict` carries approve/request-changes);
 `fail` = no review produced (SDK error, silent no-op, zero-turn run, raised
 dispatch); `timeout` = wall-clock backstop; `quarantined` = the failed dispatch
-that exhausted the attempt budget. A request-changes review is therefore
+that exhausted the attempt budget (always `failure_class: pr`). A request-changes review is therefore
 `outcome: pass` and never walks a PR toward the supervisor's quarantine.
 **Retry-later exits** (GitHub outage, SessionStart-hook-terminate) are not
 completed dispatches and write no line.

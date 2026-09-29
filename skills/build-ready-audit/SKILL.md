@@ -392,7 +392,7 @@ create-if-missing note below, and never `--force`):
 
 `needs-human` predates this step as a **PR auto-merge hold** label, and it is
 load-bearing there: `sge-auto-merge.yml`, `hold-gate.yml`,
-`.github/scripts/hold-labels.txt`, `services/pr-monitor-pod/rearm_lane.py`,
+`.github/scripts/hold-labels.txt`,
 `services/review-daemon-poc/github_adapter.py`, and the SPEC-071 regulated
 sign-off gate, which applies it as its hold mechanism. Those consumers all read
 labels on **pull requests**; this step writes labels on **issues**, so the two
@@ -455,7 +455,7 @@ the returned JSON.
 Refuses with `--skip-governance`; unset+reported under dispatch/fork.
 Walks each `READY`, unlabelled issue one at a time — gates + governance
 verdict + a recommendation (self-certify iff `MATCHES_EXISTING`/
-`NO_SPEC_WARRANTED` non-low confidence, per SPEC-095 §2.4, else hold), then
+`NO_SPEC_WARRANTED` non-low confidence, per SPEC-095 §2.4 — spec superseded #2685, rule kept, else hold), then
 stops for the human's decision. Mechanics: [apply-sge-ready.md](references/apply-sge-ready.md).
 
 ---
