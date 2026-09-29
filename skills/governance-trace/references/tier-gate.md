@@ -96,13 +96,14 @@ proposes a new user-facing feature or changes existing behaviour:
 
 **On a successful lightweight verdict** (Rule 1–4, confidence `high` or `medium`):
 
-Post the Step 6 comment (obeying the same `--no-comment` / always-post rules that apply
+Post the Step 6 comment (obeying the same `--no-comment` rule — no comment at all — that applies
 to the full-depth path), then return the following Step 7 JSON **immediately** — do **not**
 proceed to Steps 1–5:
 
 ```json
 {
   "issue": <N>,
+  "repo": "<owner/repo>",
   "verdict": "NO_SPEC_WARRANTED",
   "capability": null,
   "matchedSpec": null,

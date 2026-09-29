@@ -55,7 +55,7 @@ A fork inherits the parent's full context, including its original directive (e.g
 - `--repo <owner/repo>` — **target repo** for a hub or cross-repo dispatch; omit when already there. [Rules](references/target-repo-resolution.md).
 - `--spec SPEC-NNN` — **verify mode**: the caller already knows which spec governs this issue (it was cited in the issue text, or `sge-implement` resolved it). Skip capability/spec discovery entirely and go straight to Step 3 (requirement-change detection) against that one spec. Cheaper, and the right mode whenever a spec citation already exists — a citation is a claim, not a guarantee it still matches, so it still needs the Step 3 check.
 - (no `--spec`) — **classify mode**: full five-way classification (Steps 1–5).
-- `--no-comment` — skip posting the audit-trail comment on the issue. Ignored for `MATCHES_EXISTING_MODIFIED` and `NOT_SGE_SCOPE`, which **always** post — see Step 6.
+- `--no-comment` — post **no** comment, for **any** verdict — see Step 6.
 
 **Issue context — fetch as your next action, after the target-repo resolution above:**
 
@@ -283,13 +283,15 @@ Populate `suggestedSpecStub` in the Step 7 JSON with the full markdown content a
 
 **Comment on the issue** — the audit trail this skill exists to create:
 
-- **Always** post for `MATCHES_EXISTING_MODIFIED` and `NOT_SGE_SCOPE`, in **every** consumption mode (headless dispatch included) — `--no-comment` is ignored for these two. These are the verdicts a human must eventually see and respond to; if a headless run can't ask them a question right now, the comment is how they find out later.
-- **Otherwise** post by default; skip with `--no-comment`.
+- **`--no-comment` suppresses every comment write (#2452)**, for every verdict. A wrapped `with-repo-cwd.sh … -- gh issue comment` still counts. Return `commentPosted: false`.
+- **Otherwise** post (default) — a human must eventually see `MATCHES_EXISTING_MODIFIED` / `NOT_SGE_SCOPE`.
 
-Fuse the guard to this write (issue #1558); on refusal don't post (return `commentPosted: false`):
+Set `NO_COMMENT` in the same Bash command that posts (`1` iff `--no-comment`, else `0`; shell state is not kept between calls); unset fails closed. Fuse both guards to the write (#1558; refusal → `commentPosted: false`):
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh" assert-repo owner/repo -- \
+NO_COMMENT=<1|0>
+[ "${NO_COMMENT:-unset}" = 0 ] || { echo "NO_COMMENT=${NO_COMMENT:-unset}: no comment posted"; exit 0; }
+"$SGE_ROOT/scripts/with-repo-cwd.sh" assert-repo owner/repo -- \
 gh issue comment "$ISSUE" --body "$(cat <<'EOF'
 ## Governance trace
 
