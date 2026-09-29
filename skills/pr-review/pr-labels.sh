@@ -1395,6 +1395,25 @@ case "$CMD" in
             fi
           fi
         fi
+        # Daemon claim handoff (wtp-org#982, completing #1249). The review-daemon
+        # pre-claims the gate for the exact PR it dispatches, then hands that
+        # claim to the reviewer it spawns. #1249 did the handoff in PROMPT TEXT
+        # ("--force-claim authorized"), which a careful reviewer rightly treats
+        # as unverifiable free text and refuses -- a silent no-op that counts
+        # toward PR Warden quarantine. The daemon now sets
+        # SGE_REVIEW_CLAIM_HANDOFF_OWNER in the child's process env (not the
+        # prompt) to its own claim-owner id; a live claim whose owner matches it
+        # EXACTLY is the dispatcher's own pre-claim and is taken over here.
+        # Any other live owner is still refused (exit 3) -- the #699/#1312
+        # guarantee against a genuinely concurrent review is unchanged.
+        if [[ "$_CLAIM_LIVE" == "true" && -n "${SGE_REVIEW_CLAIM_HANDOFF_OWNER:-}" ]]; then
+          _HANDOFF_OWNER=$(parse_claim_metadata "$_CLAIM_JSON" \
+            | jq -r '.owner // empty' 2>/dev/null) || _HANDOFF_OWNER=""
+          if [[ -n "$_HANDOFF_OWNER" && "$_HANDOFF_OWNER" == "$SGE_REVIEW_CLAIM_HANDOFF_OWNER" ]]; then
+            echo "PR #$PR: live claim is the dispatching review-daemon's own pre-claim (owner=${_HANDOFF_OWNER} == SGE_REVIEW_CLAIM_HANDOFF_OWNER) - taking it over as the handoff (wtp-org#982, issue #1249)" >&2
+            _CLAIM_LIVE=false
+          fi
+        fi
         if [[ "$_CLAIM_LIVE" == "true" ]]; then
           _CLAIM_OWNER=$(parse_claim_metadata "$_CLAIM_JSON" \
             | jq -r '.owner // "unknown"' 2>/dev/null) || _CLAIM_OWNER="unknown"
