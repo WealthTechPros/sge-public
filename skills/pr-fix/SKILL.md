@@ -1,6 +1,6 @@
 ---
 description: Use when a single pull request's CI is red and needs driving to green — failing required checks blocking a merge, a PR stuck on lint/test/build failures, or when /sge:pr-monitor classifies a lane PR as CI-failing and dispatches a fix. Also handles a dirty (conflicting) PR and, with --all-prs, a whole backlog of red PRs in one pass.
-argument-hint: "<pr-number> [--all-prs] [--exclusive]"
+argument-hint: "<pr-number> [--repo owner/repo] [--all-prs] [--exclusive]"
 allowed-tools: Read, Grep, Glob, Edit, Write, Bash, Agent, Task, mcp__plugin_sge_sge-memory__search_nodes, mcp__plugin_sge_sge-memory__create_entities
 ---
 
@@ -36,11 +36,12 @@ Drive a pull request's CI to green by reading the actual failures, reproducing t
 
 ```
 /sge:pr-fix <pr-number>            # default — fix one PR
+/sge:pr-fix <pr-number> --repo owner/repo  # a PR in another repo (cross-repo / review-daemon fix lane)
 /sge:pr-fix <pr-number> --exclusive  # lock the issue so a parallel driver won't race it
 /sge:pr-fix --all-prs              # batch — triage and fix every open red/dirty PR
 ```
 
-`$ARGUMENTS` is the PR number (or branch). If omitted, uses the current branch to find the PR.
+`$ARGUMENTS` is the PR number (or branch). If omitted, uses the current branch to find the PR. For a PR in another repo pass `--repo owner/repo` after the number — never `owner/repo#N`: the check-state line below is shell-expanded with the raw arguments before the session starts, `gh pr checks` accepts `<N> --repo owner/repo` but not `owner/repo#N`, and a failing expansion ends the run with zero turns (sge#2709). With `--repo`, resolve + `cd` into that repo's checkout (below) before any `git` work. Arguments must be plain tokens — no backticks, `#` comments or other shell syntax.
 
 > **Target repo — cross-repo / control-session invocation.** These steps act on the repo in the **current working directory**; the check-state snapshot below and every `gh` call resolve there. Resolve the plugin root once (used throughout this skill) via `SGE_ROOT="$(bash ./scripts/resolve-sge-root.sh 2>/dev/null || bash "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-sge-root.sh")" || exit 1`. From a control/orchestrator session (or before `cd`-ing into the PR's worktree), resolve + `cd` via the shared helper — `cd "$("$SGE_ROOT/scripts/with-repo-cwd.sh" resolve owner/repo)" || exit 1` (fail-loud, never falls through to the ambient hub cwd). Because this skill's `git` conflict work is raw `git`, the `cd` (not a bare `export GH_REPO`) is required. The full convention — precedence, hygiene, and the raw-`git`/`MSYS_NO_PATHCONV` pitfalls — lives once in [`gh-repo`](../gh-repo/SKILL.md). Same-repo: leave `GH_REPO` unset; cwd detection is used.
 
