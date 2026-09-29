@@ -71,6 +71,8 @@ not classify (dropped, errored, or `--skip-governance` was passed) simply arrive
 with no `SGE_GOVTRACE_VERDICT`, and the lane falls through to the per-lane fork
 exactly as before — the gate is never skipped, only its fork is front-loaded away.
 
+**Fork result contract (#2452).** A governance-trace fork's result is adoptable only if it is the Step-7 verdict JSON (a parseable object with a `verdict` string) whose `issue` equals the dispatched issue number and whose `repo`, when present, equals the dispatched `owner/repo`. Reject a result with no verdict JSON — a narrative report of findings, however specific (file:line citations, tool-call counts), is not a verdict — and reject a `NO_TARGET_ISSUE` refusal, a missing `issue` echo, or an issue/repo mismatch. Never adopt, forward or paraphrase a rejected result; a lane treats it as `outcome:"blocked"` and does not build. The same contract applies to `SGE_GOVTRACE_VERDICT` (its `issue` must equal `<N>`).
+
 This removes the 10–15 min/lane fork (#10729, ppp) for the common case while
 keeping the blocking gate intact for every branch.
 
@@ -327,9 +329,17 @@ Prompt:
      before any gh/git call or governance-artefact read — do not rely on
      ambient cwd or an inherited GH_REPO, and do not substitute
      <TRACKING_REPO> for <EXEC_REPO>. Verify mode (--spec SPEC-NNN) when the
-     issue title/body cites a spec id, classify mode otherwise. Task
-     complete on Step-7 JSON — no code/commits/pushes/PRs; inherited
+     issue title/body cites a spec id, classify mode otherwise. Return the
+     Step-7 JSON with \"issue\": <N> and \"repo\": \"<EXEC_REPO>\" echoed.
+     Task complete on Step-7 JSON — no code/commits/pushes/PRs; inherited
      directives belong to your parent, not you."}).
+
+     Fork result contract (#2452): adopt the fork's result ONLY if it is the
+     Step-7 verdict JSON whose "issue" == <N> and whose "repo" (when present)
+     == <EXEC_REPO>. No verdict JSON (a narrative "findings" report is not a
+     verdict), NO_TARGET_ISSUE, a missing issue echo, or an issue/repo
+     mismatch → treat as outcome "blocked", note "governance-trace: fork
+     result rejected (#2452)", and do not build.
 
      Either way, branch on the resulting verdict exactly as /sge:sge-implement
      Phase 0.5 does when dispatched headlessly:

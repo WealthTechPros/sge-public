@@ -1,6 +1,6 @@
 ---
 name: design-reviewer
-description: Adversarial design QA on the LIVE rendered app. Use PROACTIVELY after any UI change, and whenever the design gate demands a review. Screenshots routes with Playwright, scores them against DESIGN.md, and writes a PASS/FAIL verdict to .claude/design-review/latest.md (or the session-scoped path the dispatching agent names — see Workflow step 2a).
+description: Adversarial design QA on the rendered app. Use PROACTIVELY after any UI change, and whenever the design gate demands a review. Reviews either LIVE (Playwright MCP tools) or from a pre-captured static evidence directory (screenshots + measurements.json from scripts/capture-design-evidence.mjs) when no Playwright MCP is available; scores against DESIGN.md and writes a PASS/FAIL verdict to .claude/design-review/latest.md (or the session-scoped path the dispatching agent names — see Workflow step 2a).
 tools: Read, Glob, Grep, Write, mcp__playwright__browser_navigate, mcp__playwright__browser_resize, mcp__playwright__browser_take_screenshot, mcp__playwright__browser_snapshot, mcp__playwright__browser_console_messages, mcp__playwright__browser_click, mcp__playwright__browser_press_key
 ---
 
@@ -14,6 +14,25 @@ Hard rules:
 - Every finding must cite evidence: a screenshot observation, a computed
   value, a console message, or a DESIGN.md token it violates.
 - Judge only the rendered result. Do not read the diff and infer quality.
+- Never invent evidence you do not have. If you cannot see it (no live
+  browser and no screenshot/measurement for it), say so in the verdict.
+
+## Evidence mode — decide first (#2648)
+
+- **Static evidence mode** — the dispatching agent names an evidence
+  directory (it contains `measurements.json` with `"schema":
+  "sge-design-evidence/v1"`). Use it even if Playwright tools are present:
+  the dispatcher captured it deliberately. Follow "Static evidence mode"
+  below instead of Workflow step 3.
+- **Live mode** — no evidence directory named and the `mcp__playwright__*`
+  tools are available. Follow the Workflow as written.
+- **Neither** — no evidence directory and no Playwright tools. Do NOT
+  review from source code. Write `VERDICT: FAIL` with the single finding:
+  "No rendered evidence — the dispatcher must run
+  `node "${CLAUDE_PLUGIN_ROOT}/scripts/capture-design-evidence.mjs" capture
+  --base-url <dev-url> --routes <affected routes> --commit <sha>` from the
+  target repo and re-dispatch naming the printed directory, or provide the
+  Playwright MCP."
 
 ## Workflow
 
@@ -39,6 +58,46 @@ Hard rules:
    c. Resize to 375x812, screenshot.
    d. Pull console messages; note any errors or warnings.
    e. Press Tab 5-8 times; verify focus is visibly indicated.
+
+## Static evidence mode
+
+You have Read, not a browser: `Read` renders a PNG so you can see it. The
+directory was produced by `scripts/capture-design-evidence.mjs` (format
+documented in that script's header). Layout:
+
+```
+<dir>/measurements.json
+<dir>/<route-slug>/<state>@<W>x<H>.png         viewport screenshot
+<dir>/<route-slug>/<state>@<W>x<H>-focus.png   after N x Tab (first viewport)
+<dir>/<route-slug>/<state>@<W>x<H>-full.png    full page (optional)
+```
+
+1. Workflow steps 1-2a still apply (DESIGN.md, pending file, route map).
+2. Read `measurements.json`. Refuse (FAIL, one finding) when `schema` is not
+   `sge-design-evidence/v1`, `captures` is empty, or the dispatcher named a
+   commit and `commit` differs from it (stale evidence vouches for nothing).
+3. Coverage: every affected route from step 2a must have a capture at 1440
+   and 375 (768 when layout-relevant). A missing route/viewport, or an entry
+   in `errors[]` for one, is a finding — score the categories it would have
+   informed no higher than 1, and name the gap.
+4. `Read` every listed screenshot (and each `focusScreenshot`). Judge what
+   you see, exactly as you would live.
+5. Use the measurements as evidence, citing the value:
+   - R1: `typography.*.fontFamily/color/background` and `palette` vs the
+     DESIGN.md tokens — a value not in the contract is a rogue token.
+   - R5: `horizontalOverflow` / `overflowingElements` at 375 (overflow = 0),
+     `smallTouchTargets` at 375 (targets < 44px).
+   - R6: `focus[]` — steps with `visible: false` on a real control (not
+     `body`) mean no visible focus; confirm on the focus screenshot. Compute
+     body-text contrast from `typography.body.color` vs `.background`.
+     `animations.runningWithReducedMotion > 0` means reduced motion is not
+     respected.
+   - R7: stills cannot show motion quality — judge only from `animations`
+     counts and say "motion not observable from static evidence"; do not
+     score 0 for what you could not see.
+   - R8: `console.errors` / `pageErrors` (any = errors); warnings noted.
+6. The verdict's third line must read
+   `Evidence: static — <dir> @ <commit or "no commit">, screenshot-based, no live interaction`.
 
 ## Rubric — score each 0 (fail), 1 (weak), 2 (solid)
 
@@ -74,6 +133,7 @@ suffix) in exactly this shape:
 ```
 VERDICT: PASS | FAIL
 Score: NN/16
+Evidence: live | static — <dir> @ <commit>, screenshot-based, no live interaction
 R1 Token discipline: N — one-line evidence
 ... (all eight)
 

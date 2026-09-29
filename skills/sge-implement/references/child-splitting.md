@@ -34,20 +34,21 @@ explicit DP3 opt-in; `$IW` supplies the write flag but never the create scope.
 ```bash
 IW="$SGE_ROOT/scripts/issue-write.sh"
 
-ENABLER=$(JIRA_ADAPTER_ALLOW_CREATE=1 "$IW" create \
+ENABLER=$(JIRA_ADAPTER_ALLOW_CREATE=1 "$IW" create-deduped \
   "SPEC-NNN-E1: Enabler — Migration + Types + Service Shell" \
   "Parent: #PARENT ...")
 
-JIRA_ADAPTER_ALLOW_CREATE=1 "$IW" create \
+JIRA_ADAPTER_ALLOW_CREATE=1 "$IW" create-deduped \
   "SPEC-NNN-S1: [User-facing capability] (TDD)" \
   "Parent: #PARENT
 BlockedBy: #${ENABLER} ..."
 ```
 
-> `$IW create` prints the new item's bare ref (issue number on GitHub, issueKey on
+> `$IW create-deduped` searches open items first, reusing an exact-title match and
+> prefixing `Possible duplicate of #N` on a near match (#2647). Like `create`, it prints the new item's bare ref (issue number on GitHub, issueKey on
 > Jira) — capture it, as above, to express `BlockedBy`. Treat it as opaque.
 >
-> **Labels:** `$IW create` does not take `--label` (Jira labels are set on the
+> **Labels:** `$IW create-deduped` does not take `--label` (Jira labels are set on the
 > item, not at create time in this slice). Apply `sge,enabler` / `sge,story` after
 > creation on GitHub; Jira label parity is S4 (`dispatch-label-config`, P9).
 

@@ -262,15 +262,32 @@ if the dispatch's SDK stream (captured as `DispatchResult.detail`, requires
 bare `HookEventMessage(subtype='hook_started', hook_event_name='SessionStart',
 ...)` and zero tool calls anywhere in the run, the session was torn down while
 still inside its own startup hook — before the dispatched skill ever got a
-turn. `daemon.py`'s `_looks_like_sessionstart_hook_terminate` detects this
-signature and `_claim_and_dispatch` reclassifies it the same way as an
-outage-era read failure: release the claim, return `None` (retry-later), skip
-`_track_failed_dispatch` — so it does **not** walk the PR toward
-`pr-review-stalled`. This is a harness/infra failure, not a review outcome,
-so it is checked and applied regardless of GitHub health. Every other
-exit=0-no-artefact dispatch on a healthy GitHub (permission-denied tools,
-skill back-off, plugin load failure, turn-budget exhaustion) still falls
-through to the original silent-no-op failure path.
+turn. `daemon.py`'s `_HookTerminateObserver` classifies this from the SDK's
+**typed** events over the **whole** stream (not text matching over the
+20-event `detail` tail, which carries PR-steerable model output), and carries
+the result as `DispatchResult.hook_terminate`. `_claim_and_dispatch`
+reclassifies it the same way as an outage-era read failure: release the claim,
+return `None` (retry-later), skip `_track_failed_dispatch` — so it does **not**
+walk the PR toward `pr-review-stalled`. This is a harness/infra failure, not a
+review outcome, so it is checked and applied regardless of GitHub health.
+Every other exit=0-no-artefact dispatch on a healthy GitHub (permission-denied
+tools, skill back-off, plugin load failure, turn-budget exhaustion) still
+falls through to the original silent-no-op failure path.
+
+**Retry cap (issue #2652).** Unlike the outage carve-out, nothing time-bounds
+a SessionStart hook that fails on every dispatch, so the carve-out is capped:
+only the first `REVIEW_DAEMON_HOOK_TERMINATE_RETRY_CAP` (default **3**; `0`
+disables the carve-out) *consecutive* hook-terminates for a PR are
+retry-later. From the next one on, the dispatch is counted through
+`_track_failed_dispatch` (breadcrumb reason names the cap), so quarantine
+engages after `REVIEW_DAEMON_MAX_DISPATCH_ATTEMPTS` further attempts. Any other
+dispatch outcome breaks the streak. The streak counter is in-memory, so a
+daemon restart re-grants at most one cap's worth of retries. Every dispatch
+span carries `sge.dispatch.hook_terminate` (true/false) for fleet-wide
+alerting. **Job mode** (`REVIEW_DAEMON_SINGLE_PR`) does not apply the
+carve-out: a one-shot container has no next poll cycle, so returning
+retry-later would leave no trace at all — the attempt is counted, with the
+hook-terminate named in its breadcrumb reason.
 
 > ⚠️ Because the predicate does live network I/O with a fail-safe-to-degraded
 > contract, daemon behaviour tests that assert the **healthy** path pin

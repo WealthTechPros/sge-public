@@ -33,6 +33,15 @@ framework.
   transit, PII in logs.
 - **Audit** — security-relevant events (auth, access, config change) logged
   without leaking secrets.
+- **Validation ↔ storage** (#2646) — when probing a changed boundary, compare
+  it with the persisted column type, not just the schema/parse/clamp: a bound
+  the column cannot store (Zod max `1000` vs `numeric(5,2)`) fails in the DB.
+  Rate at least **Medium** (→ `major`).
+- **Vacuous authZ tests** (#2646) — a test whose fixture has a NULL owner/tenant,
+  or with no positive control showing an authorized caller succeed, cannot
+  prove the check; when it is the only evidence for a security fix, rate at
+  least **Medium** (→ `major`), never Low. Rules:
+  `skills/pr-review/references/review-rubric.md`.
 
 ## Method
 

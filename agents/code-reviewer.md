@@ -72,6 +72,18 @@ doesn't document them, say so rather than guessing.
 - Adequate test coverage for the new behaviour
 - No dead code, no leftover debug, no commented-out blocks
 
+**Standing lenses — rate as stated, never lower** (`skills/pr-review/references/review-rubric.md`, #2646)
+- **Validation ↔ storage:** for any changed validation bound/limit on a persisted
+  field (Zod `max`/`min`/length/enum, clamp), find the column definition
+  (`numeric(p,s)`, `varchar(n)`, int width, enum, FK) and confirm every accepted
+  value is storable. Validator accepts what the column rejects (e.g. max `1000`
+  vs `numeric(5,2)` = 999.99 → DB error/500) → **Major**.
+- **Vacuous tests:** an authorization/regression test that can't tell "correctly
+  denied" from "denied for every caller" (NULL owner/tenant in the fixture, no
+  positive control showing an authorized caller succeed) → **Major** when it is
+  the only evidence for the fix. A title/assertion mismatch stays Minor unless
+  it is the only coverage.
+
 ### 4. Verify before you report
 
 For every **Blocker**, state the concrete failure path (input → line → wrong

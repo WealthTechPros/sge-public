@@ -35,7 +35,11 @@
 #                              either file absent = fail
 #   ZT-5 Agent Identity      — >= 80% of branch commits (origin/<default>..HEAD; falls
 #                              back to the last 50 commits on HEAD) carry an `Agent-Id:`
-#                              trailer, OR 0 agent commits (all-human history) = pass
+#                              trailer. Zero trailers is NEVER a pass (only an empty
+#                              history is): hook installed but silent = fail (#2510);
+#                              no attribution hook installed at all = fail too (#2520)
+#                              — "no agent commits" is indistinguishable from "agent
+#                              commits nobody can attribute" without the machinery
 #
 # Like the C12 script it is bash + git/grep/sed/awk only (no jq, runs anywhere CI does)
 # and deliberately conservative: evidence it cannot positively verify is reported as
@@ -207,26 +211,43 @@ zt5_agent="$(printf '%s\n' "$log" | awk -F'\t' '$1 ~ /^[0-9a-f]+$/ && $2 != "" {
 if [ "$zt5_total" = 0 ]; then
   add_control ZT-5 "Agent Identity" pass "no commits found (empty history) — nothing to attribute"
 elif [ "$zt5_agent" = 0 ]; then
-  # THE ZERO-TRAILER FORK (#2510). "0 trailers" has two readings and they are not
-  # equally safe: a genuinely all-human history, or an attribution hook that never
-  # fires. Passing both made this the audit that cannot detect the thing it audits
-  # (trust-fabric#331: hook read CLAUDE_SESSION_ID, Claude Code exports
-  # CLAUDE_CODE_SESSION_ID, 0/30 trailers -- and ZT-5 passed). So gate the pass on
-  # whether the machinery is installed: no hook wired => nothing was expected to
-  # emit => genuinely human. Hook wired but silent => it is broken.
+  # THE ZERO-TRAILER FORK (#2510, tightened #2520). "0 trailers" has two readings
+  # and they are not equally safe: a genuinely all-human history, or attribution that
+  # never happens. #2510 split them on whether a hook is installed -- installed but
+  # silent => broken hook => fail -- but still PASSED the no-hook case as "genuinely
+  # human". The #2520 fleet sweep showed that pass was the gap itself: 9 of 10 fleet
+  # repos had no hook, agents committed to all of them daily, and every one passed
+  # ZT-5 at 0/50. With every agent sharing the owner's token, the trailer is the ONLY
+  # attribution channel, so "no machinery" is a finding, not an exemption. Both
+  # zero-trailer shapes now fail, with distinct evidence so the remedy is obvious.
+  #
+  # Hook discovery (any one counts as installed):
+  #   - core.hooksPath (relative to the repo root, or absolute) containing
+  #     prepare-commit-msg
+  #   - .githooks/prepare-commit-msg  (the wtp-org canonical vendored location)
+  #   - .husky/prepare-commit-msg     (husky-driven repos, e.g. client-onboarding)
   zt5_hookpath="$(git -C "$ROOT" config --get core.hooksPath 2>/dev/null || true)"
   zt5_hook=""
-  if [ -n "$zt5_hookpath" ] && [ -f "$ROOT/$zt5_hookpath/prepare-commit-msg" ]; then
-    zt5_hook="$zt5_hookpath/prepare-commit-msg"
-  elif [ -f "$ROOT/.githooks/prepare-commit-msg" ]; then
+  if [ -n "$zt5_hookpath" ]; then
+    case "$zt5_hookpath" in
+      /*|[A-Za-z]:*) zt5_hookdir="$zt5_hookpath" ;;  # absolute (POSIX or Windows drive)
+      *)             zt5_hookdir="$ROOT/$zt5_hookpath" ;;
+    esac
+    if [ -f "$zt5_hookdir/prepare-commit-msg" ]; then
+      zt5_hook="$zt5_hookpath/prepare-commit-msg"
+    fi
+  fi
+  if [ -z "$zt5_hook" ]; then
     # Vendored but not wired: the repo ships the hook, so trailers ARE expected of
     # anyone who ran the installer. Still evidence the machinery is meant to run.
-    zt5_hook=".githooks/prepare-commit-msg"
+    for zt5_cand in .githooks/prepare-commit-msg .husky/prepare-commit-msg; do
+      if [ -f "$ROOT/$zt5_cand" ]; then zt5_hook="$zt5_cand"; break; fi
+    done
   fi
   if [ -n "$zt5_hook" ]; then
     add_control ZT-5 "Agent Identity" fail "0/${zt5_total} of ${scope} carry an Agent-Id: trailer, but the attribution hook IS installed (${zt5_hook}) — it is not firing (commonly the session-id env var -- the hook must read CLAUDE_CODE_SESSION_ID, not only CLAUDE_SESSION_ID; also check it is executable, its shebang, and that core.hooksPath points where you think)"
   else
-    add_control ZT-5 "Agent Identity" pass "0/${zt5_total} of ${scope} carry an Agent-Id: trailer and no attribution hook is installed — genuinely unattributed history, nothing was expected to emit"
+    add_control ZT-5 "Agent Identity" fail "0/${zt5_total} of ${scope} carry an Agent-Id: trailer and NO attribution hook is installed (checked core.hooksPath, .githooks/, .husky/) — agent-authored commits here cannot be told apart from human ones. Vendor wtp-org's .githooks/prepare-commit-msg and run git config core.hooksPath .githooks (sge#2520)"
   fi
 else
   pct=$((100 * zt5_agent / zt5_total))

@@ -287,6 +287,26 @@ _fa_require_write() { # <op-name>
   fi
 }
 
+# Commit-status list -> EFFECTIVE status per context (sge#2626 live validation
+# against Forgejo 16.0.2 / Gitea 1.22 on git.feaw.co.uk):
+#   1. The per-entry value lives in `status`; `state` is null. (Only the
+#      COMBINED /commits/{sha}/status has a top-level `state`, and the POST
+#      body takes `state` - hence the historic mix-up.) Read `status`, fall
+#      back to `state` for Gitea-compat, and write the result back to `.state`
+#      (lower-cased) so every consumer keeps reading one field.
+#   2. /commits/{sha}/statuses returns HISTORY, newest-first (ids increasing),
+#      including superseded entries for the same context. Keep only the newest
+#      entry per context - else a pending->success context reads pending and a
+#      re-run-green context stays red. Sort by id desc (jq sorts are stable, so
+#      id-less entries keep the server's newest-first order), then take the
+#      first entry of each context group. An entry WITHOUT a context is never
+#      merged with another (each keeps its own group) - collapsing them could
+#      hide a failure behind an unrelated success (fail closed).
+_FA_STATUS_EFFECTIVE='[ to_entries[] | .key as $i | .value
+    | .state = ((.status // .state // "") | tostring | ascii_downcase)
+    | ._fa_k = (if (.context // "") == "" then "#\($i)" else "c:" + .context end) ]
+  | sort_by(-(.id // 0)) | group_by(._fa_k) | map(.[0] | del(._fa_k))'
+
 # Perform an authenticated GET against the Gitea REST surface. Read path.
 # Host is allow-list-validated before the token is attached, and redirects are
 # refused (--max-redirs 0) and pinned to https (--proto/--proto-redir) so the
@@ -444,9 +464,11 @@ _fa_main() {
       ;;
     pr-statuses)
       # List commit statuses for a SHA — Forgejo/Gitea's CI-checks equivalent.
-      # Returns JSON array (Gitea CommitStatus schema: state, context, description).
-      # Callers map `state` (pending/success/error/failure/warning) to the same
-      # traffic-light logic used for `gh pr checks` output.
+      # Returns a JSON array of Gitea CommitStatus objects reduced to the
+      # EFFECTIVE (newest) entry per context, with `.state` set from the real
+      # `status` field (see _FA_STATUS_EFFECTIVE, sge#2626). Callers map
+      # `state` (pending/success/error/failure/warning) to the same
+      # traffic-light logic used for `gh pr checks` output. Requires jq.
       [ -n "${2:-}" ] && [ -n "${3:-}" ] || _fa_usage 'pr-statuses needs <origin-url-or-owner/name> <sha>'
       # Validate SHA: hex only, and 7–40 chars (abbreviated to full git SHA-1).
       # The character-class check alone accepted "" (caught) but also any length;
@@ -460,7 +482,12 @@ _fa_main() {
       fi
       _fa_slug_of "$2" || exit 1
       _fa_api_base_of "$2" "${4:-}" || exit 1
-      _fa_api_get "$_FA_API_BASE" "/repos/$_FA_SLUG/commits/$3/statuses?page=1&limit=50"
+      command -v jq >/dev/null 2>&1 || { _fa_err "jq is required for pr-statuses (per-context status reduction)"; exit 1; }
+      local _ps_raw
+      _ps_raw=$(_fa_api_get "$_FA_API_BASE" "/repos/$_FA_SLUG/commits/$3/statuses?page=1&limit=50") \
+        || { _fa_err "pr-statuses: GET commits/$3/statuses failed for $_FA_SLUG"; exit 1; }
+      printf '%s' "$_ps_raw" | jq -c "$_FA_STATUS_EFFECTIVE" \
+        || { _fa_err "pr-statuses: unparseable statuses payload for $3"; exit 1; }
       ;;
     list-issues-filtered)
       # Like list-issues but accepts an explicit <query-string> appended verbatim as
@@ -608,7 +635,7 @@ _fa_main() {
       _fa_api_base_of "$2" "" || exit 1
       local _raw _state
       _raw=$(_fa_api_get "$_FA_API_BASE" "/repos/$_FA_SLUG/commits/$3/statuses?limit=50") || exit 1
-      _state=$(printf '%s' "$_raw" | jq -r '
+      _state=$(printf '%s' "$_raw" | jq -r "$_FA_STATUS_EFFECTIVE"' |
         if length == 0 then "none"
         elif [.[] | select(.state == "failure" or .state == "error")] | length > 0 then "failure"
         elif [.[] | select(.state == "pending")] | length > 0 then "pending"

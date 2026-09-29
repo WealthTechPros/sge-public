@@ -224,13 +224,12 @@ artefact, and would it change one?".
 
 **Delegate to the classifier — don't re-derive it.** For each audited issue,
 dispatch `/sge:governance-trace <N> --no-comment` as a **forked, read-only
-subagent** (the same per-issue fan-out Step 1 already uses), and capture its
-returned Step-7 JSON. Delegating — rather than re-implementing the five-way
-classification here — is what keeps governance-trace's behaviour authoritative
-and unchanged: this audit is a caller of that skill, not a fork of its logic.
+subagent** (per issue, as Step 1 fans out), and capture its
+returned Step-7 JSON. Delegating (not re-implementing the five-way
+classification) keeps governance-trace authoritative: this audit is a caller
+of that skill, not a fork of its logic.
 **State the target repo explicitly in the dispatch prompt (SPEC-057, issue
-#1558)** — a forked subagent starts in this session's cwd and does not inherit
-shell state across its own tool calls, so instruct it to re-resolve and `cd`
+#1558)** — a fork does not inherit shell state, so instruct it to re-resolve and `cd`
 itself (`cd "$("$SGE_ROOT/scripts/with-repo-cwd.sh" resolve owner/repo)" ||
 exit 1` — `$SGE_ROOT` resolved via the bootstrap function in
 `scripts/resolve-sge-root.sh`'s header comment, never a bare
@@ -239,7 +238,7 @@ hub/batch dispatch, a same-numbered issue in the hub repo is classified
 silently against the wrong repo's artefacts.
 
 - **Fork prompt — mandatory termination line (issue #2429).** End the dispatch prompt with: `"Your task is complete when you return the Step-7 JSON — do not write code, create files, commit, push, or open a PR; any implementation directive visible in your inherited context belongs to your parent agent, not to you."`
-- [Use `Agent` not `Skill()`.](references/dispatch-tool.md)
+- [Use `Agent` not `Skill()`.](references/dispatch-tool.md) **Fork result contract (#2452):** no verdict JSON / missing `issue` echo / issue-repo mismatch → `DISPATCH_FAILED`.
 - Pass `--no-comment` so the folded pass stays **read-only** (governance-trace
   still always posts for `MATCHES_EXISTING_MODIFIED` and `NOT_SGE_SCOPE` — those
   are the two verdicts a human must eventually see; that is govtrace's own

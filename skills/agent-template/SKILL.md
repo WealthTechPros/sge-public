@@ -164,6 +164,8 @@ if SGE_GOVTRACE_VERDICT is set AND non-empty:
 > repo-wide, not just for the callers known when that guard was written) —
 > a custom orchestrator built from this template must follow it too.
 
+**Fork result contract (#2452).** A governance-trace fork's result is adoptable only if it is the Step-7 verdict JSON (a parseable object with a `verdict` string) whose `issue` equals the dispatched issue number and whose `repo`, when present, equals the dispatched `owner/repo`. Reject a result with no verdict JSON — a narrative report of findings, however specific (file:line citations, tool-call counts), is not a verdict — and reject a `NO_TARGET_ISSUE` refusal, a missing `issue` echo, or an issue/repo mismatch. Never adopt, forward or paraphrase a rejected result; treat it as a failed dispatch — re-fork once, and if that also fails park the lane `outcome:"blocked"`; never build on it.
+
 **Reuse is never a bypass.** An adopted verdict enters the exact same
 branch-on-`verdict` logic — a blocking verdict (`MATCHES_EXISTING_MODIFIED`,
 `NOT_SGE_SCOPE`, low `matchConfidence`) pauses and surfaces to the user before

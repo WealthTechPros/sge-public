@@ -50,7 +50,7 @@ Without the flag, behaviour is unchanged.
 
 > **Target repo â€” cross-repo / control-session invocation.** This monitor acts on the **cwd** repo (it takes a lane count, not a repo) and dispatches `/sge:pr-review` / `/sge:pr-fix`. From a control/orchestrator or remote/worktree session, resolve the plugin root via `SGE_ROOT="$(bash ./scripts/resolve-sge-root.sh 2>/dev/null || bash "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-sge-root.sh")" || exit 1`, then `cd` via `cd "$("$SGE_ROOT/scripts/with-repo-cwd.sh" resolve owner/repo)" || exit 1` â€” **or** `export GH_REPO=owner/repo` for `gh`-only monitoring. Convention: [`gh-repo`](../gh-repo/SKILL.md).
 
-> **Bundled library â€” [`monitor-lib.sh`](monitor-lib.sh).** All the mechanical bash referenced below (`is_spec_pr`, `fetch_*`, `*_stale*`, `*_stall`, `is_stale_draft`, `stale_draft_lane`, `pr_ready_for_merge`, `is_infra_failure`, `is_cancelled_run`, `escape_cancelled_run`, `worktree_synced_with_remote`, `update_branch_safe`, `worktree_sync_state`, `automerge_settle_ok`, `disarm_stale_automerge`, `is_setup_step_html_error`, `check_systemic_failure`, `is_blast_radius_pr`) lives there, **sourced** at Startup â€” this file carries the judgement, the library the code. Don't restate function bodies; change them in the library, where `skills/tests/pr-monitor-*.test.sh` execute them.
+> **Bundled library â€” [`monitor-lib.sh`](monitor-lib.sh).** All the mechanical bash referenced below (every function named in this file) lives there, **sourced** at Startup â€” this file carries the judgement, the library the code. Don't restate function bodies; change them in the library, where `skills/tests/pr-monitor-*.test.sh` execute them.
 
 ---
 
@@ -110,6 +110,10 @@ Two further legs over `fetch_claimed_prs`, both mechanised in [`monitor-lib.sh`]
 ### Stale-draft lane â€” abandoned drafts are invisible to the whole fleet (issue #1248)
 
 A **fourth leg** over drafts: `is_stale_draft <pr>` returns 0 (no claim label, head older than `STALE_DRAFT_MINUTES` (default **45**), no check in flight) means presumed abandoned. `stale_draft_lane <pr>` then readies a **green** draft (logged + audited) or posts an idempotent abandonment comment on a **red** one â€” **never** auto-ready over red CI; an active draft is a no-op. **Run it here** â€” full rules and rationale: [`stale-draft-lane.md`](references/stale-draft-lane.md).
+
+### Stale-review re-dispatch — verdict predates head (issue #2644)
+
+Each cycle `stale_review_check "$pr"` (every open PR) reads `pr-labels.sh review-coverage`; exit 0 = verdict predates head, CI green, unclaimed: dispatch `/sge:pr-review "$pr"` (a pass clears stale `changes-requested`). Never on `shadow-only`/`unknown`; anti-thrash capped per head and window. Rules: [`stale-review-redispatch.md`](references/stale-review-redispatch.md).
 
 ### Stacked-PR detection & merge-order recommendation (#2296)
 
@@ -175,7 +179,7 @@ source "$SGE_ROOT/skills/pr-monitor/monitor-lib.sh"
 
 ---
 
-> **Non-GitHub hosts (Forgejo/Gitea):** when `origin` is a Forgejo/Gitea instance, `source "$SGE_ROOT/skills/lib/forgejo-pr-read.sh"` and replace the loop's `gh pr list/view/checks` reads with `fpr_list`/`fpr_view`/`fpr_checks`. Mutating ops (labels, merge) stay GitHub-only until the mutating slice â€” skip + log deferral. Auth fails loud; the host must be on the adapter allow-list (ADR-0010). Full routing table, field mapping, and auth detail: [`host-adapter-routing.md`](references/host-adapter-routing.md).
+> **Non-GitHub hosts (Forgejo/Gitea):** when `origin` is a Forgejo/Gitea instance, `source "$SGE_ROOT/skills/lib/forgejo-pr-mutate.sh"` (sources `forgejo-pr-read.sh` too) and replace `gh pr list/view/checks` reads with `fpr_list`/`fpr_view`/`fpr_checks`, and rerun/merge/label writes with `fpr_rerun`/`fpr_merge_ready`+`fpr_merge`/`fpr_add_label`/`fpr_remove_label` (#2582, not live-validated). Auth fails loud; host must be on the adapter allow-list (ADR-0010). Routing table, degrade rules, auth detail: [`host-adapter-routing.md`](references/host-adapter-routing.md).
 
 ## Per-PR classification (each cycle)
 
@@ -298,6 +302,8 @@ CYCLE (on any lane's `gh pr checks --watch` returning, or a lane action completi
   # Fourth leg â€” stale-draft sweep (#1248): green stale drafts readied, red ones
   # get an abandonment comment. Self-guards; active drafts are no-ops.
   for each open draft PR: stale_draft_lane "$pr"
+  # Stale-review sweep (#2644): verdict predates head -> re-dispatch /sge:pr-review.
+  for each open PR: stale_review_check "$pr" && dispatch /sge:pr-review "$pr"
   for lane in 1..LANES (oldest first):
     if lane has a PR: classify â†’ act; if merged, backfill next oldest eligible PR
     else: backfill next oldest eligible PR (or mark empty)

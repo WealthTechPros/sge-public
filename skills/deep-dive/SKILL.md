@@ -176,6 +176,8 @@ Dispatch `/sge:governance-trace <issue-number>` as a **forked, headless** subage
 
 > **Dispatch tool — `Agent`, never `Skill(args=)` (issue #2452).** "Dispatch as a forked subagent" is an outcome, not a tool name. `Skill(skill: "sge:governance-trace", args: "<issue-number> ...")` does not fork — it inlines governance-trace's own SKILL.md into *your* context, so `args` is never received by any background execution and no classification runs. Use `Agent` with the issue number, `--repo`, and this phase's termination line spelled out in the prompt text itself, e.g. `Agent({description: "Governance-trace classify issue <N>", subagent_type: "general-purpose", prompt: "Invoke sge:governance-trace ... Issue number <N>, repo <owner/repo> — read directly, don't rely on args= threading. ..."})`.
 
+**Fork result contract (#2452).** A governance-trace fork's result is adoptable only if it is the Step-7 verdict JSON (a parseable object with a `verdict` string) whose `issue` equals the dispatched issue number and whose `repo`, when present, equals the dispatched `owner/repo`. Reject a result with no verdict JSON — a narrative report of findings, however specific (file:line citations, tool-call counts), is not a verdict — and reject a `NO_TARGET_ISSUE` refusal, a missing `issue` echo, or an issue/repo mismatch. Never adopt, forward or paraphrase a rejected result; retry at most once, then self-classify inline against the same governance artefacts and state in the report that the fork's result was rejected (and why).
+
 ```json
 {
   "verdict": "MATCHES_EXISTING",

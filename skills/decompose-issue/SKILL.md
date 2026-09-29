@@ -211,7 +211,9 @@ One enabler issue, then one issue per vertical slice. Each child carries its dep
 
 > **Children are created through `$IW`, not `gh issue create` directly** (SPEC-105 S3, #1701). `scripts/issue-write.sh` is the backend-aware write seam: on GitHub it delegates to `gh` unchanged; on a Jira-tracked repo it routes to P6 `create-item` so the children reach the tracker the work actually lives in. Shelling `gh issue create` here means a Jira repo's decomposition silently produces nothing. `create` is scope-gated per DP3, so it needs the explicit `JIRA_ADAPTER_ALLOW_CREATE=1` opt-in — `$IW` supplies the write flag but never the create scope. Full routing table: [`../team-pipeline/references/alm-routing.md`](../team-pipeline/references/alm-routing.md).
 >
-> `$IW create <title> <body>` prints the new item's **bare ref** (issue number on GitHub, issueKey on Jira) — capture it to express `DependsOn:`. It takes no `--label`/`--milestone`; apply those after creation on the GitHub path (Jira label parity is S4, P9).
+> **Search before filing (#2647):** use `$IW create-deduped <title> <body> [--search <phrase>]` — it searches open items first (`$IR search`), returns the existing ref on an exact-title match (a re-run never duplicates a child), and prefixes `Possible duplicate of #N` on a near match.
+>
+> `$IW create-deduped` (like `create`) prints the new item's **bare ref** (issue number on GitHub, issueKey on Jira) — capture it to express `DependsOn:`. It takes no `--label`/`--milestone`; apply those after creation on the GitHub path (Jira label parity is S4, P9).
 
 **Spec lane** (parent references `SPEC-NNN`):
 
@@ -220,7 +222,7 @@ IW="${CLAUDE_PLUGIN_ROOT:-.}/scripts/issue-write.sh"
 PARENT=312
 SPEC=SPEC-027
 
-E1=$(JIRA_ADAPTER_ALLOW_CREATE=1 "$IW" create \
+E1=$(JIRA_ADAPTER_ALLOW_CREATE=1 "$IW" create-deduped \
   "${SPEC}-E1: Enabler — Migration + Model + Service Shell + Types" \
   "$(cat <<EOF
 Parent: #${PARENT}
@@ -233,7 +235,7 @@ EOF
 )")
 gh issue edit "$E1" --add-label "sge,enabler"   # GitHub path; Jira labels are S4 (P9)
 
-JIRA_ADAPTER_ALLOW_CREATE=1 "$IW" create \
+JIRA_ADAPTER_ALLOW_CREATE=1 "$IW" create-deduped \
   "${SPEC}-S1: CSV ingest + validation (TDD)" \
   "$(cat <<EOF
 Parent: #${PARENT}
@@ -259,7 +261,7 @@ EOF
 
 ```bash
 PARENT_MILESTONE=$(gh issue view "$PARENT" --json milestone --jq '.milestone.title // empty')
-E1=$(JIRA_ADAPTER_ALLOW_CREATE=1 "$IW" create "Enabler: <parent title> — foundation" \
+E1=$(JIRA_ADAPTER_ALLOW_CREATE=1 "$IW" create-deduped "Enabler: <parent title> — foundation" \
   "$(printf 'Parent: #%s\nDependsOn: —\nOwns: ...' "$PARENT")")
 if [ -n "$PARENT_MILESTONE" ]; then
   gh issue edit "$E1" --add-label "enabler" --milestone "$PARENT_MILESTONE"
@@ -323,7 +325,7 @@ Worked example — a child whose deliverable lives in another repo (the `sge#798
 shape), stamped so team-pipeline routes its worktree/PR to `owner/other-repo`:
 
 ```bash
-S4=$(JIRA_ADAPTER_ALLOW_CREATE=1 "$IW" create \
+S4=$(JIRA_ADAPTER_ALLOW_CREATE=1 "$IW" create-deduped \
   "${SPEC}-S4: Wire the adviser allowlist (TDD)" \
   "$(cat <<EOF
 Parent: #${PARENT}

@@ -77,6 +77,16 @@ required; a bare `python`/`pytest`/`npm test` on PATH is not safe to assume corr
 that needs the full-suite result for its own judgment reads it from Phase 3's already-posted
 outcome (passed into the dispatch prompt), never re-runs it to obtain it fresh.
 
+**Standing rubric lenses — codified the same way (issue #2646).** A full specialist dispatch
+approved a PR whose validation ceiling exceeded its column type and whose only authorization
+test was vacuous, rating the latter minor. Include this instruction **verbatim in each dispatch
+prompt**: *"For every changed validation bound or limit on a persisted field, find the column
+definition and confirm every accepted value is storable — a validator that accepts a value the
+column rejects is `major`. A regression or authorization test that cannot distinguish 'correctly
+denied' from 'denied for every caller' (NULL owner/tenant fixture, no positive control) is at
+least `major` when it is the only evidence for the fix."* Full rules, severity edges and the
+incident: [`review-rubric.md`](review-rubric.md).
+
 ## Verify the agent actually ran before trusting its (non-)result (issue #883)
 
 A `[]` from an agent that never did any work looks identical to a thorough clean pass — twice in

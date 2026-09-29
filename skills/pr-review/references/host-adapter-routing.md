@@ -21,9 +21,29 @@ source "$SGE_ROOT/skills/lib/forgejo-pr-read.sh"
 
 **Scope:** only the non-mutating read and diff phases (Phase 1 Discovery, Phase 2
 agent dispatch input, Phase 3 quality gates CI read, Phase 4 issue validation) are
-routed here. Everything mutating — `pr-labels.sh`, `gh pr review`, `gh pr merge`,
-`gh pr ready` — remains GitHub-only until the mutating pr-review slice. On a
-Forgejo repo, skip any action that requires a write and log the deferral.
+routed here.
+
+**Mutating ops — partially deferred still (issue #2582).** `pr-labels.sh`'s full
+review-gate STATE MACHINE (`start-review` claim mutex, stale-claim takeover,
+`pr-reviewing`/`pr-reviewed`/`changes-requested`/`hold` transitions, heartbeats,
+`sync-check`, `sge-verdict` coverage tracking, follow-up preservation gate, `gh pr
+review`, `gh pr ready`) is **NOT ported to Forgejo** — that is a materially larger
+slice than #2582's budget covered and remains GitHub-only. On a Forgejo repo, skip
+any action that needs that state machine and log the deferral, exactly as before.
+
+What #2582 **did** ship, reusable by a simplified Forgejo review flow if one is
+built later: `skills/lib/forgejo-pr-mutate.sh` gives bare `fpr_add_label` /
+`fpr_remove_label` (direct label add/remove, no claim semantics), `fpr_merge_ready`
+(a degrading linked/reviewed-label/CI-green check — the reviewed-label gate only
+applies when `SGE_FORGEJO_REVIEWED_LABEL` is configured for the repo) and
+`fpr_merge` (squash-merge, TOCTOU-pinned to the current head SHA), plus `fpr_rerun`
+(CI retrigger — Forgejo has no native failed-only rerun, only a full-retrigger
+empty commit). See [`pr-monitor`'s copy of this
+doc](../../pr-monitor/references/host-adapter-routing.md#mutating-ops-rerun--merge--label--issue-2582)
+for the full routing table and the open cancelled-vs-failed question — this file
+does not duplicate it. **Not live-validated** against a real Forgejo instance
+(built without `git.feaw.co.uk` credentials or `mcp__forgejo__*` access); needs a
+manual pass before any Forgejo repo's pr-review flow depends on it.
 
 **Forgejo PR fields mapping** (from Gitea JSON to the names this skill references):
 

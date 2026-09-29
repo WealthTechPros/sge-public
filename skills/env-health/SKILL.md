@@ -334,11 +334,25 @@ chronic false-positive). Flag a drop early, mid-morning, not after a lost aftern
 > (fail-loud) — since `git rev-parse --show-toplevel` below and the throughput log path
 > both need cwd, not just `GH_REPO`. See [`gh-repo`](../gh-repo/SKILL.md).
 
+> **Host-routed (sge-public#47).** Detect the host first — `gh` only talks to
+> GitHub. On a Forgejo/Gitea remote there is no merged-PR search yet, so report
+> `THROUGHPUT_SKIP` with the reason (plus the open-PR backlog from the adapter's
+> `list-prs`, via `fpr_open_pr_heads`) — **never** a silent `0 merged`, which
+> would fire a false `THROUGHPUT_WARN` (or hide a real collapse). The same
+> applies on GitHub when `gh` fails: skip, don't count zero.
+
 ```bash
-REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
+source "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/lib/forgejo-pr-read.sh"
+HOST="$(fpr_host_kind)"
+if [ "$HOST" != "github" ]; then
+  if OPEN=$(fpr_open_pr_heads 2>/dev/null); then OPEN_N=$(printf '%s' "$OPEN" | grep -c .); else OPEN_N="unknown"; fi
+  echo "THROUGHPUT_SKIP: host=$HOST — merged-PR count needs GitHub search (open PRs: $OPEN_N)"
+  exit 0   # skip the rest of Component C only
+fi
+REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)" || { echo "THROUGHPUT_SKIP: gh cannot resolve the repo"; exit 0; }
 LOG="${ENV_HEALTH_THROUGHPUT_LOG:-$(git rev-parse --show-toplevel 2>/dev/null || echo .)/memory/env-health-throughput.jsonl}"
 TODAY=$(date -u +%F)
-MERGED_TODAY=$(gh pr list --repo "$REPO" --state merged --search "merged:>=${TODAY}" --json number --jq length)
+MERGED_TODAY=$(gh pr list --repo "$REPO" --state merged --search "merged:>=${TODAY}" --limit 1000 --json number --jq length)   || { echo "THROUGHPUT_SKIP: gh pr list failed for $REPO — not counting as 0"; exit 0; }
 # Baseline = median of last 7 finalized working-day rows for THIS repo
 # (append `{"date":..,"repo":..,"merged":..}` to $LOG daily); <5 rows -> skip.
 BASELINE=$(jq -s --arg repo "$REPO" '
@@ -361,6 +375,33 @@ fi
 
 - Only flag on **working days**; suppress Sat/Sun. `THROUGHPUT_WARN` triggers the full sweep — diagnose the cause, don't just log it.
 - **No history yet → `THROUGHPUT_SKIP`, never a guessed baseline.** `MERGED_TODAY`/`BASELINE` share the same `--repo` scope; log each day's final count to `$LOG` to roll it.
+
+---
+
+## Component C2 — Forgejo CI portability scan (sge-public#48)
+
+When the host is Forgejo/Gitea (`with-repo-cwd.sh host` → `forgejo`) and the
+repo has `.forgejo/workflows/`, warn on steps that are GitHub-only and **fail
+silently or noisily on Forgejo runners** — the per-PR CI noise otherwise gets
+misread as a real regression:
+
+- `uses: actions/github-script` — Forgejo resolves bare `actions/*` against its
+  own mirror (`data.forgejo.org`), which has no `github-script` (it wraps
+  Octokit; there is no Forgejo-API equivalent) → `repository not found`.
+- bare `gh ` invocations — the GitHub CLI is not in stock Forgejo runner images
+  (`gh: command not found`, exit 127), and even when installed it cannot talk
+  to a Forgejo API.
+
+```bash
+if [ "$(fpr_host_kind)" = "forgejo" ] && [ -d .forgejo/workflows ]; then
+  grep -nE 'uses:[[:space:]]*actions/github-script|(^|[[:space:];|&(])gh[[:space:]]+(pr|issue|api|release|run|repo|label|workflow)[[:space:]]'     .forgejo/workflows/*.y*ml 2>/dev/null     | sed 's/^/CI_PORTABILITY_WARN: GitHub-only step on a Forgejo runner: /'
+fi
+```
+
+Advisory only — it never gates fan-out. Remedy: replace with `curl` against the
+Forgejo REST API (or a `data.forgejo.org/actions/*` action), or install `gh`
+in the runner image only for steps that genuinely target GitHub. Full
+guidance: [`references/forgejo-actions-portability.md`](references/forgejo-actions-portability.md).
 
 ---
 
