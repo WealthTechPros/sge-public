@@ -342,11 +342,10 @@ commands: [mechanisms](references/mechanisms.md).
 
 Once the queue is stored, **batch-classify the whole wave in ONE hop** before
 fanning out: run `/sge:build-ready-audit` over the queued issues (its #872 fold
-runs `/sge:governance-trace` per issue, returning a `results[]` array with a
-`governance` verdict each). Store the verdicts by issue number; Phase 3c injects
+runs `/sge:governance-trace` per issue, returning a `governance` verdict each). Store verdicts by issue; Phase 3c injects
 each into its lane as `SGE_GOVTRACE_VERDICT`, which the lane's gate **adopts**
-instead of forking — removing the 10–15 min/lane fork (#10729) while keeping the
-blocking gate. **Opt-out/fallback:** any issue the batch can't classify (dropped,
+instead of forking — removing the 10–15 min/lane fork (#10729); gate
+stays. **Opt-out/fallback:** any issue the batch can't classify (dropped,
 errored, `--skip-governance`) arrives with no `SGE_GOVTRACE_VERDICT` and its lane
 falls through to a per-lane fork exactly as before — the gate is never skipped,
 only its fork front-loaded away. Full contract: [dispatch-prompts](references/dispatch-prompts.md).
@@ -424,15 +423,16 @@ budget target, the full **Lean Agent Contract** (Rules 1–3), and these Steps
 2. **Governance-trace gate (MANDATORY, before writing any code):** adopt the
    front-loaded `SGE_GOVTRACE_VERDICT` (Phase 1.5) when it matches this issue,
    else run `/sge:governance-trace <N>` via `Agent`, never `Skill(args=)`
-   (#2452); branch per `/sge:sge-implement` Phase 0.5's *Headless completion contract*
-   before Step 3's Implement the change. MATCHES_EXISTING
+   (#2452); branch per `/sge:sge-implement` Phase 0.5's *Headless completion contract*.
+   MATCHES_EXISTING
    / NO_SPEC_WARRANTED / NOT_ONBOARDED with `matchConfidence` not low → proceed.
    Any other verdict, or `matchConfidence` low → **do NOT build:** write
    `/tmp/team-pipeline-agent-<N>.json` (`"outcome":"blocked","prNumber":null`,
    `note:"governance-trace: <why>"`) and **terminate WITHOUT building** (Phase 4
    4a parks it; never auto-override). **Caller owns Step W (§2.4a, #1938):** on
-   adoption the fork is skipped, so `create_entities` the adopted front-loaded
-   verdict, `path: front-loaded` (fire-and-forget).
+   adoption `create_entities` the adopted verdict, `path: front-loaded`
+   (fire-and-forget).
+   **Fork result contract (#2452):** no verdict JSON / no `issue` echo / issue-repo mismatch → blocked ([ref](references/dispatch-prompts.md)).
 3. Implement the change (TDD per AC) per the Lean Agent Contract — draft PR on
    first commit (`Part of #<N>`; cross-repo `Part of owner/repo#<N>` — #2241), cheap inline
    gates, write the completion file (no self-reported token count, #857), no

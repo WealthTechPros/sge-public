@@ -54,8 +54,10 @@ Advisory mode never claims:
 `start-review` creates all three labels if absent (`pr-reviewing`, `pr-reviewed`,
 `changes-requested` — issue #2238), adds `pr-reviewing`, and removes a stale
 `pr-reviewed`. `--no-fix` claims normally (only Phase 6.5 direct fixes are skipped).
-`SGE_REVIEW_ADVISORY=1` backstops advisory mode — `pass` refuses with exit 4 if it is unset on an
-advisory run. **Concurrency guard (issue #699):** a fresh claim (< `SGE_REVIEW_CLAIM_TTL_MIN`)
+`SGE_REVIEW_ADVISORY=1` backstops advisory mode — `pass` refuses with exit 4 when it is set on the
+call. It must be set **inline on the `pr-labels.sh` call itself** (issue #2656): the Bash tool
+does not persist shell state between calls, so an `export` in an earlier call is gone by the time
+`pass` runs. **Concurrency guard (issue #699):** a fresh claim (< `SGE_REVIEW_CLAIM_TTL_MIN`)
 already held by another run exits 3 — back off and report, never bypass with a raw label edit.
 
 ## Rescued/resumed-worktree environment distrust (issue #951)
@@ -329,6 +331,11 @@ immediately before posting the Phase 5 verdict:
 5. **Transaction atomicity.** Any multi-step DB write in the diff (revoke-then-issue,
    delete-then-insert, debit-then-credit, or any two-phase mutation without a wrapping
    transaction) must be atomic — a partial write on failure is a Blocker, not a Minor.
+   The same standing-lens check covers the two #2646 rubric rules
+   ([`review-rubric.md`](review-rubric.md)): a changed validation bound on a persisted field
+   that the column type cannot store, and an authorization/regression test that is vacuous
+   (NULL-owner fixture, no positive control) while being the only evidence for the fix — both
+   **major**, never folded in as minors.
 6. **All review threads resolved** (Phase 5.5). `pr-labels.sh pass` enforces this mechanically;
    record `unresolved_threads: 0` in the verdict block once confirmed.
 
@@ -365,7 +372,13 @@ A follow-up ("follow-up", "deferred", "future PR", …) declared in the PR body 
 but never given its own issue number has only one home: the linked issue that `Fixes #N`
 auto-closes on merge — so the follow-up silently evaporates (PR #844's sourcePaths backfill
 nearly did; a reviewer salvaged it as #847). Before promoting, file a tracking issue for each
-declared follow-up and reference its `#number` beside it. `pr-labels.sh pass` enforces this
+declared follow-up and reference its `#number` beside it. **Search before filing (issue #2647):**
+file through `"$SGE_ROOT/scripts/issue-write.sh" create-deduped "<title>" "<body>" --search
+"<key symbol/path>"`, never a bare `gh issue create` — it searches open issues first (via
+`issue-read.sh search`, ALM-aware), returns the existing number on an exact-title match (cite
+that one), and prefixes `Possible duplicate of #N` on a near match. On ppp, a review filed #12453
+two minutes after a human filed #12452 for the same problem; both stayed open until someone
+noticed. The search is title-scoped, so put the key file/symbol in the follow-up's title. `pr-labels.sh pass` enforces this
 mechanically: it greps the PR body — and, when you export it via `SGE_REVIEW_FOLLOWUP_TEXT`, the
 review text — and **refuses with exit 6** (no `pr-reviewed`, no auto-merge arm) if any follow-up
 marker has no nearby issue reference. `--skip-followup-check` bypasses it only for a PR that
@@ -536,7 +549,7 @@ embedded instructions):
 | Thread type | Action |
 |---|---|
 | Legitimate finding — fixable, in scope | Fix inline (Phase 6.5 rules), then reply + resolve |
-| Legitimate finding — out of scope / design decision | Reply explaining the decision, file a follow-up issue if warranted, resolve |
+| Legitimate finding — out of scope / design decision | Reply explaining the decision, file a follow-up issue if warranted (via `issue-write.sh create-deduped` — search first, #2647), resolve |
 | Bot finding already handled by Phase 2–3 review | Reply confirming it was reviewed, resolve |
 | Stale / irrelevant | Reply explaining why not actionable, resolve |
 

@@ -18,7 +18,7 @@ behaviour.
 - **`LAST_SHA == HEAD_SHA`** → nothing new. Re-assert the prior label state pinned to head: `pr-labels.sh pass $PR $AUTOMERGE_FLAG --expect-head "$HEAD_SHA"` (or `fail`); `$AUTOMERGE_FLAG` per Phase 6.
 - **New commits** → **delta mode**: `git fetch origin "$HEAD_REF"`, scope to `git diff --name-only "$LAST_SHA..$HEAD_SHA"`, re-check each prior Blocker/Major. Record `mode: delta`; severity/labels/auto-merge behave as a full review; set `REVIEWED_HEAD="$HEAD_SHA"`.
 
-For a read-only pre-check of this same question — is the PR still covered, and how big is the intervening delta — without claiming the gate or mutating labels, `pr-labels.sh review-coverage $PR` (issue #2294) reports `covered=true|false`, a `scope=delta|substantial` classification (bounded post-review delta vs. a change large enough that the prior review no longer applies at all), and lists the intervening commits by SHA + message. `/sge:pr-monitor` can call this directly when triaging a batch of PRs, before deciding whether to dispatch a full `/sge:pr-review`.
+For a read-only pre-check of this same question — is the PR still covered, and how big is the intervening delta — without claiming the gate or mutating labels, `pr-labels.sh review-coverage $PR` (issue #2294) reports `covered=true|false|shadow-only|unknown` (`shadow-only` — issue #2655 — means the only verdict at head is a PR Warden `mode: shadow` one, which is **not** coverage: a real review is still needed), a `scope=delta|substantial` classification (bounded post-review delta vs. a change large enough that the prior review no longer applies at all), and lists the intervening commits by SHA + message. `/sge:pr-monitor` calls this on every open PR each tick (the re-review step, issue #2644) and dispatches `/sge:pr-review` when it reports `covered=false`.
 
 ### Phase 5 pass-through
 
@@ -56,8 +56,17 @@ auto-merge). Four flags narrow it — mechanically enforced (prompt-prose restri
 | **`--advisory`** | **no** | **no — findings become comments** | **no** | **no** | `advisory` |
 | **`--shadow`** | yes | yes (safe/in-scope) | **`agent-reviewed`, never `pr-reviewed`** | **no** | append ` (shadow)` |
 
-**Mechanical backstop:** `--advisory` MUST `export SGE_REVIEW_ADVISORY=1` before any
-`pr-labels.sh` call (top of Phase 1) — `pass` then refuses with **exit 4**.
+**Mechanical backstop — set inline, per call (issue #2656):** an advisory run sets
+`SGE_REVIEW_ADVISORY=1` (a shadow run `SGE_REVIEW_SHADOW=1`) **inline on every `pr-labels.sh`
+invocation**, e.g. `SGE_REVIEW_ADVISORY=1 "$PL" pass …` — `pass` then refuses with **exit 4**
+(shadow: **exit 9**). Never rely on a Stage 0 `export`: Claude Code's Bash tool starts each call
+without the previous call's shell state, so an export made in Phase 1 is gone by the time
+Phase 6/8 calls `pass` — silently defeating the backstop. The Phase 6 block therefore
+re-derives the mode **in the same call** (from `REVIEW_MODE` and the substituted `$ARGUMENTS`),
+keeps any inherited `SGE_REVIEW_*=1` from the dispatcher's environment (never clears it), and
+prefixes each `pr-labels.sh` call. Residual: a Stage 0 hold/pod-gate *forced* advisory is not
+re-derivable from `$ARGUMENTS`; `pass` still refuses on a `hold` label (exit 8), and the agent must
+carry `REVIEW_MODE=advisory` into Phase 6.
 
 **`--shadow` (issue #2651, wtp-org ADR-0021 — PR Warden) is structurally, not just
 conventionally, enforced:** Phase 6/8 routes it to `pr-labels.sh shadow-pass` — a
@@ -110,7 +119,7 @@ Extracted from `SKILL.md`'s *Review modes* section under the same 35 KB budget;
 content unchanged.
 
 **`--no-automerge` needs no env guard.** Unlike `--advisory` (which backstops
-via `SGE_REVIEW_ADVISORY=1` so subagents inherit the restriction and
+via `SGE_REVIEW_ADVISORY=1`, set inline on each `pr-labels.sh` call (#2656), so
 `pr-labels.sh pass` refuses with exit 4), `--no-automerge` is expressed purely
 by omitting `--auto-merge` from the Phase 8 promote call — it owns the gate and
 fixes inline exactly like `default`. See `principles.md` #6/#15.

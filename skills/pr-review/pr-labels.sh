@@ -133,7 +133,13 @@
 #                                             this makes no label changes and can be
 #                                             called any time from /sge:pr-review or
 #                                             /sge:pr-monitor. Prints one of:
-#                                               covered=true                  verdict SHA matches head
+#                                               covered=true                  a non-shadow verdict SHA
+#                                                                             matches head
+#                                               covered=shadow-only           the only verdict(s) at head
+#                                                                             are PR Warden `mode: shadow`
+#                                                                             (issue #2655) — untrusted for
+#                                                                             gate purposes; a real review
+#                                                                             is still needed. NOT coverage.
 #                                               covered=false scope=delta     small/bounded post-review
 #                                                                             delta (< SGE_REVIEW_COVERAGE_
 #                                                                             DELTA_MAX commits, default 3)
@@ -211,8 +217,9 @@
 #   - `pass` refuses draft PRs and verifies the swap actually took (with retry)
 #   - when SGE_REVIEW_ADVISORY=1 in the environment, `pass` refuses (exit 4):
 #     an advisory / review-only dispatch may post a verdict comment but must
-#     never move the pr-reviewed gate or arm auto-merge (issue #754). Subagents
-#     inherit the parent env, so a dispatcher exports one variable and the
+#     never move the pr-reviewed gate or arm auto-merge (issue #754). Set it inline
+#     on the call (a cross-call export does not survive the Bash tool, #2656)
+#     or in the dispatcher's process env; either way the
 #     capability is gone mechanically — a conflicting prompt cannot talk past it.
 #   - `pass` refuses (exit 5) while any dispatched Layer 2/3 reviewer recorded in
 #     the per-PR attestation ledger never cleared rl_reviewer_ran (issue #883) —
@@ -241,8 +248,9 @@
 #     issue #2653 Bug 3a): the mechanical backstop for PR Warden shadow mode
 #     (#2651), same shape as the exit-4 advisory guard — a shadow dispatch must
 #     never apply pr-reviewed or arm auto-merge even if a future regression ever
-#     routed it to `pass` instead of `shadow-pass`. SKILL.md exports it alongside
-#     REVIEW_MODE=shadow.
+#     routed it to `pass` instead of `shadow-pass`. SKILL.md sets it INLINE on
+#     each pr-labels.sh call of a shadow run (never a cross-call export — the
+#     Bash tool does not persist shell state between calls, issue #2656).
 #   - rate-limit stalls fail LOUD, not silent (issue #1147): a PR #1144 dispatch
 #     ran 3+ hours and burned 268k tokens silently retrying rate-limited `gh`
 #     REST calls instead of failing or switching quota buckets. `label_status`
@@ -2328,33 +2336,43 @@ case "$CMD" in
       exit 0
     fi
 
-    VERDICT_SHA=""
+    # Issue #2655: extract every trusted verdict as one "<sha>\t<mode>" line
+    # (oldest first), not just the last SHA, so the verdict block's `mode:`
+    # field can be consulted. Since #2653 a PR Warden `mode: shadow` verdict
+    # is deliberately untrusted for gate purposes — reporting it as
+    # covered=true would let a consumer (e.g. /sge:pr-monitor's re-review
+    # step, #2644) skip dispatching the real review the PR still needs.
+    # Emitting lines (`.[]`) rather than `[...] | last` also keeps ordering
+    # correct under --paginate, where --jq runs once per page.
+    VERDICT_LINES=""
     if [[ -n "$REPO_FULL" ]]; then
       TRUST_FILTER='.user.login == "wtp-sge[bot]" or .user.login == "github-actions[bot]"
            or (((.author_association // "") | ascii_upcase) as $assoc
                | $assoc == "OWNER" or $assoc == "MEMBER" or $assoc == "COLLABORATOR")'
-      VERDICT_SHA=$(gh api "repos/$REPO_FULL/pulls/$PR/reviews" --paginate \
-        --jq '
-          [.[] | select(.body != null)
-           | select('"$TRUST_FILTER"')
-           | select(.body | test("```sge-verdict"))
-           | .body | split("\n")[] | select(test("^\\s*(commit|sha|head)\\s*:"))
-           | capture(":\\s*(?<val>\\S+)") | .val
-          ] | last // empty' \
-        2>/dev/null) || VERDICT_SHA=""
+      VERDICT_JQ='
+          .[] | select(.body != null)
+          | select('"$TRUST_FILTER"')
+          | select(.body | test("```sge-verdict"))
+          | (.body | split("\n")) as $lines
+          | ([$lines[] | select(test("^\\s*(commit|sha|head)\\s*:"))
+              | capture(":\\s*(?<val>\\S+)") | .val] | last // "") as $sha
+          | ([$lines[] | select(test("^\\s*mode\\s*:"))
+              | capture(":\\s*(?<val>.*)$") | .val] | first // "") as $mode
+          | select($sha != "")
+          | $sha + "\t" + ($mode | gsub("[\t\r]"; " "))'
+      VERDICT_LINES=$(gh api "repos/$REPO_FULL/pulls/$PR/reviews" --paginate \
+        --jq "$VERDICT_JQ" 2>/dev/null) || VERDICT_LINES=""
 
-      if [[ -z "$VERDICT_SHA" ]]; then
-        VERDICT_SHA=$(gh api "repos/$REPO_FULL/issues/$PR/comments" --paginate \
-          --jq '
-            [.[] | select(.body != null)
-             | select('"$TRUST_FILTER"')
-             | select(.body | test("```sge-verdict"))
-             | .body | split("\n")[] | select(test("^\\s*(commit|sha|head)\\s*:"))
-             | capture(":\\s*(?<val>\\S+)") | .val
-            ] | last // empty' \
-          2>/dev/null) || VERDICT_SHA=""
+      if [[ -z "$VERDICT_LINES" ]]; then
+        VERDICT_LINES=$(gh api "repos/$REPO_FULL/issues/$PR/comments" --paginate \
+          --jq "$VERDICT_JQ" 2>/dev/null) || VERDICT_LINES=""
       fi
     fi
+    VERDICT_LINES=$(printf '%s\n' "$VERDICT_LINES" | tr -d '\r' | grep -v '^[[:space:]]*$') || VERDICT_LINES=""
+    VERDICT_LAST=$(printf '%s\n' "$VERDICT_LINES" | tail -n 1)
+    VERDICT_SHA="${VERDICT_LAST%%$'\t'*}"
+    VERDICT_MODE=""
+    [[ "$VERDICT_LAST" == *$'\t'* ]] && VERDICT_MODE="${VERDICT_LAST#*$'\t'}"
 
     if [[ -z "$VERDICT_SHA" ]]; then
       # No verdict found — cannot prove coverage either way. Fail closed:
@@ -2377,6 +2395,34 @@ case "$CMD" in
     fi
     PREFIX_LEN=$(( V_LEN < H_LEN ? V_LEN : H_LEN ))
     if [[ "${VERDICT_NORM:0:$PREFIX_LEN}" == "${HEAD_NORM:0:$PREFIX_LEN}" ]]; then
+      # Issue #2655: a shadow-mode verdict at head is not real coverage. If
+      # the latest verdict is shadow, look for ANY non-shadow verdict that
+      # also covers head (e.g. a real review posted before a later PR Warden
+      # shadow pass at the same SHA) — only when none exists is the head
+      # covered solely by shadow review work: covered=shadow-only.
+      shopt -s nocasematch
+      if [[ "$VERDICT_MODE" == *shadow* ]]; then
+        REAL_AT_HEAD=""
+        while IFS=$'\t' read -r _cv_sha _cv_mode; do
+          [[ -n "$_cv_sha" ]] || continue
+          [[ "$_cv_mode" == *shadow* ]] && continue
+          _cv_norm=$(printf '%s' "$_cv_sha" | tr '[:upper:]' '[:lower:]')
+          [[ ${#_cv_norm} -ge 7 && "$_cv_norm" =~ ^[0-9a-f]+$ ]] || continue
+          _cv_len=$(( ${#_cv_norm} < H_LEN ? ${#_cv_norm} : H_LEN ))
+          if [[ "${_cv_norm:0:$_cv_len}" == "${HEAD_NORM:0:$_cv_len}" ]]; then
+            REAL_AT_HEAD="$_cv_sha"
+          fi
+        done <<< "$VERDICT_LINES"
+        shopt -u nocasematch
+        if [[ -z "$REAL_AT_HEAD" ]]; then
+          echo "PR #$PR: review-coverage — only a shadow-mode verdict covers head (${VERDICT_SHA:0:12}, mode: $VERDICT_MODE); covered=shadow-only"
+          echo "  a PR Warden shadow verdict is untrusted for gate purposes (issue #2653) — a real (non-shadow) /sge:pr-review is still needed at this head"
+          exit 0
+        fi
+        echo "PR #$PR: review-coverage — verdict covers head (${REAL_AT_HEAD:0:12}; a later shadow verdict is ignored); covered=true"
+        exit 0
+      fi
+      shopt -u nocasematch
       echo "PR #$PR: review-coverage — verdict covers head (${VERDICT_SHA:0:12}); covered=true"
       exit 0
     fi

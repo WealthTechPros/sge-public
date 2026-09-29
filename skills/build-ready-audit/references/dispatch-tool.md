@@ -11,6 +11,8 @@ number is never received by any background execution. Use `Agent` with the
 issue number, `--repo`/target-repo resolution, and Step 2G's mandatory
 termination line spelled out in the prompt text.
 
+**Fork result contract (#2452).** A governance-trace fork's result is adoptable only if it is the Step-7 verdict JSON (a parseable object with a `verdict` string) whose `issue` equals the dispatched issue number and whose `repo`, when present, equals the dispatched `owner/repo`. Reject a result with no verdict JSON — a narrative report of findings, however specific (file:line citations, tool-call counts), is not a verdict — and reject a `NO_TARGET_ISSUE` refusal, a missing `issue` echo, or an issue/repo mismatch. Never adopt, forward or paraphrase a rejected result; the Step 2G caller records it as `DISPATCH_FAILED` (see SKILL.md).
+
 ## No-nested-spawning guard — the fork-of-fork case
 
 This skill itself declares `context: fork` and, per its own docs

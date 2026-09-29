@@ -199,7 +199,7 @@ Every issue this command files carries a hidden stable key: `<!-- sge-drift-key:
 
 ## Step 3 — Raise issues
 
-Render each gap's `proposedIssue` via `gh issue create --title … --label "$LABEL" --body …` with the `<!-- sge-drift-key: … -->` footer — worked example: `references/issue-lifecycle-examples.md`. Respect `--max`: file highest-severity first, log the deferred count — never silently truncate.
+Render each gap's `proposedIssue` via `"$IW" create-deduped <title> <body> --search <artefact-id>` (search-before-file, #2647) then `gh issue edit --add-label "$LABEL"`, with the `<!-- sge-drift-key: … -->` footer — worked example: `references/issue-lifecycle-examples.md`. Respect `--max`: file highest-severity first, log the deferred count — never silently truncate.
 
 ## Step 4 — Reverse alignment: reconcile open issues with current scope
 

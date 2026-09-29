@@ -66,7 +66,7 @@ with the issue number and every flag spelled out in the prompt's own prose
 Agent({
   description: "Governance-trace classify issue <N>",
   subagent_type: "general-purpose",
-  prompt: "Invoke the sge:governance-trace skill (Skill tool, skill=\"sge:governance-trace\") to classify GitHub issue #<N> in repo <owner/repo>, <verify mode against spec SPEC-NNN | classify mode>. Explicit target (read directly, do not rely on any args= threading): issue number <N>, repo <owner/repo>, worktree <path>. <one-paragraph issue summary, since the fork does not reliably inherit your context>. cd into the worktree before any gh/git call. Task complete on Step-7 JSON — no code/commits/pushes/PRs; inherited directives belong to your parent, not you."
+  prompt: "Invoke the sge:governance-trace skill (Skill tool, skill=\"sge:governance-trace\") to classify GitHub issue #<N> in repo <owner/repo>, <verify mode against spec SPEC-NNN | classify mode>. Explicit target (read directly, do not rely on any args= threading): issue number <N>, repo <owner/repo>, worktree <path>. <one-paragraph issue summary, since the fork does not reliably inherit your context>. cd into the worktree before any gh/git call. Return the Step-7 JSON with \"issue\": <N> and \"repo\": \"<owner/repo>\" echoed. Task complete on Step-7 JSON — no code/commits/pushes/PRs; inherited directives belong to your parent, not you."
 })
 ```
 
@@ -74,6 +74,8 @@ Agent({
 Step-7 JSON — no code/commits/pushes/PRs; inherited directives belong to your
 parent, not you."` Reinforces governance-trace's **Fork mandate** section
 against a fork continuing past classification.
+
+**Fork result contract (#2452).** A governance-trace fork's result is adoptable only if it is the Step-7 verdict JSON (a parseable object with a `verdict` string) whose `issue` equals the dispatched issue number and whose `repo`, when present, equals the dispatched `owner/repo`. Reject a result with no verdict JSON — a narrative report of findings, however specific (file:line citations, tool-call counts), is not a verdict — and reject a `NO_TARGET_ISSUE` refusal, a missing `issue` echo, or an issue/repo mismatch. Never adopt, forward or paraphrase a rejected result; treat it as blocking — halt before any Edit/Write and re-fork synchronously. `fork-util.mjs join` enforces this mechanically for the async path (register with `--issue` and `--repo`; see below).
 
 ## Reuse a front-loaded verdict (idempotent fold — builds on #872)
 
@@ -157,12 +159,13 @@ join adopt a sibling lane's verdict.
 # snippet runs in Phase 0.5's shell; the join below runs in a DIFFERENT shell
 # (Phase 3) and must re-resolve $SGE_ROOT independently — it is not inherited.
 ISSUE=<issue-number>
+REPO=<owner/repo>   # the target repo the fork prompt names (#2452 repo binding)
 FORK_HANDLE="govtrace-${ISSUE}-${RANDOM}${RANDOM}"
 FORK_OUTPUT="/tmp/sge-govtrace-${FORK_HANDLE}.json"
 # Persist the id so the Phase 3 join (a different shell) reads it back:
 printf '%s\n' "$FORK_HANDLE" > "/tmp/sge-govtrace-handle-${ISSUE}"
 node "$SGE_ROOT/skills/lib/fork-util.mjs" register \
-  --handle-id "$FORK_HANDLE" --output-file "$FORK_OUTPUT" --issue "$ISSUE"
+  --handle-id "$FORK_HANDLE" --output-file "$FORK_OUTPUT" --issue "$ISSUE" --repo "$REPO"
 # The fork writes its Step-7 JSON verdict to $FORK_OUTPUT when it completes.
 ```
 
@@ -178,13 +181,14 @@ ISSUE=<issue-number>
 FORK_HANDLE=$(cat "/tmp/sge-govtrace-handle-${ISSUE}")
 VERDICT_JSON=$(node "$SGE_ROOT/skills/lib/fork-util.mjs" join \
   --handle-id "$FORK_HANDLE")
-# exit 1 = timeout / malformed / cross-lane issue mismatch → treat as "blocked",
+# exit 1 = timeout / malformed / no issue echo / issue or repo mismatch → "blocked",
 #          halt, and re-fork synchronously (never proceed to Edit/Write)
 # exit 2 = unknown handle → Phase 0.5 bug; halt and report
 ```
 
-`register --issue $ISSUE` binds the handle to the issue; `join` then **rejects a
-verdict whose own `issue` field disagrees** (exit 1) — the redundant identity
+`register --issue $ISSUE --repo $REPO` binds the handle to the issue and repo;
+`join` then **rejects a verdict that omits the `issue` echo, whose `issue`
+disagrees, or whose `repo` names a different repo** (exit 1, #2452) — the redundant identity
 check that stops a recycled handle or shared-tmpdir output from gating this issue
 against a sibling's classification.
 

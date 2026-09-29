@@ -135,6 +135,25 @@ A draft PR is opened. The operator reviews `DESIGN.md`'s taste decision —
 this is the one part of the loop that is genuinely subjective and must be
 theirs, not Claude's — adds the CI step if desired, and merges.
 
+## Running the review without the Playwright MCP (#2648)
+
+`design-reviewer` reviews live through the `mcp__playwright__*` tools when the
+session has them. When it does not, capture static evidence first (Playwright
+used as a library from the target repo, which must have `playwright`
+installed; `--channel msedge|chrome` uses a system browser), validate it, then
+dispatch design-reviewer naming the printed directory:
+
+```bash
+EVIDENCE="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/capture-design-evidence.mjs" capture \
+  --base-url http://localhost:3000 --routes /,/design-system --commit "$(git rev-parse HEAD)")"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/capture-design-evidence.mjs" validate "$EVIDENCE"
+```
+
+The reviewer then scores from the screenshots plus `measurements.json`
+(overflow, touch targets, focus walk, typography/palette, console, reduced
+motion) and marks the verdict `Evidence: static`. Multi-state routes: pass
+`--plan plan.json` (format in the script header).
+
 ## Related
 
 - `SPEC-115-design-quality-enforcement-loop.md` — full spec

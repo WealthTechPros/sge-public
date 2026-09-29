@@ -85,7 +85,7 @@ IW="${CLAUDE_PLUGIN_ROOT:-.}/scripts/issue-write.sh"
 | Phase / step | Write op | Port call |
 |---|---|---|
 | **Phase 1/2** — claim notice, triage, exit report | P5 `comment-item` | `"$IW" comment "$n" "$body"` |
-| **Decomposition** — child work items | P6 `create-item` | `JIRA_ADAPTER_ALLOW_CREATE=1 "$IW" create "$title" "$body"` |
+| **Decomposition / follow-ups** — new work items | P10 `search` then P6 `create-item` | `JIRA_ADAPTER_ALLOW_CREATE=1 "$IW" create-deduped "$title" "$body" [--search "<phrase>"]` (search-before-file, #2647) |
 | **PR handoff** — close-on-merge linkage | P8 `link-close-on-merge` | `"$IW" close-link "$n" "$pr_url"` (github: embed the printed token — only when the PR has earned a closing keyword; else `Part of #N`, see sge-implement/references/close-keyword.md) |
 
 ### PR comments are NOT tracker writes — they stay on `gh`

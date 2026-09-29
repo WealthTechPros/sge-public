@@ -124,7 +124,7 @@ Refuse **only** when this scan actually finds no issue number anywhere in the in
 }
 ```
 
-**Echo check (when a number WAS received):** the `issue` field of the Step 7 JSON — and any issue commented on in Step 6 — must equal the number parsed from the positional argument. If the issue being analysed ever differs from that number, return the refusal above instead of a verdict.
+**Echo check (when a number WAS received):** the `issue` field of the Step 7 JSON — and any issue commented on in Step 6 — must equal the number parsed from the positional argument, and its `repo` field must equal the resolved `$TARGET` (#2452). If the issue being analysed ever differs from that number, return the refusal above instead of a verdict.
 
 ## Consumption modes
 
@@ -335,6 +335,7 @@ End with exactly this JSON shape:
 ```json
 {
   "issue": 4600,
+  "repo": "org/repo",
   "verdict": "MATCHES_EXISTING",
   "capability": "CAP-04",
   "matchedSpec": "SPEC-027",
@@ -359,6 +360,7 @@ On a **Step 0.5 cache hit**, the same shape is returned from the reused comment,
 ```json
 {
   "issue": 4600,
+  "repo": "org/repo",
   "verdict": "MATCHES_EXISTING",
   "matchedSpec": "SPEC-027",
   "matchConfidence": "medium",
@@ -368,6 +370,7 @@ On a **Step 0.5 cache hit**, the same shape is returned from the reused comment,
 }
 ```
 
+- `issue` / `repo` — the echoed target: `issue` is the positional number this run received, `repo` is the resolved `$TARGET` (`owner/repo`) the classification ran against. Always emitted — dispatchers reject a result that omits the `issue` echo or whose `issue`/`repo` disagrees with what they dispatched (#2452 fork result contract).
 - `verdict` — one of `MATCHES_EXISTING`, `MATCHES_EXISTING_MODIFIED`, `NEEDS_NEW_SPEC`, `NO_SPEC_WARRANTED`, `NOT_SGE_SCOPE`, `NOT_ONBOARDED`. This is the routing signal callers branch on — it doesn't change based on this skill's layer-awareness. (`NO_TARGET_ISSUE` is not a classification — it is the hard-stop refusal shape defined under Usage, returned without running any step.)
 - `capability` / `matchedSpec` — `null` when none applies to the verdict. Kept as top-level fields (redundant with `layers.capability.id` / `layers.spec.id` when they're `existing`) for callers that only need the routing-relevant id and don't care about the full layer breakdown.
 - `matchConfidence` — `high` / `medium` / `low`; dispatchers should treat `low` as worth a human glance even on an otherwise-clean `MATCHES_EXISTING`.

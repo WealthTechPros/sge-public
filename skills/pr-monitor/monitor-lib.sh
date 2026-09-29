@@ -75,6 +75,18 @@
 #                                carve-out; echoes a one-word reason
 #                                (SKILL.md Appendix A is the canonical
 #                                condition list)
+#   review_coverage_state <pr>   "<covered> <scope>" from pr-labels.sh
+#                                review-coverage (issue #2644); unreadable ->
+#                                "unknown -"
+#   rereview_decision ...        PURE stale-review decision: "dispatch" or
+#                                "skip:<reason>" (covered/ci/claim/draft/hold/
+#                                anti-thrash caps) -- issue #2644
+#   rereview_attempt_counts <pr> <head>  "<per-head> <per-window>" ledger counts
+#   record_rereview_dispatch <pr> <head> append a dispatch to the ledger
+#   pr_ci_state <pr>             green | red | pending | unknown
+#   stale_review_check <pr>      per-PR leg: 0 + "dispatch:<scope> head=<sha>"
+#                                when /sge:pr-review must be re-dispatched
+#                                because the verdict predates head (#2644)
 #
 # Environment (all optional unless noted):
 #   SPEC_GLOB_RE          REQUIRED by is_spec_pr / check_systemic_failure â€”
@@ -85,6 +97,10 @@
 #                         minutes (default: 45) â€” is_stale_draft / stale_draft_lane
 #   STALE_CLAIM_MINUTES   claim lease length in minutes (default: 30)
 #   MERGE_GATE_LABEL      repo merge-gate label (default: pr-reviewed)
+#   REREVIEW_CAP_PER_HEAD     stale-review re-dispatches per (PR, head) (default: 1)
+#   REREVIEW_CAP_PER_WINDOW   ... per PR inside the window (default: 3)
+#   REREVIEW_WINDOW_MINUTES   anti-thrash window in minutes (default: 360)
+#   REREVIEW_STATE            ledger dir (default: $TMPDIR/sge-prmon-rereview)
 #   CLAUDE_PLUGIN_ROOT    plugin root â€” reclaim_if_stale shells out to
 #                         skills/pr-review/pr-labels.sh under it
 #
@@ -989,3 +1005,157 @@ is_blast_radius_pr() {
   return 1
 }
 
+
+# ---- stale-review re-dispatch (issue #2644) --------------------------------
+# After a PR is reviewed, later pushes move its head; the automatic review only
+# ran at creation, so its verdict (and any `changes-requested` label) describes
+# an OLD head and nothing re-reviews the new one. `/sge:pr-review` detects a
+# stale verdict itself (#2294) but only when invoked. This leg closes the loop:
+# each cycle, for each open PR, ask `pr-labels.sh review-coverage` (the read-only
+# verdict-vs-head report) and dispatch `/sge:pr-review` when it says
+# covered=false. The re-review clears the stale `changes-requested` on a pass
+# (`pr-labels.sh pass` removes it, #2238) and keeps it + posts fresh findings on
+# a fail -- the monitor never touches either label itself.
+#
+# Deliberately NOT dispatched:
+#   covered=true         the verdict covers head -- nothing to do
+#   covered=shadow-only  only a PR Warden shadow verdict covers head (#2655);
+#                        surfaced, not re-dispatched -- shadow coverage is a
+#                        distinct state for the NOT REVIEWED row / a human
+#   covered=unknown      no verdict / unreadable -- never a re-review (a PR with
+#                        no verdict needs a FIRST review, the NOT REVIEWED row's
+#                        job)
+#
+# Anti-thrash: at most REREVIEW_CAP_PER_HEAD dispatches per (PR, head) -- a
+# re-review that fails to post a verdict is not retried forever at the same SHA
+# -- and at most REREVIEW_CAP_PER_WINDOW per PR inside REREVIEW_WINDOW_MINUTES,
+# so a PR being pushed to repeatedly cannot burn a review per push. The ledger
+# is a per-repo, per-PR file of "<epoch>\t<head>" lines under REREVIEW_STATE
+# (escape_cancelled_run's ledger convention).
+REREVIEW_CAP_PER_HEAD="${REREVIEW_CAP_PER_HEAD:-1}"
+REREVIEW_CAP_PER_WINDOW="${REREVIEW_CAP_PER_WINDOW:-3}"
+REREVIEW_WINDOW_MINUTES="${REREVIEW_WINDOW_MINUTES:-360}"
+REREVIEW_STATE="${REREVIEW_STATE:-${TMPDIR:-/tmp}/sge-prmon-rereview}"
+
+# Resolve pr-labels.sh the same way reclaim_if_stale does.
+_monitor_pr_labels() {
+  local _root="${CLAUDE_PLUGIN_ROOT:-}"
+  [ -n "$_root" ] || _root="$(bash "$(dirname "${BASH_SOURCE[0]}")/../../scripts/resolve-sge-root.sh" 2>/dev/null)"
+  [ -n "$_root" ] || _root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+  printf '%s' "$_root/skills/pr-review/pr-labels.sh"
+}
+
+# Echo "<covered> <scope>" for a PR from `pr-labels.sh review-coverage`, e.g.
+# "false delta", "false substantial", "true -", "shadow-only -", "unknown -".
+# Any unparseable/failed read -> "unknown -" (fail closed: never a dispatch).
+review_coverage_state() { # $1=pr
+  local pr=$1 out covered scope
+  # Capture everything, THEN take line 1: piping into `head -n 1` can SIGPIPE
+  # the multi-line report and, under a caller's pipefail, discard it entirely.
+  out=$(bash "$(_monitor_pr_labels)" review-coverage "$pr" 2>/dev/null) || out=""
+  out="${out%%$'\n'*}"
+  covered=$(printf '%s' "$out" | grep -oE 'covered=[a-z-]+' | head -n 1)
+  covered="${covered#covered=}"
+  case "$covered" in true|false|shadow-only|unknown) ;; *) covered="unknown" ;; esac
+  scope=$(printf '%s' "$out" | grep -oE 'scope=[a-z]+' | head -n 1)
+  scope="${scope#scope=}"
+  printf '%s %s' "$covered" "${scope:--}"
+}
+
+_rereview_ledger() { # $1=pr
+  local repo="${GH_REPO:-local}"
+  repo="${repo//[^A-Za-z0-9._-]/_}"
+  printf '%s' "$REREVIEW_STATE/${repo}.${1}"
+}
+
+# Echo "<dispatches at this head> <dispatches inside the window>" for a PR.
+rereview_attempt_counts() { # $1=pr $2=head [$3=now-epoch]
+  local pr=$1 head=$2 now="${3:-$(date -u +%s)}" ledger
+  ledger=$(_rereview_ledger "$pr")
+  if [ ! -f "$ledger" ]; then echo "0 0"; return 0; fi
+  awk -F'\t' -v head="$head" -v now="$now" -v win="$(( REREVIEW_WINDOW_MINUTES * 60 ))" '
+    $1 ~ /^[0-9]+$/ { if ($2 == head) h++; if (now - $1 < win) w++ }
+    END { printf "%d %d\n", h, w }' "$ledger"
+}
+
+record_rereview_dispatch() { # $1=pr $2=head [$3=now-epoch]
+  local pr=$1 head=$2 now="${3:-$(date -u +%s)}"
+  mkdir -p "$REREVIEW_STATE" 2>/dev/null
+  printf '%s\t%s\n' "$now" "$head" >> "$(_rereview_ledger "$pr")"
+}
+
+# PURE decision (no gh calls -- the testable core). Echoes "dispatch" (return 0)
+# or "skip:<reason>" (return 1). Evaluated top to bottom:
+#   $1 covered   true | false | shadow-only | unknown   (review_coverage_state)
+#   $2 ci        green | red | pending | unknown
+#   $3 claimed   true when a claim label (CLAIM_LABELS_RE) is on the PR
+#   $4 draft     true for a draft PR
+#   $5 hold      true when the `hold` label is on the PR (#1393)
+#   $6 head_n    prior re-review dispatches at THIS head
+#   $7 window_n  prior re-review dispatches inside REREVIEW_WINDOW_MINUTES
+rereview_decision() {
+  local covered=$1 ci=$2 claimed=$3 draft=$4 hold=$5 head_n=${6:-0} window_n=${7:-0}
+  [[ "$head_n" =~ ^[0-9]+$ ]] || head_n=999999     # unreadable ledger -> capped (fail closed)
+  [[ "$window_n" =~ ^[0-9]+$ ]] || window_n=999999
+  case "$covered" in
+    true)        echo "skip:covered"; return 1 ;;
+    shadow-only) echo "skip:shadow-only"; return 1 ;;
+    false)       ;;
+    *)           echo "skip:coverage-unknown"; return 1 ;;
+  esac
+  [ "$draft" = "true" ]   && { echo "skip:draft"; return 1; }
+  [ "$hold" = "true" ]    && { echo "skip:hold"; return 1; }
+  [ "$claimed" = "true" ] && { echo "skip:claimed"; return 1; }
+  case "$ci" in
+    green)   ;;
+    red)     echo "skip:ci-red"; return 1 ;;      # CODE/INFRA FAIL rows own it
+    pending) echo "skip:ci-pending"; return 1 ;;  # re-check next cycle
+    *)       echo "skip:ci-unknown"; return 1 ;;
+  esac
+  [ "$head_n" -ge "$REREVIEW_CAP_PER_HEAD" ]     && { echo "skip:cap-per-head"; return 1; }
+  [ "$window_n" -ge "$REREVIEW_CAP_PER_WINDOW" ] && { echo "skip:cap-per-window"; return 1; }
+  echo "dispatch"; return 0
+}
+
+# Echo green | red | pending | unknown for a PR's checks.
+pr_ci_state() { # $1=pr
+  local pr=$1 out
+  out=$(gh pr checks "$pr" --json state --jq \
+    "if any(.[]; $FAILING_CHECK_JQ) then \"red\" elif any(.[]; .state == \"PENDING\" or .state == \"QUEUED\" or .state == \"IN_PROGRESS\" or .state == \"REQUESTED\" or .state == \"WAITING\" or .state == \"EXPECTED\") then \"pending\" else \"green\" end" \
+    2>/dev/null) || out=""
+  case "$out" in green|red|pending) printf '%s' "$out" ;; *) printf 'unknown' ;; esac
+}
+
+# The per-PR leg. Echoes one line and returns 0 ONLY when the caller must now
+# dispatch `/sge:pr-review "$pr"` (+ --no-automerge under NO_AUTOMERGE=1):
+#   dispatch:<scope> head=<sha>   the attempt is ALREADY recorded in the ledger,
+#                                 so a crashed dispatch still counts to the cap
+#   skip:<reason> head=<sha>      return 1 -- log it in the heartbeat; no action
+stale_review_check() { # $1=pr
+  local pr=$1 meta head draft labels claimed hold cov covered scope ci counts decision
+  meta=$(gh pr view "$pr" --json headRefOid,isDraft,labels \
+    --jq '[.headRefOid, (.isDraft|tostring), ([.labels[].name] | join(","))] | join("\u001f")' 2>/dev/null) || meta=""
+  # \x1f (not a tab): a non-whitespace IFS keeps an EMPTY head field empty
+  # instead of collapsing it and shifting "false" into $head.
+  IFS=$'\x1f' read -r head draft labels <<< "$meta"
+  if [ -z "$head" ]; then echo "skip:pr-unreadable"; return 1; fi
+  claimed=false; hold=false
+  printf '%s' ",$labels," | grep -qE ",(${CLAIM_LABELS_RE})," && claimed=true
+  printf '%s' ",$labels," | grep -q ',hold,' && hold=true
+  cov=$(review_coverage_state "$pr"); covered="${cov%% *}"; scope="${cov#* }"
+  # Only spend the checks + ledger reads when a re-review is actually in play.
+  if [ "$covered" = "false" ]; then
+    ci=$(pr_ci_state "$pr")
+    counts=$(rereview_attempt_counts "$pr" "$head")
+  else
+    ci=unknown; counts="0 0"
+  fi
+  # shellcheck disable=SC2086  # counts is "<head_n> <window_n>", split on purpose
+  if decision=$(rereview_decision "$covered" "$ci" "$claimed" "$draft" "$hold" $counts); then
+    record_rereview_dispatch "$pr" "$head"
+    echo "dispatch:${scope} head=${head}"
+    return 0
+  fi
+  echo "${decision} head=${head}"
+  return 1
+}

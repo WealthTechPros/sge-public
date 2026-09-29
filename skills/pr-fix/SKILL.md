@@ -344,6 +344,7 @@ While fixing, you'll often uncover work that shouldn't block *this* PR but mustn
 
 - Use the repo's issue conventions (labels such as `test`, `tech-debt`, `bug`; title in the repo's commit style).
 - One issue per concern, with enough context (file:line, why it was deferred, rough effort) to pick up later.
+- **Search before filing (#2647)** — file through `"$SGE_ROOT/scripts/issue-write.sh" create-deduped "<title>" "<body>" --search "<key symbol/path>"`, never a bare `gh issue create`: it searches open issues first, returns an exact-title match's number instead of filing (link that one), and prefixes `Possible duplicate of #N` on a near match. The search is title-scoped, so name the key file/symbol in the title. Labels go on after (`gh issue edit --add-label`).
 - Optionally post a short summary comment on the PR listing the follow-ups created.
 
 This keeps the PR's scope honest while ensuring the discoveries are governed, not dropped.

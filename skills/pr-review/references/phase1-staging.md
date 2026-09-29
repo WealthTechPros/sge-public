@@ -30,10 +30,10 @@ source "$SGE_ROOT/skills/pr-review/review-lib.sh"   # rl_* helpers
 REPO="${GH_REPO:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"; export GH_REPO="$REPO"
 PR="${1:-$(gh pr view --json number --jq .number 2>/dev/null)}"   # orchestrators pass it positionally
 [ -n "$PR" ] || { echo "NO_PR — pass a PR number"; exit 1; }
-REVIEW_MODE="default"                                             # issue #754
+REVIEW_MODE="default"                                             # issue #754; no export — env is per-call (#2656)
 case " $ARGUMENTS " in
-  *" --advisory "*)     REVIEW_MODE="advisory"; export SGE_REVIEW_ADVISORY=1 ;;
-  *" --shadow "*)       REVIEW_MODE="shadow"; export SGE_REVIEW_SHADOW=1 ;;
+  *" --advisory "*)     REVIEW_MODE="advisory" ;;
+  *" --shadow "*)       REVIEW_MODE="shadow" ;;
   *" --no-fix "*)       REVIEW_MODE="no-fix" ;;
   *" --no-automerge "*) REVIEW_MODE="no-automerge" ;;
 esac

@@ -681,7 +681,7 @@ IR="${CLAUDE_PLUGIN_ROOT:-.}/scripts/issue-read.sh"
 IW="${CLAUDE_PLUGIN_ROOT:-.}/scripts/issue-write.sh"
 TRACKING=$("$IR" search "pipeline runs" --state open --limit 1 \
   | jq -r '.[0].number // empty')
-[ -n "$TRACKING" ] || TRACKING=$(JIRA_ADAPTER_ALLOW_CREATE=1 "$IW" create \
+[ -n "$TRACKING" ] || TRACKING=$(JIRA_ADAPTER_ALLOW_CREATE=1 "$IW" create-deduped \
   "pipeline runs" \
   "Rolling log of /sge:team-pipeline run reports. One comment per run.")
 "$IW" comment "$TRACKING" "## team-pipeline run ${RUN_ID}
@@ -690,7 +690,7 @@ ${PHASE6_REPORT}
 \`\`\`"
 ```
 
-> **`$IW create` prints the new item's bare ref** — an issue number on GitHub, an
+> **`$IW create-deduped` (search-first, #2647) prints the item's bare ref** — an issue number on GitHub, an
 > issueKey (`PROJ-123`) on Jira. Treat `$TRACKING` as opaque and pass it straight
 > back to `$IW`; never parse it as an integer.
 >

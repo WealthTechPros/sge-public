@@ -86,9 +86,20 @@ Parse machine-readable output — never scrape `git branch` with `sed` (it injec
 git worktree list --porcelain                    # worktree path, HEAD, branch per stanza
 git for-each-ref refs/heads \
   --format='%(refname:short) %(objectname:short) %(upstream:short) %(upstream:track)'
-gh pr list --state open --json number,title,headRefName
 git stash list --format='%gd %h %s'              # NOTE: repo-global — shared by ALL worktrees
 ```
+
+**Open-PR set — host-routed and FAIL-CLOSED (sge-public#47).** The open-PR list decides what is "in flight" and therefore never deleted, so it must come from the repo's real host, never an assumed `gh`. Resolve it through the shared routing shim, which detects the host (`scripts/with-repo-cwd.sh host`) and uses `gh pr list` on GitHub or the Forgejo adapter's `list-prs` verb on Forgejo/Gitea:
+
+```bash
+source "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/lib/forgejo-pr-read.sh"
+if ! OPEN_PRS="$(fpr_open_pr_heads)"; then   # "<number><TAB><head-branch>" per open PR
+  echo "REFUSE: cannot determine the open-PR set for $(git remote get-url origin) (host: $(fpr_host_kind)) — nothing will be deleted" >&2
+  exit 1
+fi
+```
+
+`fpr_open_pr_heads` exits non-zero when the host is `unknown` (self-hosted Forgejo/Gitea not declared in `SGE_FORGEJO_HOSTS`), the `gh`/adapter call fails, the payload is malformed, or the list hits its page cap (possible truncation). **On any non-zero exit, stop: no deletion plan, in any mode including `--force`.** You may still print the read-only audit, marked "open-PR set unknown". An empty `OPEN_PRS` with exit 0 is a confirmed zero; an empty list from a failed call is never treated as one.
 
 Record: every worktree path + branch + HEAD SHA, every local branch + tip SHA + upstream/ahead-behind, the set of **open-PR branches** (always preserved), and the stash list with each stash's subject line.
 
@@ -150,6 +161,8 @@ The recency guard is a secondary net; the claim file is the real fix. A worktree
 gh pr list --state merged --head "$b" --json number,mergedAt,headRefOid
 # or: gh pr view "$b" --json state,headRefOid
 ```
+
+On a non-GitHub host (`fpr_host_kind` ≠ `github`) there is no merged-PR lookup yet, so skip this cross-check: the branch stays 🟥 VALUABLE on ahead-count (fail safe — never SAFE on an unverified merge).
 
 If a merged PR exists for the branch **and** the branch tip equals the PR's `headRefOid` (no commits added after the merge) **and** the working tree is clean → ⬜ SAFE (squash-merged). If the tip has moved past the merged PR's head, the extra commits are 🟥 VALUABLE.
 
@@ -340,3 +353,4 @@ When given several repo directories, **fan out the read-only part, keep the dest
 10. **A rescue is checked for supersession before it is pushed at all** (issue #1538). The `../worktrees/rescue-guard.sh supersession` preflight runs FIRST on the "Push + draft PR" path — a branch already merged elsewhere is Discarded (tip SHA recorded), never pushed as a duplicate or reverting PR (the 2026-07-23 incident: 3/3 rescued PRs superseded, one would have reverted ~1,808 lines).
 11. **Live ownership claims are sacrosanct** (issue #1759). A worktree carrying a fresh `.sge-wt-claim` (within TTL) is **never** in the deletion plan — not in default mode, not in `--force`. The claim file is the primary signal that a running worker owns the worktree; the recency guard (directory mtime within 10 min) is a secondary net for the case where no claim was written yet. An expired claim self-heals: the worktree falls through to normal audit. The recency guard carries the same immunity under `--force`.
 12. **Sweeps never mutate merge-gate labels** (issue #1759). A sweep must **never** add, remove, or modify GitHub labels on PRs — specifically `pr-reviewing` and `pr-reviewed`. These labels are the property of the review plane (`/sge:pr-review`'s termination contract), and a sweep that strips `pr-reviewing` mid-review corrupts the review's state machine. The sweep's job is worktree/branch lifecycle only; label state is out of scope.
+13. **No open-PR set, no deletions** (sge-public#47). The open-PR list comes from the repo's real host via `fpr_open_pr_heads` (GitHub `gh`, or the Forgejo adapter's `list-prs`), never an assumed `gh`. If it cannot be obtained or may be truncated, the sweep refuses to delete anything — an empty list from a failed call would mark every live PR branch SAFE.
