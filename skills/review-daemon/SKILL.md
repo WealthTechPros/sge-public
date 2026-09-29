@@ -201,6 +201,40 @@ cause (heartbeat posting failure, unexpectedly long reviews) should be fixed.
 | `SGE_AGENT_ID` | `$(hostname)` | Owner field in claim comments posted by `pr-labels.sh` (interactive reviews). |
 | `SGE_REVIEW_CLAIM_TTL` | `900` | Claim comment TTL in seconds (used by `pr-labels.sh`). |
 | `REVIEW_DAEMON_CLAIM_TTL_SECONDS` | `2700` | Daemon's fallback reclaim TTL for label-only (pre-#1312) claims. |
+| `REVIEW_DAEMON_REPO` | unset | `owner/repo` single-repo mode. Wins over `REVIEW_DAEMON_ORGS` and App-scope enumeration. Mandatory on the PAT path. |
+| `GITHUB_APP_INSTALLATION_ID` | unset | The single App installation polled when `REVIEW_DAEMON_ORGS` is unset (legacy / default mode). Not read in multi-org mode. |
+| `REVIEW_DAEMON_ORGS` | unset | Comma-separated account logins (e.g. `WealthTechPros,Professional-Performance-Portfolio`): the **explicit allowlist** of App installations to poll, one installation token each. Unset/blank = single-installation mode (`GITHUB_APP_INSTALLATION_ID`). Requires App auth. See [Multiple orgs](#multiple-orgs). |
+
+---
+
+## Multiple orgs
+
+The GitHub App can be installed on several accounts — including **client orgs
+that PR Warden must never review**. So the daemon never polls "every
+installation the App can see": with `REVIEW_DAEMON_ORGS` set it lists the App's
+installations (`GET /app/installations`, App JWT), keeps **only** those whose
+`account.login` is in the allowlist (exact whole-login match, case-insensitive
+— never a prefix/substring), and mints a separate installation token per kept
+installation.
+
+- **Explicit allowlist rule.** An org is reviewed only if it is named in
+  `REVIEW_DAEMON_ORGS`. Every other installation is skipped — no token is ever
+  minted for it — and each skip is logged once at startup
+  (`[token] skipping installation for account '<login>' ...`) so the exclusion
+  is visible in the daemon log.
+- **Never add a client org.** Client orgs the App is installed on for other
+  purposes (e.g. `MultreesInvestorServices`) must never appear in
+  `REVIEW_DAEMON_ORGS`. Adding an org is an owner decision, not a config tweak.
+- **Per-installation tokens.** Every GitHub call for a repo — polling,
+  claim/labels, comments, verdicts — uses that repo's own installation token,
+  and a dispatched review receives (`GH_TOKEN` / `SGE_REVIEW_APP_TOKEN`) only
+  the token for the PR's own org. A repo whose owner has no allowlisted
+  installation is refused (fail-closed; the dispatch gets no token).
+- **Missing installation.** An allowlisted org with no App installation logs a
+  loud `WARNING` at startup naming it; the daemon keeps running for the others.
+- **Precedence.** `REVIEW_DAEMON_REPO` (single-repo mode) and shadow mode keep
+  their narrower scope and ignore `REVIEW_DAEMON_ORGS`. Unset/blank
+  `REVIEW_DAEMON_ORGS` is today's single-installation behaviour, unchanged.
 
 ---
 
@@ -428,6 +462,13 @@ budget. Falls back to per-repo queries when `REVIEW_DAEMON_REPO` is set, when
 search reports > 1000 results, or on any search error. The "has a hold label …
 excluded" line is logged when a PR enters the held state and once when it
 leaves — not every cycle (in-memory; a restart re-logs each held PR once).
+
+In multi-org mode (`REVIEW_DAEMON_ORGS`) the org-wide poll runs **per
+allowlisted installation**: one search per installation, over only that
+installation's repos (`org:<its owner>`), made with that installation's own
+token — never one global search across installations. A non-allowlisted owner
+is never searched, and one installation's search failure drops only that
+installation back to per-repo polling.
 
 ---
 
