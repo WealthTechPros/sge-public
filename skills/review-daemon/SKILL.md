@@ -6,7 +6,9 @@ description: "Operational reference for the SGE review daemon (SPEC-090 Layer 1)
 
 The **review daemon** (`services/review-daemon-poc/`) polls a fleet of repos for
 open, non-draft PRs and dispatches `/sge:pr-review --no-automerge` against eligible
-candidates.  All code-host access goes through the provider-agnostic `HostPort`
+candidates — or, for a PR that is conflicting or has a failing required check,
+`/sge:pr-fix` via the [fix lane](#fix-lane--pr-warden-review--fix-never-merge-wtp-org-adr-0021).
+Neither lane ever merges.  All code-host access goes through the provider-agnostic `HostPort`
 (`hostport.py`) so the daemon core is decoupled from GitHub specifics.
 
 This document covers the **claim-mutex protocol** (issue #1312) in full — the
@@ -201,6 +203,119 @@ cause (heartbeat posting failure, unexpectedly long reviews) should be fixed.
 | `SGE_AGENT_ID` | `$(hostname)` | Owner field in claim comments posted by `pr-labels.sh` (interactive reviews). |
 | `SGE_REVIEW_CLAIM_TTL` | `900` | Claim comment TTL in seconds (used by `pr-labels.sh`). |
 | `REVIEW_DAEMON_CLAIM_TTL_SECONDS` | `2700` | Daemon's fallback reclaim TTL for label-only (pre-#1312) claims. |
+| `REVIEW_DAEMON_REPO` | unset | `owner/repo` single-repo mode. Wins over `REVIEW_DAEMON_ORGS` and App-scope enumeration. Mandatory on the PAT path. |
+| `GITHUB_APP_INSTALLATION_ID` | unset | The single App installation polled when `REVIEW_DAEMON_ORGS` is unset (legacy / default mode). Not read in multi-org mode. |
+| `REVIEW_DAEMON_ORGS` | unset | Comma-separated account logins (e.g. `WealthTechPros,Professional-Performance-Portfolio`): the **explicit allowlist** of App installations to poll, one installation token each. Unset/blank = single-installation mode (`GITHUB_APP_INSTALLATION_ID`). Requires App auth. See [Multiple orgs](#multiple-orgs). |
+
+---
+
+## Multiple orgs
+
+The GitHub App can be installed on several accounts — including **client orgs
+that PR Warden must never review**. So the daemon never polls "every
+installation the App can see": with `REVIEW_DAEMON_ORGS` set it lists the App's
+installations (`GET /app/installations`, App JWT), keeps **only** those whose
+`account.login` is in the allowlist (exact whole-login match, case-insensitive
+— never a prefix/substring), and mints a separate installation token per kept
+installation.
+
+- **Explicit allowlist rule.** An org is reviewed only if it is named in
+  `REVIEW_DAEMON_ORGS`. Every other installation is skipped — no token is ever
+  minted for it — and each skip is logged once at startup
+  (`[token] skipping installation for account '<login>' ...`) so the exclusion
+  is visible in the daemon log.
+- **Never add a client org.** Client orgs the App is installed on for other
+  purposes (e.g. `MultreesInvestorServices`) must never appear in
+  `REVIEW_DAEMON_ORGS`. Adding an org is an owner decision, not a config tweak.
+- **Per-installation tokens.** Every GitHub call for a repo — polling,
+  claim/labels, comments, verdicts — uses that repo's own installation token,
+  and a dispatched review receives (`GH_TOKEN` / `SGE_REVIEW_APP_TOKEN`) only
+  the token for the PR's own org. A repo whose owner has no allowlisted
+  installation is refused (fail-closed; the dispatch gets no token).
+- **Missing installation.** An allowlisted org with no App installation logs a
+  loud `WARNING` at startup naming it; the daemon keeps running for the others.
+- **Precedence.** `REVIEW_DAEMON_REPO` (single-repo mode) and shadow mode keep
+  their narrower scope and ignore `REVIEW_DAEMON_ORGS`. Unset/blank
+  `REVIEW_DAEMON_ORGS` is today's single-installation behaviour, unchanged.
+
+---
+
+## Fix lane — PR Warden "review + fix, never merge" (wtp-org ADR-0021)
+
+The daemon runs two lanes off the same poll. A PR the review lane cannot help —
+it can't merge whatever a review says — goes to the **fix lane**, which
+dispatches `/sge:pr-fix owner/repo#N` instead of `/sge:pr-review`.
+
+**Classification** (GitHub adapter, `list_open_reviewable_changes`). After the
+shared exclusions (draft, `pr-reviewing` live claim, `pr-review-stalled`
+quarantine, hold labels `hold`/`do-not-merge`/`needs-human`/`blocked`), a PR is a
+**fix candidate** when either:
+
+- `mergeable == CONFLICTING` or `mergeStateStatus == DIRTY` → `fix_reason: conflict`, or
+- its rollup is `FAILURE`/`ERROR` **and** a per-PR re-read
+  (`isRequired(pullRequestNumber:)`, which covers branch protection and rulesets)
+  shows at least one **required** check completed as failed
+  (`FAILURE`/`TIMED_OUT`/`STARTUP_FAILURE`, or status `FAILURE`/`ERROR`)
+  → `fix_reason: failing-check: <names>`.
+
+These never trigger a fix: pending checks, non-required checks, `CANCELLED`/`ACTION_REQUIRED`
+runs, and the ignore list (`hold-gate`, `Require pr-reviewed label` by default).
+A live `pr-fixing` claim keeps the PR out of the fix lane. Classification runs
+*before* the reviewed-marker and standing-fail-verdict exclusions, so a
+`pr-reviewed` PR that has since gone dirty or red is picked up. Any read error
+classifies as "review" (the pre-fix-lane behaviour).
+
+**Dispatch.** Same machinery as a review: fresh re-read (`is_still_fixable`),
+the same `pr-reviewing` claim (`apply_fix_marker`, which tolerates a standing
+`pr-reviewed`), the box-wide budget slot, the diff-sized turn/wall-clock budget,
+the heartbeat, the OTEL span (`sge.dispatch.kind=fix`) and the shared per-PR
+quarantine counter. The daemon **always** releases its claim after a fix run —
+`/sge:pr-fix` takes its own `pr-fixing` claim. No review verdict is ever posted
+for a fix run. The prompt (`build_fix_prompt`, contract locked by
+`fix_lane.test.py`) says: pre-claimed; never `gh pr merge`, never add or
+re-apply `pr-reviewed`, never `pr-labels.sh pass`; drop a standing
+`pr-reviewed` with `pr-labels.sh stale` before pushing; push and exit, without
+waiting for CI.
+
+**Success means the head moved**, not exit 0 alone. After the run the daemon
+re-reads the head:
+
+- **moved** → success. The failure counter resets, and any standing
+  `pr-reviewed` is dropped with a short comment (`mark_approval_stale`, the
+  adapter equivalent of `pr-labels.sh stale`), so merge automation can't fire
+  over unreviewed fix commits in repos without sge's head-binding. The PR goes
+  back to the **review** lane on a later cycle.
+- **not moved** (or the dispatch failed or timed out) → counts toward the shared
+  quarantine (`pr-review-stalled` after `REVIEW_DAEMON_MAX_DISPATCH_ATTEMPTS`).
+  A failure during a GitHub outage is retried later and doesn't count.
+
+**Loop safety** (`fix_lane.py::FixLedger`):
+
+- one fix per `(repo, pr, head_sha)`, never re-dispatched against the same head.
+  An unknown head is not eligible.
+- at most `REVIEW_DAEMON_FIX_MAX_ATTEMPTS` (default 2) fix attempts per PR in any
+  `REVIEW_DAEMON_FIX_WINDOW_SECONDS` (default 86400) window.
+- the attempt is recorded *before* dispatch, so a crash mid-run can't loop.
+  The ledger persists to `REVIEW_DAEMON_FIX_LEDGER_PATH`, or to
+  `$REVIEW_DAEMON_LOG_DIR/fix-ledger.json` when only the log dir is set, so it
+  survives `Restart=always`.
+- a fix candidate the ledger won't allow is left out of **both** lanes that
+  cycle. Reviewing a PR that can't merge is wasted work, and quarantine is how
+  it reaches a human.
+
+**Scheduling.** Fix candidates are dispatched first, but they share the same
+concurrency cap as reviews. Each lane is ordered oldest-first. A PR sits in
+exactly one lane per cycle, so it is never reviewed and fixed in the same cycle.
+Dispatch logs record the lane in their header (`# dispatch PR #N @ <ts> kind: fix|review`).
+
+| Variable | Default | Effect |
+|---|---|---|
+| `REVIEW_DAEMON_FIX_LANE` | on | `0` disables the lane: fix candidates take the review path (pre-fix-lane behaviour). |
+| `REVIEW_DAEMON_FIX_MAX_ATTEMPTS` | `2` | Fix attempts per PR per window. |
+| `REVIEW_DAEMON_FIX_WINDOW_SECONDS` | `86400` | Rolling window for the attempt cap. |
+| `REVIEW_DAEMON_FIX_LEDGER_PATH` | `$REVIEW_DAEMON_LOG_DIR/fix-ledger.json` | Ledger file (in-memory only when neither is set). |
+| `REVIEW_DAEMON_FIX_IGNORE_CHECKS` | `hold-gate,Require pr-reviewed label` | Comma-separated check names that never trigger a fix. |
+| `REVIEW_DAEMON_FIX_MODEL` | unset | Model for fix dispatches (e.g. `sonnet`). Unset: fixes go through model routing at a fixed **sonnet** tier (the routing config's `sonnet` model; a fix is not sized by the PR's diff, so the per-path/size rules do not apply), with `ANTHROPIC_MODEL` still a hard override. Precedence: `REVIEW_DAEMON_FIX_MODEL` > `ANTHROPIC_MODEL` > routed sonnet tier. |
 
 ---
 
@@ -391,6 +506,7 @@ tools (wtp-mcp#888, MCP-031). Field names are a cross-repo contract:
 | Field | Type | Meaning |
 |---|---|---|
 | `ts` | string | completion time, `YYYY-MM-DDTHH:MM:SSZ` (UTC) |
+| `kind` | string | `review` or `fix` (PR Warden fix lane). A fix record's `verdict` is always `none`; its `outcome` is `pass` only when the fix moved the head |
 | `repo` | string | `owner/name` |
 | `pr` | int | PR number |
 | `head_sha` | string | head commit the dispatch ran against (`""` if unknown) |
@@ -428,6 +544,13 @@ budget. Falls back to per-repo queries when `REVIEW_DAEMON_REPO` is set, when
 search reports > 1000 results, or on any search error. The "has a hold label …
 excluded" line is logged when a PR enters the held state and once when it
 leaves — not every cycle (in-memory; a restart re-logs each held PR once).
+
+In multi-org mode (`REVIEW_DAEMON_ORGS`) the org-wide poll runs **per
+allowlisted installation**: one search per installation, over only that
+installation's repos (`org:<its owner>`), made with that installation's own
+token — never one global search across installations. A non-allowlisted owner
+is never searched, and one installation's search failure drops only that
+installation back to per-repo polling.
 
 ---
 
