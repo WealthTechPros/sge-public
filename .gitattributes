@@ -1,0 +1,56 @@
+# --- Line-ending policy (wtp-org#992 pattern 7) ------------------------------
+# Store every text file as LF and check it out as LF on every OS, so Windows
+# clones (core.autocrlf=true by default) stop producing CRLF churn, broken
+# shebangs, and platform-dependent hashes. Rules further down this file are
+# more specific and take precedence over this catch-all.
+* text=auto eol=lf
+
+# Windows-only scripts need CRLF in the working tree (cmd.exe requires it for
+# .cmd/.bat; keep .ps1 consistent with Windows tooling). Stored as LF in git.
+*.ps1 text eol=crlf
+*.psm1 text eol=crlf
+*.psd1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binary files — never normalise or diff as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.bmp binary
+*.tif binary
+*.tiff binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.eot binary
+*.zip binary
+*.gz binary
+*.tgz binary
+*.7z binary
+*.jar binary
+*.exe binary
+*.dll binary
+*.so binary
+*.dylib binary
+*.docx binary
+*.xlsx binary
+*.pptx binary
+*.doc binary
+*.xls binary
+*.ppt binary
+*.mp3 binary
+*.mp4 binary
+*.wav binary
+*.webm binary
+*.sqlite binary
+*.db binary
+*.parquet binary
+*.pfx binary
+*.p12 binary
+# -----------------------------------------------------------------------------
