@@ -244,7 +244,11 @@ installation.
 
 The daemon runs two lanes off the same poll. A PR the review lane cannot help —
 it can't merge whatever a review says — goes to the **fix lane**, which
-dispatches `/sge:pr-fix owner/repo#N` instead of `/sge:pr-review`.
+dispatches `/sge:pr-fix N --repo owner/repo` instead of `/sge:pr-review`, with
+the lane's operating contract (resolve the target checkout, pre-claimed, never
+merge, bounded) in the SDK system prompt — never appended to the skill
+arguments, which Claude Code shell-expands into the skill's `!`gh pr checks
+$ARGUMENTS`` step before the session starts (sge#2709).
 
 **Classification** (GitHub adapter, `list_open_reviewable_changes`). After the
 shared exclusions (draft, `pr-reviewing` live claim, `pr-review-stalled`
@@ -454,7 +458,7 @@ owner-approved defaults (Rob, 2026-09-28), overridable per host.
 |---|---|---|
 | `haiku` | `claude-haiku-4-5-20251001` | docs-only change (every file `*.md`/`*.mdx`/`*.markdown`/`*.txt`/`*.rst`/`*.adoc`); Dependabot/Renovate-authored PR; diff < 50 changed lines touching no risky path |
 | `sonnet` | `claude-sonnet-5` | default for code PRs |
-| `opus` | `claude-opus-5-5` | any risky path; diff >= 1500 changed lines (the largest budget bucket); changed-file list unavailable (fail closed) |
+| `opus` | `claude-opus-5-5` | any risky path (a deleted file is not a risky-path candidate); diff adding >= 1500 lines (the largest budget bucket — sized by additions, so a large deletion routes to sonnet); changed-file list unavailable (fail closed) |
 
 Check order is the precedence: unknown file list → **risky path** → dependency
 bot → docs-only → large diff → small diff → sonnet. A risky path always wins
