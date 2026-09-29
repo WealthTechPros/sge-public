@@ -33,6 +33,7 @@ PR="${1:-$(gh pr view --json number --jq .number 2>/dev/null)}"   # orchestrator
 REVIEW_MODE="default"                                             # issue #754
 case " $ARGUMENTS " in
   *" --advisory "*)     REVIEW_MODE="advisory"; export SGE_REVIEW_ADVISORY=1 ;;
+  *" --shadow "*)       REVIEW_MODE="shadow"; export SGE_REVIEW_SHADOW=1 ;;
   *" --no-fix "*)       REVIEW_MODE="no-fix" ;;
   *" --no-automerge "*) REVIEW_MODE="no-automerge" ;;
 esac

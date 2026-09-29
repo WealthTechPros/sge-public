@@ -237,7 +237,7 @@ switches each from *failure* to **retry-later**:
 |---|---|---|
 | **Timed-out / failed dispatch** (AC1) | `_track_failed_dispatch` increments the per-PR no-op/quarantine counter; PR marches toward `pr-review-stalled` | `_claim_and_dispatch` releases the claim and returns `None` (retry-later). The attempt is **not** counted against the 1800 s timeout budget and the **no-op/quarantine counter is not incremented**. |
 | **Cycle wall-clock timeout** (AC2) | `_AdaptiveWidth.observe(timed_out=True)` halves effective dispatch width for the backoff window | `run_once` reports the cycle as clean (`timed_out=False`); width is **held at the configured value** — no backoff armed |
-| **Exit-0-no-artefact read** (#1250, AC3) | reported as a silent no-op **failure** (`ok=False`), counter increments | released and returned `None` (retry-later); the unreadable artefact is a transient read failure, not a no-op |
+| **Exit-0-no-artefact read** (#1250, AC3) | an exit=0-no-artefact dispatch whose last SDK message is a SessionStart hook_started event with zero tool calls is reclassified as an infra failure and does NOT increment the per-PR quarantine counter (or is auto-retried once within the same cycle), regardless of GitHub health; every other exit=0-no-artefact dispatch is still reported as a silent no-op **failure** (`ok=False`), counter increments | released and returned `None` (retry-later); the unreadable artefact is a transient read failure, not a no-op |
 
 **Retry-later contract.** "Retry-later" means the daemon releases its
 `pr-reviewing` claim and returns a `None` verdict (omitted from the cycle's
@@ -254,6 +254,23 @@ re-queued PR is strictly better than a falsely-quarantined one.
 behave byte-identically to the pre-outage-aware daemon — the predicate is the
 only new branch and is inert while GitHub is operational. A dispatch that *raises*
 (vs. returns not-ok) is out of scope and still counts toward quarantine (#1436).
+
+**SessionStart-hook-terminate carve-out (issue #2502).** One sub-case of the
+healthy-GitHub AC3 cell is further split, independent of `is_github_degraded()`:
+if the dispatch's SDK stream (captured as `DispatchResult.detail`, requires
+`include_hook_events=True` on the dispatch's `ClaudeAgentOptions`) ended with a
+bare `HookEventMessage(subtype='hook_started', hook_event_name='SessionStart',
+...)` and zero tool calls anywhere in the run, the session was torn down while
+still inside its own startup hook — before the dispatched skill ever got a
+turn. `daemon.py`'s `_looks_like_sessionstart_hook_terminate` detects this
+signature and `_claim_and_dispatch` reclassifies it the same way as an
+outage-era read failure: release the claim, return `None` (retry-later), skip
+`_track_failed_dispatch` — so it does **not** walk the PR toward
+`pr-review-stalled`. This is a harness/infra failure, not a review outcome,
+so it is checked and applied regardless of GitHub health. Every other
+exit=0-no-artefact dispatch on a healthy GitHub (permission-denied tools,
+skill back-off, plugin load failure, turn-budget exhaustion) still falls
+through to the original silent-no-op failure path.
 
 > ⚠️ Because the predicate does live network I/O with a fail-safe-to-degraded
 > contract, daemon behaviour tests that assert the **healthy** path pin

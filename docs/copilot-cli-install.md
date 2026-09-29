@@ -146,7 +146,7 @@ SGE.
   same whether the *consuming* repo lives on GitHub or Azure DevOps.
 - Everything **downstream of install** in this plugin bundle is currently
   **GitHub-only**: the `PostToolUse` PR-review hook triggers off `gh pr
-  create`, `/sge:align`'s drift tracking raises GitHub Issues, and CI
+  create`, `/sge:sge-align`'s drift tracking raises GitHub Issues, and CI
   workflows (`ai-supply-chain.yml`, `require-commit-trailer.yml`,
   `require-test-evidence.yml`) are GitHub Actions. If your repo is hosted on
   Azure DevOps, the skills still run locally, but hook-driven automation and

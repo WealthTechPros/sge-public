@@ -1,6 +1,6 @@
 ---
 description: "Use when a pull request needs the SGE merge-gate review — before merging any PR, when a PR is review-blocked (`mergeStateStatus: BLOCKED` or the `pr-reviewed` label is missing), when /sge:pr-monitor routes a lane PR here, or when new commits have landed on an already-reviewed PR and a delta re-review is needed."
-argument-hint: <pr-number> [--advisory | --no-fix | --no-automerge]
+argument-hint: <pr-number> [--advisory | --no-fix | --no-automerge | --shadow]
 allowed-tools: Read, Grep, Glob, Edit, Write, Bash, Agent, Task, mcp__plugin_sge_sge-memory__search_nodes, mcp__plugin_sge_sge-memory__create_entities
 ---
 
@@ -25,14 +25,14 @@ allowed-tools: Read, Grep, Glob, Edit, Write, Bash, Agent, Task, mcp__plugin_sge
 ## Usage
 
 ```
-/sge:pr-review <pr-number> [--advisory | --no-fix | --no-automerge] [--tier0]
+/sge:pr-review <pr-number> [--advisory | --no-fix | --no-automerge | --shadow] [--tier0]
 ```
 
 `$ARGUMENTS` is the PR number; if omitted, resolve from the branch.
 
 ### Review modes (issue #754) — `--no-automerge` per SPEC-090
 
-Default = merge-gate owner (claims gate, moves labels, fixes safe issues inline, arms auto-merge). Three flags narrow it — mechanically enforced: `--no-fix` (findings become comments), `--no-automerge` (no auto-merge arm), `--advisory` (no claim, no fixes, no label transitions, no promote). **Backstop:** `--advisory` MUST `export SGE_REVIEW_ADVISORY=1` before any `pr-labels.sh` call — `pass` then refuses with **exit 4**. **Prose ("don't apply pr-reviewed") is NOT equivalent (sge#2508)** — the pass path applies the label regardless; a dispatch that must not label/merge MUST pass `--advisory`. Full matrix + incident: [`mode-selection.md`](references/mode-selection.md#mode-flags-issue-754--no-automerge-per-spec-090).
+Default = merge-gate owner (claims gate, moves labels, fixes safe issues inline, arms auto-merge). Four flags narrow it — mechanically enforced: `--no-fix` (findings become comments), `--no-automerge` (no auto-merge arm), `--advisory` (no claim, no fixes, no label transitions, no promote), `--shadow` (#2651). **Backstop:** `--advisory` exports `SGE_REVIEW_ADVISORY=1`; `pass` then refuses (**exit 4**). **Prose is NOT equivalent (sge#2508)** — `pass` applies the label regardless; use `--advisory`. Full matrix + incident: [`mode-selection.md`](references/mode-selection.md#mode-flags-issue-754--no-automerge-per-spec-090).
 
 **Target repo (cross-repo / control-session):** act on the CWD repo; from elsewhere `cd "$("$SGE_ROOT/scripts/with-repo-cwd.sh" resolve owner/repo)" || exit 1` — **or** `export GH_REPO=owner/repo` for `gh`-only work (every `gh` call/script honours it; #662, `cd` preferred). Same-repo: unset. `$SGE_ROOT` resolved per Stage 0 below. [`gh-repo`](../gh-repo/SKILL.md).
 
@@ -56,9 +56,10 @@ source "$SGE_ROOT/skills/pr-review/review-lib.sh"   # rl_* helpers
 REPO="${GH_REPO:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"; export GH_REPO="$REPO"
 PR="${1:-$(gh pr view --json number --jq .number 2>/dev/null)}"   # orchestrators pass it positionally
 [ -n "$PR" ] || { echo "NO_PR — pass a PR number"; exit 1; }
-REVIEW_MODE="default"   # issue #754
+REVIEW_MODE="default"  # #754; order matters (#2653, mode-selection.md)
 case " $ARGUMENTS " in
   *" --advisory "*) REVIEW_MODE="advisory"; export SGE_REVIEW_ADVISORY=1 ;;
+  *" --shadow "*) REVIEW_MODE="shadow"; export SGE_REVIEW_SHADOW=1 ;;
   *" --no-fix "*) REVIEW_MODE="no-fix" ;;
   *" --no-automerge "*) REVIEW_MODE="no-automerge" ;;
 esac
@@ -220,7 +221,7 @@ pr: <number>
 commit: <HEAD_SHA reviewed>
 reviewed_at: <ISO-8601 UTC>
 plugin_ref: <sge plugin version this reviewing environment has installed> # SPEC-121 Phase 2 — see sge-verdict-block.md
-mode: full | delta | phase5-passthrough | tier0 | advisory
+mode: full | delta | phase5-passthrough | tier0 | advisory | shadow
 governance_tier: T0 | T1 | T2 | absent # proportional governance — see tier-scaling.md
 blockers: <count>
 majors: <count>
@@ -295,9 +296,13 @@ if [[ "$HOLD_ST" == *"hold=true"* ]]; then
   echo "PR #$PR: PASS — held for human sign-off. Remove the 'hold' label once obtained."
   exit 0
 fi
-# Pass (APPROVE/COMMENT, no Blockers), NON-DRAFT -> promote (auto-merge unless --no-automerge), reviewed head. Else fail:
-AUTOMERGE_FLAG="--auto-merge"; [ "$REVIEW_MODE" = "no-automerge" ] && AUTOMERGE_FLAG=""
-"$PL" pass $PR $AUTOMERGE_FLAG --expect-head "$REVIEWED_HEAD"
+# Pass (no Blockers), NON-DRAFT -> promote (shadow: shadow-pass). Else fail:
+if [ "$REVIEW_MODE" = "shadow" ]; then
+  "$PL" shadow-pass "$PR"
+else
+  AUTOMERGE_FLAG="--auto-merge"; [ "$REVIEW_MODE" = "no-automerge" ] && AUTOMERGE_FLAG=""
+  "$PL" pass $PR $AUTOMERGE_FLAG --expect-head "$REVIEWED_HEAD"
+fi
 "$PL" fail $PR
 ```
 
@@ -323,7 +328,7 @@ A `pass` must not open the gate over red CI. After Phase 6.5 fixes (or a PR that
 
 **Follow-up preservation gate (issue #859).** File a tracking issue for each declared follow-up ("follow-up"/"deferred"/"future PR") before promoting, else it evaporates when `Fixes #N` closes the issue. `pr-labels.sh pass` greps the PR body (and review text via `export SGE_REVIEW_FOLLOWUP_TEXT="$REVIEW_SUMMARY"`), **refusing with exit 6** if a marker lacks a nearby issue ref; `--skip-followup-check` bypasses.
 
-> **If advisory → this phase does not run (issue #754).** A review-only dispatch never promotes/undrafts/arms auto-merge; guard: `[ "$REVIEW_MODE" = "advisory" ] && { echo "advisory: no promote/auto-merge"; exit 0; }` (exit 4 backstop). `--no-fix`/`--no-automerge` run Phase 8 normally (`AUTOMERGE_FLAG` per Phase 6).
+> **If advisory → this phase does not run (issue #754).** A review-only dispatch never promotes/undrafts/arms auto-merge; guard: `[ "$REVIEW_MODE" = "advisory" ] && { echo "advisory: no promote/auto-merge"; exit 0; }` (exit 4 backstop). `--no-fix`/`--no-automerge`/`--shadow` run Phase 8 normally (Phase 6).
 
 Run the **pre-merge verification checklist**: [`pre-merge-checklist.md`](references/pre-merge-checklist.md).
 
