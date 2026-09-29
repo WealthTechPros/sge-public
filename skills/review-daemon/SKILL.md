@@ -329,6 +329,108 @@ wasted dispatch at full review cost.
 
 ---
 
+## Per-dispatch model routing (owner decision 2026-09-28)
+
+Each dispatch runs at a model **tier** chosen from the PR itself
+(`services/review-daemon-poc/model_routing.py`). Thresholds and globs are
+owner-approved defaults (Rob, 2026-09-28), overridable per host.
+
+| Tier | Default model | Chosen when |
+|---|---|---|
+| `haiku` | `claude-haiku-4-5-20251001` | docs-only change (every file `*.md`/`*.mdx`/`*.markdown`/`*.txt`/`*.rst`/`*.adoc`); Dependabot/Renovate-authored PR; diff < 50 changed lines touching no risky path |
+| `sonnet` | `claude-sonnet-5` | default for code PRs |
+| `opus` | `claude-opus-5-5` | any risky path; diff >= 1500 changed lines (the largest budget bucket); changed-file list unavailable (fail closed) |
+
+Check order is the precedence: unknown file list → **risky path** → dependency
+bot → docs-only → large diff → small diff → sonnet. A risky path always wins
+(a Dependabot PR that edits a workflow routes to opus). Default risky globs:
+`infra/**`, `platform/infra/**`, `.github/workflows/**`, `**/migrations/**`,
+`**/*auth*[/**]`, `**/*security*[/**]`, `**/*secret*[/**]`, `**/*crypto*[/**]`,
+`**/Pulumi*.y[a]ml`, `**/Dockerfile`, `**/Dockerfile.*`, `**/*.Dockerfile`,
+`.githooks/**`, `hooks/**` (case-insensitive; a rename counts both paths).
+
+The changed-file list comes from one paginated `pulls/{n}/files` call per
+**dispatched** PR (after the claim is won), never per polled PR.
+
+**Precedence of configuration:** `ANTHROPIC_MODEL` (issue #2491) is a hard
+override — one model for every dispatch, routing bypassed (the displaced tier
+is still logged) → `REVIEW_DAEMON_MODEL_ROUTING` JSON (`haiku`/`sonnet`/`opus`
+model ids, `small_diff_lines`, `large_diff_lines`, `risky_globs` (replace),
+`risky_globs_add` (append), `docs_globs`, `bot_authors`) → built-in defaults.
+An invalid `REVIEW_DAEMON_MODEL_ROUTING` **refuses to start**, like the #1435
+tool-config check. The chosen model + tier is recorded on the `dispatching:`
+log line, the dispatch log file header, and the OTEL span attributes
+`sge.dispatch.model` / `sge.dispatch.model_tier`.
+
+## Startup skill check and zero-turn dispatches (2026-09-28)
+
+On 2026-09-28 the WSL daemon host had no `sge` plugin installed: every
+dispatch returned `num_turns=0` in ~50 ms, three attempts per PR were burned,
+and PR #4 was quarantined before anyone noticed. Two guards now apply:
+
+- **At startup** the daemon verifies `/sge:pr-review` is resolvable by the
+  Claude Code its SDK spawns (`skill_check.py`): an `sge@*` entry in
+  `$CLAUDE_CONFIG_DIR`/`~/.claude` `plugins/installed_plugins.json` applying to
+  the dispatch cwd, whose `installPath` has `skills/pr-review/SKILL.md`, not
+  disabled in `enabledPlugins`. Otherwise it **refuses to start** with a FATAL
+  line naming the fix.
+- **At runtime** a dispatch whose `ResultMessage` reports `num_turns == 0` is an
+  immediate **INFRA** failure (named cause: skill not found), not an exit-0
+  candidate for artefact verification — no verdict is posted; it counts toward
+  quarantine like any other INFRA failure.
+
+## Dispatch run log — `runs.jsonl` (2026-09-28)
+
+The daemon appends **one JSON line per completed dispatch** to
+`$PR_WARDEN_RUNS_LOG` (wtp-org's PR Warden supervisor sets it to
+`$WTP_HOME/review-daemon/logs/runs.jsonl`; ADR-0021 §3.3), falling back to
+`$REVIEW_DAEMON_LOG_DIR/runs.jsonl`, else nothing is written. Readers: the
+supervisor's quarantine sweep and cost/status feed, and wtp-mcp's `pr_agent_*`
+tools (wtp-mcp#888, MCP-031). Field names are a cross-repo contract:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `ts` | string | completion time, `YYYY-MM-DDTHH:MM:SSZ` (UTC) |
+| `repo` | string | `owner/name` |
+| `pr` | int | PR number |
+| `head_sha` | string | head commit the dispatch ran against (`""` if unknown) |
+| `outcome` | string | `pass`, `fail`, `timeout` or `quarantined` — see below |
+| `verdict` | string | `approve`, `request_changes` or `none` (from the review artefact's own verdict) |
+| `needs_human` | bool | the review concluded `blocked` (supervisor escalates; never counted as a failure) |
+| `model` / `model_tier` | string | routed model and tier (`override` under `ANTHROPIC_MODEL`) |
+| `duration_s` | float | dispatch wall time, seconds |
+| `cost_usd` / `num_turns` | number or null | from the SDK `ResultMessage` (`total_cost_usd`, `num_turns`) |
+
+`outcome` is the **dispatch-execution** outcome, matching the supervisor's
+"failed attempt" semantics: `pass` = the review ran and left a verified
+artefact **whatever it concluded** (`verdict` carries approve/request-changes);
+`fail` = no review produced (SDK error, silent no-op, zero-turn run, raised
+dispatch); `timeout` = wall-clock backstop; `quarantined` = the failed dispatch
+that exhausted the attempt budget. A request-changes review is therefore
+`outcome: pass` and never walks a PR toward the supervisor's quarantine.
+**Retry-later exits** (GitHub outage, SessionStart-hook-terminate) are not
+completed dispatches and write no line.
+
+Each record is one `os.write` of one line (< 4096 bytes, PIPE_BUF) to a file
+opened `O_APPEND`, so concurrent workers never interleave. It never contains PR
+content, prompts, dispatch output or secrets. A write failure is logged and
+never reaches the dispatch path.
+
+## Org-wide poll and quiet hold logging (2026-09-28)
+
+Under App-scope enumeration each cycle runs **one** paginated GraphQL `search`
+(`org:<owner> is:pr is:open archived:false sort:created-asc`) for the whole
+fleet instead of two queries per repo; selection rules (draft, markers, hold,
+fail-at-head, shadow-at-head, stale-claim reclaim, rate-limit floor) are
+unchanged and run on the same node shape, truncated to the per-repo path's 50
+oldest PRs per repo. One line per cycle logs the GraphQL cost and remaining
+budget. Falls back to per-repo queries when `REVIEW_DAEMON_REPO` is set, when
+search reports > 1000 results, or on any search error. The "has a hold label …
+excluded" line is logged when a PR enters the held state and once when it
+leaves — not every cycle (in-memory; a restart re-logs each held PR once).
+
+---
+
 ## References
 
 - SPEC-103: outage-aware dispatch — retry-later, not failure, during GitHub degradation (issue #1341)
