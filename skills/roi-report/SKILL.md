@@ -46,7 +46,7 @@ Flags:
 
 ### Step 1: Attribute pending usage, then read spec-cost entities from Cortex
 
-Attribute BEFORE checking for empty entities — otherwise a fresh install (or any repo whose latest session hasn't been attributed yet) always reports "No token data yet", even when `memory/token-usage.jsonl` has rows waiting (#726). Read the JSONL sidecar (written by the plugin's own token-metering Stop/SubagentStop hook; absent = no data yet) and call the `attribute_costs` MCP tool, which wraps the tested `attributeCosts()` (mcp/sge-cortex/src/cost-attribution.ts) and upserts `spec-cost` entities in Cortex — idempotent, safe to call every run:
+Attribute BEFORE checking for empty entities — otherwise a fresh install (or any repo whose latest session hasn't been attributed yet) always reports "No token data yet", even when `memory/token-usage.jsonl` has rows waiting (#726). Read the JSONL sidecar (written by the plugin's own token-metering Stop/SubagentStop hook on hosts that support it — see `docs/token-metering.md`; absent = metering unavailable, not zero usage) and call the `attribute_costs` MCP tool, which wraps the tested `attributeCosts()` (mcp/sge-cortex/src/cost-attribution.ts) and upserts `spec-cost` entities in Cortex — idempotent, safe to call every run:
 
 ```bash
 JSONL="${REPO_ROOT}/memory/token-usage.jsonl"
@@ -166,7 +166,7 @@ On failure: print the error but do NOT abort — the local report is the primary
 ## Graceful degradation
 
 - No Cortex / sge-memory unavailable: read `memory/token-usage.jsonl` directly, skip Step 5.
-- No JSONL file: print "No token data yet." and exit.
+- No JSONL file: print "Token metering unavailable in this repo — no usage producer ran here (e.g. a host without metering support such as GitHub Copilot CLI; see docs/token-metering.md). This is not zero usage." and exit. Never report zero cost.
 - `gh` not authenticated: skip Step 2 (byPR empty), note it in the report.
 - `--push` but no `SGE_BACKEND_URL`: skip Step 6 with a warning.
 

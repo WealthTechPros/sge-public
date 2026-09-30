@@ -80,7 +80,9 @@ Bundled, stack-agnostic specialist agents (a repo MAY override any of these with
 
 ## Hooks
 
-The plugin ships two hooks:
+The full plugin distribution ships the hooks below. The **public** distribution (`sge-public`) ships only the token-metering hook.
+
+- **`Stop` / `SubagentStop` (`hooks/token-meter.sh`)** — appends one local `TokenUsageRecord` per assistant turn to the consumer repo's git-ignored `memory/token-usage.jsonl`, which `/sge:cost-guard` and `/sge:roi-report` read. Local-only, no network. It reads a Claude Code session transcript and is not validated on GitHub Copilot CLI. Where no usage sidecar is written, the skills report *metering unavailable*, never zero usage. See [`docs/token-metering.md`](docs/token-metering.md), including what counts as evidence of Cortex savings.
 
 - **`SessionStart` (`hooks/session-start.sh`)** — at the start of a session it surfaces an SGE intro: on the **first session of the day** (or whenever an update is available) a framed box with the installed version/status, live skill+agent counts, and the "start here" commands; on later sessions the same day it falls back to a **one-line** summary. When the published version on `main` is newer than the installed one it nudges `/plugin update sge` so repos stay on the latest methodology skills (passive nudge by default — a hook can't mutate the version-pinned cache itself; `SGE_AUTO_UPDATE=auto` turns it into a run-now directive). The box throttle is a per-repo date stamp kept in `.git/sge-intro-state` (never committed); `SGE_INTRO_STATE` and `SGE_TODAY` override the location/date. The version check honours `SGE_REMOTE_VERSION` as an override (non-empty forces the comparison version for pinned/air-gapped installs; empty skips the check). Any failure — no network, no `curl`/`gh`, unreadable `plugin.json` — degrades to a summary-only line or a silent no-op and never blocks session start.
 - **`PostToolUse` (`hooks/pr-created.sh`)** — whenever a PR is created via `gh pr create` in a session with the plugin installed, it triggers `/sge:pr-review` on the new PR so nothing misses the merge gate. Default is an in-session nudge; set `SGE_AUTO_REVIEW=headless` to launch the review as an independent background `claude -p` run instead. PRs opened outside Claude Code still need `/sge:pr-monitor` or a CI backstop.
@@ -89,7 +91,7 @@ The plugin ships two hooks:
 
 The plugin registers one optional MCP server, **`sge-memory`**, via a `.mcp.json` at the plugin root. It is a lightweight, persistent memory store for SGE skills — now backed by **`sge-cortex`** (SPEC-052): a WTP-owned, vendored server on Node's built-in `node:sqlite`, shipped as a single committed bundle with no runtime install. It replaced the third-party `mcp-memory-libsql`.
 
-- The store lives in a local SQLite file under the consumer repo's git-ignored `memory/` directory; the server resolves that path via `CLAUDE_PROJECT_DIR` so memory stays **per-repo** (see [`docs/sge-memory.md`](docs/sge-memory.md)) — never committed.
+- The store is a local SQLite file keyed on the consumer repo's identity (its git `origin`), kept outside the working tree under `~/.claude/sge-memory/`, so memory stays **per-repo** and is never committed (see [`docs/sge-memory.md`](docs/sge-memory.md)).
 - It is **optional and non-blocking**: skills degrade gracefully when it is absent. Skills that use it should always pass an explicit namespace (`sge:pipeline-state`, `sge:review-verdicts`, `sge:decisions`, `sge:conflict-map`).
 
 See [`docs/sge-memory.md`](docs/sge-memory.md) for details. (Wiring individual skills to it is follow-up work.)
