@@ -33,7 +33,7 @@ Check current session token consumption against the active spec's `BudgetPolicy`
 
 ### Step 1: Locate accumulated usage
 
-The `TokenUsageRecord` rows live in the local JSONL sidecar (written by the plugin's own token-metering hook — absent means no data yet):
+The `TokenUsageRecord` rows live in the local JSONL sidecar (written by the plugin's own token-metering hook on hosts that support it — see `docs/token-metering.md`; an **absent** file means metering is unavailable in this repo, not zero usage):
 
 ```bash
 JSONL="${REPO_ROOT}/memory/token-usage.jsonl"
@@ -63,7 +63,7 @@ node "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/cost-guard/
 ```
 
 Branch on the exit code:
-- **0** — verdict `ok` (or no usage data: stdout has `"noData": true` — report "No usage data found for this spec/session" and exit cleanly; do not block the session)
+- **0** — verdict `ok`; or no usage data (`"noData": true` — report "No usage data found for this spec/session"); or no sidecar at all (`"meteringUnavailable": true` — report "Token metering unavailable in this repo (not zero usage) — see docs/token-metering.md"; never render it as 0%). Exit cleanly either way; do not block the session
 - **1** — verdict `alert`
 - **2** — verdict `deny` (only possible when `policy.action` is `"deny"`)
 - **64** — usage/internal error: report the stderr message, then exit ok (soft gate — never block on a tool error)

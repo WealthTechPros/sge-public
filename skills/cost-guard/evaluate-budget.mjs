@@ -18,8 +18,13 @@
  * Inputs:
  *   --jsonl <path>       memory/token-usage.jsonl sidecar. TokenUsageRecord rows
  *                        are summed (inputTokens/outputTokens; cache tokens and
- *                        session_end events are ignored). Missing file or zero
- *                        matching rows => "no usage data" verdict, exit 0.
+ *                        session_end events are ignored). Zero matching rows =>
+ *                        "no usage data" verdict, exit 0. A MISSING file means
+ *                        no metering producer ran in this repo (e.g. a host the
+ *                        token-meter hook cannot read, such as GitHub Copilot
+ *                        CLI — #2760) => "metering unavailable" verdict
+ *                        (meteringUnavailable: true, usagePercent: null), exit 0.
+ *                        Never reported as zero usage.
  *   --spec / --session   Filter JSONL rows by specId / sessionId.
  *   --input-tokens /     Pre-summed totals; bypasses JSONL reading (used when the
  *   --output-tokens      caller already aggregated usage, e.g. from Cortex).
@@ -34,7 +39,7 @@
  * Output (stdout): single JSON object —
  *   { action: "ok"|"alert"|"deny", reason, usagePercent,
  *     totalInputTokens, totalOutputTokens, policy, specId, sessionId,
- *     noData, policySource: "inline"|"file"|"default" }
+ *     noData, meteringUnavailable, policySource: "inline"|"file"|"default" }
  *
  * Exit codes (the skill branches on these):
  *   0 — ok    (within budget; also "no usage data" — soft gate never blocks)
@@ -234,6 +239,7 @@ function main() {
   let totalInputTokens;
   let totalOutputTokens;
   let noData = false;
+  let meteringUnavailable = false;
 
   if (args.inputTokens !== undefined || args.outputTokens !== undefined) {
     totalInputTokens = Number(args.inputTokens ?? 0);
@@ -246,15 +252,23 @@ function main() {
     totalInputTokens = summed.totalInputTokens;
     totalOutputTokens = summed.totalOutputTokens;
     noData = summed.fileMissing || summed.matched === 0;
+    meteringUnavailable = summed.fileMissing;
   } else {
     fail('Provide either --jsonl <path> or --input-tokens/--output-tokens');
   }
 
   const { policy, policySource } = resolvePolicy(args);
 
-  const verdict = noData
-    ? { action: 'ok', reason: 'No usage data found for this spec/session', usagePercent: 0 }
-    : evaluateBudget(totalInputTokens, totalOutputTokens, policy);
+  const verdict = meteringUnavailable
+    ? {
+        action: 'ok',
+        reason:
+          'Token metering unavailable: no usage sidecar exists for this repo, so no metering producer ran here (not zero usage)',
+        usagePercent: null,
+      }
+    : noData
+      ? { action: 'ok', reason: 'No usage data found for this spec/session', usagePercent: 0 }
+      : evaluateBudget(totalInputTokens, totalOutputTokens, policy);
 
   process.stdout.write(JSON.stringify({
     ...verdict,
@@ -265,6 +279,7 @@ function main() {
     specId: args.spec ?? null,
     sessionId: args.session ?? null,
     noData,
+    meteringUnavailable,
   }, null, 2) + '\n');
 
   process.exit(verdict.action === 'deny' ? 2 : verdict.action === 'alert' ? 1 : 0);
