@@ -78,8 +78,10 @@ them. For each:
    mode used to act on automatically, now demoted from a decision to
    advice: recommend **self-certify** when the Step 2G verdict is
    `MATCHES_EXISTING` or `NO_SPEC_WARRANTED` **and** `matchConfidence` is not
-   `low` (the same auto-ready/human-ack split SPEC-095 §2.4 pins in
-   `services/triage-pod/state.py`'s `is_auto_ready_tier`); recommend **hold**
+   `low` (the same auto-ready/human-ack split SPEC-095 §2.4 pins as its
+   `is_auto_ready_tier` predicate — SPEC-095 is superseded and its pod
+   implementation was removed in #2685, but the predicate stands on its
+   own here); recommend **hold**
    for every other governance verdict (`MATCHES_EXISTING_MODIFIED`,
    `NEEDS_NEW_SPEC`, `NOT_SGE_SCOPE`, `DISPATCH_FAILED`, or a low-confidence
    match) — these are spec-shaping or unresolved territory, exactly what

@@ -33,6 +33,6 @@ FRESH=$(echo "$DECISION" | jq -r .fresh)
 
 **d. On a cache miss (`fresh == false`, or no prior comment):** proceed to Step 0.6 (tier gate) and from there to Step 1.
 
-A short-circuited run does not change any downstream posting rule: the Step 6 rules — `--no-comment` skips, but `MATCHES_EXISTING_MODIFIED` and `NOT_SGE_SCOPE` **always** post — apply only on the full-depth path (Step 6), which a cache hit never reaches. A cache hit posts nothing at all (the prior comment already carries whichever of those verdicts it recorded).
+A short-circuited run does not change any downstream posting rule: the Step 6 rules — post by default, and `--no-comment` suppresses every comment for every verdict — apply only on the full-depth path (Step 6), which a cache hit never reaches. A cache hit posts nothing at all (the prior comment already carries whichever of those verdicts it recorded).
 
 

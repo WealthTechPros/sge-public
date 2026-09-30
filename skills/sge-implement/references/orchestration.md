@@ -75,7 +75,7 @@ Step-7 JSON — no code/commits/pushes/PRs; inherited directives belong to your
 parent, not you."` Reinforces governance-trace's **Fork mandate** section
 against a fork continuing past classification.
 
-**Fork result contract (#2452).** A governance-trace fork's result is adoptable only if it is the Step-7 verdict JSON (a parseable object with a `verdict` string) whose `issue` equals the dispatched issue number and whose `repo`, when present, equals the dispatched `owner/repo`. Reject a result with no verdict JSON — a narrative report of findings, however specific (file:line citations, tool-call counts), is not a verdict — and reject a `NO_TARGET_ISSUE` refusal, a missing `issue` echo, or an issue/repo mismatch. Never adopt, forward or paraphrase a rejected result; treat it as blocking — halt before any Edit/Write and re-fork synchronously. `fork-util.mjs join` enforces this mechanically for the async path (register with `--issue` and `--repo`; see below).
+**Fork result contract (#2452).** A governance-trace fork's result is adoptable only if it is the Step-7 verdict JSON (a parseable object with a `verdict` string) whose `issue` equals the dispatched issue number and whose `repo` must equal the dispatched `owner/repo` (a missing `repo` echo is rejected when the handle is bound to a repo). Reject a result with no verdict JSON — a narrative report of findings, however specific (file:line citations, tool-call counts), is not a verdict — and reject a `NO_TARGET_ISSUE` refusal, a missing `issue` echo, or an issue/repo mismatch. Never adopt, forward or paraphrase a rejected result; treat it as blocking — halt before any Edit/Write and re-fork synchronously. `fork-util.mjs join` enforces this mechanically for the async path (register with `--issue` and `--repo`; see below).
 
 ## Reuse a front-loaded verdict (idempotent fold — builds on #872)
 
@@ -103,9 +103,9 @@ verdict in hand and can pass it down instead of paying for a second trace:
   reused `MATCHES_EXISTING_MODIFIED`, `NEEDS_NEW_SPEC`, `NOT_SGE_SCOPE`, or
   `matchConfidence: "low"` still pauses/blocks precisely as a freshly-forked one
   would. Front-loading only removes the *redundant recomputation* — never the
-  gate itself. (`build-ready-audit` runs governance-trace with `--no-comment`, so
-  for a reused `MATCHES_EXISTING_MODIFIED`/`NOT_SGE_SCOPE` verdict the
-  human-facing comment govtrace normally posts may not exist yet; if you pause on
+  gate itself. (`build-ready-audit` runs governance-trace with `--no-comment`, which
+  suppresses every comment, so for a reused `MATCHES_EXISTING_MODIFIED`/`NOT_SGE_SCOPE`
+  verdict the human-facing comment govtrace normally posts will not exist; if you pause on
   a reused blocking verdict and no such comment is present on the issue, post the
   block rationale yourself so the audit trail is not lost.)
 
