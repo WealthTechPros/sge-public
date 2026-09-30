@@ -782,3 +782,15 @@ warning and returns 0 on any API failure — a heartbeat is enrichment on top of
 Regression coverage: `skills/tests/pr-review-claim-heartbeat.test.sh`,
 `skills/tests/pr-review-claim-heartbeat-behavioural.test.sh` (scenarios 6–7 exercise the
 owner-mismatch and absolute-ceiling guards specifically).
+
+## Head-scoped gate labels (wtp-org#992 item 4)
+
+A verdict label (`pr-reviewed`, `changes-requested`, `agent-reviewed`) judges exactly one commit: the `commit:` in the latest trusted `sge-verdict` block. After the head moves, the label describes a superseded commit.
+
+The currency rule lives in one place, `skills/pr-review/gate-labels.sh` (`classify`, `current`, `list`). Its Python twin is `services/review-daemon-poc/gate_labels.py`. Both are pinned to the shared fixture table `gate-labels.fixtures.tsv` by `skills/tests/gate-labels-parity.test.sh`.
+
+- **Merge gates** use `gate-labels.sh current`, for example `sge-auto-merge.yml` step 2.1. A label counts only when its verdict covers the bound head. A stale or unproven label reads as absent, so the gate fails closed.
+- **Push-time writer:** `pr-labels.sh sync-check`, run by `pr-reviewed-staleness.yml`, strips every provably stale verdict label on `synchronize`.
+- **Daemon review selection** re-selects a PR whose `pr-reviewed` is provably stale, and does so again at dispatch time (`is_still_reviewable`).
+- **Holds** (`hold`, `do-not-merge`, `needs-human`, `blocked`) are not verdict labels. A push never releases one.
+- **`hold-gate.yml`** reads the PR's labels from the API at run time, not from the event payload. A job re-run replays the original payload, so it could not see a hold that changed after the event.

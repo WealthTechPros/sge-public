@@ -42,82 +42,13 @@ The `pr-reviewing` **label** is the real mutex — it is the only signal that `p
 
 ## TTL self-heal logic (issue #1312 AC2)
 
-The stale-claim sweep (`list_stale_reclaimable_changes`) treats a claim as
-**orphaned** (reclaimable) when **both** conditions hold:
-
-1. `claimedAt + ttl` has elapsed (the base TTL window).
-2. No **qualifying** `sge-claim-heartbeat` comment was posted within the last
-   `ttl` seconds (qualifying rules below).
-
-A heartbeat comment (see below) posted by the daemon during a long dispatch
-extends the effective window, so a review that legitimately takes > 15 minutes is
-**not** reclaimed while the daemon is running.
-
-### What makes a heartbeat qualify (issues #2229, #2246)
-
-Claim and heartbeat comment bodies are **untrusted data** — the fences are
-public and any PR commenter can post one. Four rules bound what they can do:
-
-| Rule | Effect |
-| --- | --- |
-| **Owner-bound** | Only a heartbeat whose `owner` matches the claim's `owner` counts. Un-bound, any commenter's heartbeat could keep *any* claim alive. |
-| **Claim-ordered** | Only a heartbeat posted at/after the claim's `claimedAt` counts, so a leftover heartbeat from a prior claim can't resurrect a later one. |
-| **Absolute ceiling** | Past `claimedAt + CLAIM_MAX_LIFETIME_SECONDS` (default 14400 s / 4 h) **no** heartbeat keeps the claim alive — a wedged or malicious heartbeat loop cannot hold the mutex forever. Bash parity: `SGE_REVIEW_CLAIM_MAX_LIFETIME`. The ceiling also clamps an inflated `ttl`, so the TTL check alone cannot outlive it either. |
-| **Author-authenticated** | The claim comment and each heartbeat must be *posted by* the daemon, not merely *claim to be* it. Owner-binding alone is spoofable, because the owner string is plainly visible in the claim comment: a forged *later* claim naming a different owner would otherwise displace the genuine one, stop its real heartbeats matching, and hand an in-flight review's mutex to the forger. Anchors below. |
-
-Unlike an `sge-verdict` block — which a human OWNER may legitimately post by
-hand — a claim or heartbeat has exactly **one** legitimate author. So the anchor
-is *identity*, never author association:
-
-* `REVIEW_DAEMON_TRUSTED_VERDICT_AUTHORS` when the operator pins one;
-* the daemon's own resolved posting login;
-* `APP_ACTOR_LOGIN` (`REVIEW_DAEMON_APP_ACTOR`, default `sge[bot]`).
-
-Association (`OWNER`/`MEMBER`/`COLLABORATOR`) is deliberately **not** accepted
-here: on a private repo that is everyone who can comment, so the gate would
-block nobody — and conversely a GitHub App bot reports association `NONE`, so an
-association check would make the daemon reject *its own* claims and
-double-dispatch onto its own in-flight reviews. The daemon's own identity is
-always an anchor, even beside a pinned allow-list, because a daemon that cannot
-recognise its own claim comment cannot hold its own mutex.
-
-Ordering matters for the last rule: a comment that cannot be authenticated at
-all (fetched by a query that did not select the author fields) is **honoured**,
-not discarded — dropping it would hide live claims and make the daemon
-double-dispatch, breaking the mutex outright. Both queries feeding the sweep
-select the author fields, so this only covers legacy call paths.
-
-`claimedAt`/`ttl` are likewise never trusted at face value. A non-string,
-malformed, timezone-naive, or future-dated `claimedAt`, and a non-numeric,
-infinite, or non-positive `ttl`, all degrade to the same fallback a missing
-field takes. This matters beyond the one PR: the sweep has no per-PR
-`try`/`except` and neither does the fleet loop above it, so an uncaught parse
-error aborts the scan for **every** remaining PR and repo — and repeats every
-poll cycle for as long as the comment exists.
-
-### Heartbeat comment format
-
-```
-```sge-claim-heartbeat
-{"owner":"<agent-id>","at":"<ISO-8601-UTC>"}
-```
-```
-
-The daemon posts a heartbeat comment every `CLAIM_HEARTBEAT_INTERVAL_SECONDS`
-(default 600 s, configurable) for each in-flight dispatch.  The sweep looks for
-a *qualifying* heartbeat comment within the claim's TTL window — if one exists,
-the claim is still live regardless of `claimedAt`, up to the absolute ceiling.
-
-### Fallback (backward compat)
-
-For PRs claimed before issue #1312 was deployed (label-only claims with no
-comment), the sweep falls back to the `pr-reviewing` label's `LabeledEvent`
-timestamp from the PR timeline, compared against the daemon's
-`REVIEW_DAEMON_CLAIM_TTL_SECONDS` policy (default 2700 s, 45 min).
+How a stale `pr-reviewing` claim is detected and reclaimed (TTL, heartbeats, what qualifies): [references/ttl-self-heal.md](references/ttl-self-heal.md).
 
 ---
 
 ## Skip-on-live-claim rule (issue #1312 AC3)
+
+Foreign `agent-working`/fresh `pr-fixing` claims skip both lanes ([shared protocol](../lib/shared-claim-protocol.md)).
 
 Before attempting to claim a PR, any actor checks for an existing live claim
 comment:
@@ -337,6 +268,9 @@ Dispatch logs record the lane in their header (`# dispatch PR #N @ <ts> kind: fi
 | `REVIEW_DAEMON_FIX_IGNORE_CHECKS` | `hold-gate,Require pr-reviewed label` | Comma-separated check names that never trigger a fix. |
 | `REVIEW_DAEMON_FIX_FINDINGS`, `REVIEW_DAEMON_AUTO_MERGE*` | off | Delegation policy -- see [references/delegation-policy.md](references/delegation-policy.md). |
 | `REVIEW_DAEMON_FIX_MODEL` | unset | Model for fix dispatches (e.g. `sonnet`). Unset: fixes go through model routing at a fixed **sonnet** tier (the routing config's `sonnet` model; a fix is not sized by the PR's diff, so the per-path/size rules do not apply), with `ANTHROPIC_MODEL` still a hard override. Precedence: `REVIEW_DAEMON_FIX_MODEL` > `ANTHROPIC_MODEL` > routed sonnet tier. |
+| `REVIEW_DAEMON_RED_MAIN_*` | on | Red default-branch lane: [references/red-main.md](references/red-main.md). |
+
+**Red default branch** (wtp-org#992 pattern 9): when a fleet repo's default branch fails a required check, the fix lane opens one fix (or culprit-revert) PR -- [references/red-main.md](references/red-main.md).
 
 ---
 
@@ -348,6 +282,10 @@ findings -- is **delegation policy** (`delegation_policy.py`, one object, one
 accessor `get_policy()`), with **neutral defaults**: nothing delegated, no
 operator values built in. Gates, env knobs and the policy-file shape:
 [references/delegation-policy.md](references/delegation-policy.md).
+
+## Approval carry and update-behind (wtp-org#992 pattern 9)
+
+Approved PRs that fall behind are updated, and their approval is carried across a clean base update with no model call: [references/approval-carry.md](references/approval-carry.md).
 
 ---
 
@@ -370,73 +308,7 @@ pass / fail / release_review_marker
 
 ## Outage-aware dispatch (SPEC-103, issue #1341)
 
-During a **GitHub degradation event** the daemon's box-saturation and
-failure-tracking machinery would otherwise misfire — GitHub's own 503s, checkout
-failures, and HTML error pages are not the box over-committing, and an
-outage-era artefact re-read is unreliable, not a proven no-op. The daemon reads
-the **shared outage predicate** — `is_github_degraded()` from
-`services/review-daemon-poc/github_status.py` (the in-process port of
-`scripts/github-status.sh`; both read GitHub Status API v2, cached ~5 min,
-fail-safe to *degraded* on an unreachable API) — at **three** decision points and
-switches each from *failure* to **retry-later**:
-
-| Decision point | Healthy (`indicator == "none"`) | Degraded (`indicator != "none"`) |
-|---|---|---|
-| **Timed-out / failed dispatch** (AC1) | `_track_failed_dispatch` increments the per-PR no-op/quarantine counter; PR marches toward `pr-review-stalled` | `_claim_and_dispatch` releases the claim and returns `None` (retry-later). The attempt is **not** counted against the 1800 s timeout budget and the **no-op/quarantine counter is not incremented**. |
-| **Cycle wall-clock timeout** (AC2) | `_AdaptiveWidth.observe(timed_out=True)` halves effective dispatch width for the backoff window | `run_once` reports the cycle as clean (`timed_out=False`); width is **held at the configured value** — no backoff armed |
-| **Exit-0-no-artefact read** (#1250, AC3) | an exit=0-no-artefact dispatch whose last SDK message is a SessionStart hook_started event with zero tool calls is reclassified as an infra failure and does NOT increment the per-PR quarantine counter (or is auto-retried once within the same cycle), regardless of GitHub health; every other exit=0-no-artefact dispatch is still reported as a silent no-op **failure** (`ok=False`), counter increments | released and returned `None` (retry-later); the unreadable artefact is a transient read failure, not a no-op |
-
-**Retry-later contract.** "Retry-later" means the daemon releases its
-`pr-reviewing` claim and returns a `None` verdict (omitted from the cycle's
-outcome map, no `report_verdict`), so the **next poll cycle re-dispatches** the PR
-once GitHub recovers. Nothing is quarantined, no width is lost, no alert fires for
-an infrastructure-caused blip.
-
-**Fail-safe.** Because an unreachable status API classifies as *degraded*, a
-daemon that cannot confirm GitHub is healthy errs toward retry-later — it never
-quarantines a PR or halves its width on an **unconfirmed** window. A briefly
-re-queued PR is strictly better than a falsely-quarantined one.
-
-**Healthy-path parity.** When `is_github_degraded()` is false, all three points
-behave byte-identically to the pre-outage-aware daemon — the predicate is the
-only new branch and is inert while GitHub is operational. A dispatch that *raises*
-(vs. returns not-ok) is a **transient** failure (see "Self-healing quarantine"
-below): backed off, never counted.
-
-**SessionStart-hook-terminate carve-out (issue #2502).** One sub-case of the
-healthy-GitHub AC3 cell is further split, independent of `is_github_degraded()`:
-if the dispatch's SDK stream (captured as `DispatchResult.detail`, requires
-`include_hook_events=True` on the dispatch's `ClaudeAgentOptions`) ended with a
-bare `HookEventMessage(subtype='hook_started', hook_event_name='SessionStart',
-...)` and zero tool calls anywhere in the run, the session was torn down while
-still inside its own startup hook — before the dispatched skill ever got a
-turn. `daemon.py`'s `_HookTerminateObserver` classifies this from the SDK's
-**typed** events over the **whole** stream (not text matching over the
-20-event `detail` tail, which carries PR-steerable model output), and carries
-the result as `DispatchResult.hook_terminate`. `_claim_and_dispatch`
-reclassifies it the same way as an outage-era read failure: release the claim,
-return `None` (retry-later), skip `_track_failed_dispatch` — so it does **not**
-walk the PR toward `pr-review-stalled`. This is a harness/infra failure, not a
-review outcome, so it is checked and applied regardless of GitHub health.
-Every other exit=0-no-artefact dispatch on a healthy GitHub (permission-denied
-tools, skill back-off, plugin load failure, turn-budget exhaustion) still
-falls through to the original silent-no-op failure path.
-
-**Retry cap (issue #2652).** Unlike the outage carve-out, nothing time-bounds
-a SessionStart hook that fails on every dispatch, so the carve-out is capped:
-only the first `REVIEW_DAEMON_HOOK_TERMINATE_RETRY_CAP` (default **3**; `0`
-disables the carve-out) *consecutive* hook-terminates for a PR are
-retry-later. From the next one on, the dispatch is a **transient** failure
-(self-healing quarantine, below): jittered exponential backoff, an uncounted
-`sge:dispatch-transient` breadcrumb naming the cap, and **never** quarantine
-(superseding #2652's count-then-quarantine, Rob 2026-09-29). Any other
-dispatch outcome breaks the streak. The streak counter is in-memory, so a
-daemon restart re-grants at most one cap's worth of retries. Every dispatch
-span carries `sge.dispatch.hook_terminate` (true/false) for fleet-wide
-alerting. **Job mode** (`REVIEW_DAEMON_SINGLE_PR`) does not apply the
-carve-out: a one-shot container has no next poll cycle, so returning
-retry-later would leave no trace at all — the attempt is recorded as a
-transient failure (uncounted breadcrumb naming the hook-terminate).
+During a GitHub degradation event (the shared `is_github_degraded()` predicate), outage-caused timeouts and failures never shrink dispatch width or count against a PR: [references/outage-aware-dispatch.md](references/outage-aware-dispatch.md).
 
 ## Self-healing quarantine (Rob, 2026-09-29)
 

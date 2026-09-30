@@ -79,6 +79,7 @@ Do not run the swarm from this file.
 
 - Worktree placement: [`worktrees`](../worktrees/SKILL.md)
 - Cross-repo / hub targeting: [`gh-repo`](../gh-repo/SKILL.md)
+- Before a lane touches an existing PR: `${CLAUDE_PLUGIN_ROOT}/scripts/pr-claim.sh check` / `take --lane work` / `release` ([`shared-claim-protocol`](../lib/shared-claim-protocol.md)), so it never collides with PR Warden
 - Run reporting: [`exit-report`](../exit-report/SKILL.md) — a `--duration` run
   ends with team-pipeline's Phase 6 exit report (`skill: "team-pipeline"`;
   `stopReason: "bound-hit"` when the deadline fired)
