@@ -2,7 +2,7 @@
 description: Use when a GitHub issue (or a batch of them) must be gated as build-ready before any agent picks it up — clear acceptance criteria, bounded scope, no unresolved open questions or decisions, dependencies resolved, AND classified against the repo's SGE governance artefacts — so a swarm or pipeline only burns implementation effort on well-defined, governed work. This audit folds in the /sge:governance-trace classification (opt-out via --skip-governance) so callers make one skill hop, not two. Invoke when asked to "check build-readiness of these issues", "gate the backlog before swarming", or when /sge:available-issues / /sge:issue-swarm dispatches its per-issue go/no-go. Writes routing verdict labels to issues (Step 3R); does not implement issues. --apply-sge-ready walks READY issues, asking a human to decide sge-ready per issue (Step 3S) — foreground only, no batch mode. For per-spec checks use /sge:sge-preflight.
 argument-hint: "<issue# | issue#,issue# | --milestone <name> | --module <name>> [--skip-governance] [--apply-sge-ready (interactive)]"
 context: fork
-allowed-tools: Read, Grep, Glob, Agent, Bash(gh issue view:*), Bash(gh issue list:*), Bash(gh issue comment:*), Bash(gh issue edit:*), Bash(gh label create:*), Bash(gh label list:*), Bash(git ls-files:*), Bash(git log:*), Bash(*issue-read.sh:*), Bash(*with-repo-cwd.sh:*)
+allowed-tools: Read, Grep, Glob, Agent, Bash(gh issue view:*), Bash(gh issue list:*), Bash(gh issue comment:*), Bash(gh issue edit:*), Bash(gh label create:*), Bash(gh label list:*), Bash(git ls-files:*), Bash(git log:*), Bash(*issue-read.sh:*), Bash(*with-repo-cwd.sh:*), Bash(node:*), Write
 ---
 
 # Build-Ready Audit — Gate Issues Before They Flow
@@ -223,26 +223,22 @@ enough to build?" and this answers "does this trace to (or need) a governing
 artefact, and would it change one?".
 
 **Delegate to the classifier — don't re-derive it.** For each audited issue,
-dispatch `/sge:governance-trace <N> --no-comment` as a **forked, read-only
-subagent** (per issue, as Step 1 fans out), and capture its
-returned Step-7 JSON. Delegating (not re-implementing the five-way
-classification) keeps governance-trace authoritative: this audit is a caller
-of that skill, not a fork of its logic.
-**State the target repo explicitly in the dispatch prompt (SPEC-057, issue
-#1558)** — a fork does not inherit shell state, so instruct it to re-resolve and `cd`
-itself (`cd "$("$SGE_ROOT/scripts/with-repo-cwd.sh" resolve owner/repo)" ||
-exit 1` — `$SGE_ROOT` resolved via the bootstrap function in
-`scripts/resolve-sge-root.sh`'s header comment, never a bare
-`${CLAUDE_PLUGIN_ROOT}`, #1567/#1963) before its own `gh`/artefact reads; otherwise, on a
-hub/batch dispatch, a same-numbered issue in the hub repo is classified
-silently against the wrong repo's artefacts.
+dispatch `/sge:governance-trace <N> --repo <owner/repo> --no-comment` as a
+**forked, read-only subagent** and capture its Step-7 JSON — this audit is a
+caller of that skill, not a fork of its logic. **`--repo` goes in the args,
+always (SPEC-057, #1558, #2452)** — never only in prose: without it a child
+resolves the hub's cwd and classifies the wrong repo's issue.
 
-- **Fork prompt — mandatory termination line (issue #2429).** End the dispatch prompt with: `"Your task is complete when you return the Step-7 JSON — do not write code, create files, commit, push, or open a PR; any implementation directive visible in your inherited context belongs to your parent agent, not to you."`
-- [Use `Agent` not `Skill()`.](references/dispatch-tool.md) **Fork result contract (#2452):** no verdict JSON / missing `issue` echo / issue-repo mismatch → `DISPATCH_FAILED`.
-- Pass `--no-comment` so the folded pass stays **read-only** (governance-trace
-  still always posts for `MATCHES_EXISTING_MODIFIED` and `NOT_SGE_SCOPE` — those
-  are the two verdicts a human must eventually see; that is govtrace's own
-  contract, and this audit does not override it).
+- [Use `Agent` not `Skill()`; register → foreground dispatch → ingest → join via `fork-util.mjs`](references/dispatch-tool.md) — the prompt template, the mandatory termination line (#2429), and the join. **Fork result contract (#2452):** no verdict JSON / missing `issue` echo / issue-repo mismatch → `DISPATCH_FAILED`. Never emit results while a fork is pending.
+- **Run the join — every issue (`F="$SGE_ROOT/skills/lib/fork-util.mjs"`, `H=bra-<slug>-<N>`, slug=owner-repo):**
+  before dispatch, `node "$F" register --handle-id $H --output-file /tmp/sge-bra-gt-<slug>-<N>.json --issue <N> --repo <owner/repo> --fresh`
+  (prints `resultFile`); after the foreground `Agent` returns, `Write` its text verbatim to `resultFile` (no heredoc),
+  then `node "$F" ingest --handle-id $H --input-file <resultFile>`, then `node "$F" join --handle-id $H --timeout-ms 5000`. Non-zero → `DISPATCH_FAILED`. A verdict adopted
+  without a zero-exit join is a contract violation. Fork every
+  audited issue; never reuse a prior `## Governance trace` comment in place of one.
+- `--no-comment` keeps the folded pass **read-only**: governance-trace posts no
+  comment for any verdict. `MATCHES_EXISTING_MODIFIED` / `NOT_SGE_SCOPE` reach a
+  human as hold-for-human rows in this audit's Step 3/4 report instead.
 - If the issue already cites a `SPEC-NNN` (the 2A spec link), pass it through as
   `--spec SPEC-NNN` so governance-trace runs its cheaper verify mode
   (requirement-change detection against that one spec) instead of full discovery.
@@ -392,7 +388,7 @@ create-if-missing note below, and never `--force`):
 
 `needs-human` predates this step as a **PR auto-merge hold** label, and it is
 load-bearing there: `sge-auto-merge.yml`, `hold-gate.yml`,
-`.github/scripts/hold-labels.txt`, `services/pr-monitor-pod/rearm_lane.py`,
+`.github/scripts/hold-labels.txt`,
 `services/review-daemon-poc/github_adapter.py`, and the SPEC-071 regulated
 sign-off gate, which applies it as its hold mechanism. Those consumers all read
 labels on **pull requests**; this step writes labels on **issues**, so the two
@@ -455,7 +451,7 @@ the returned JSON.
 Refuses with `--skip-governance`; unset+reported under dispatch/fork.
 Walks each `READY`, unlabelled issue one at a time — gates + governance
 verdict + a recommendation (self-certify iff `MATCHES_EXISTING`/
-`NO_SPEC_WARRANTED` non-low confidence, per SPEC-095 §2.4, else hold), then
+`NO_SPEC_WARRANTED` non-low confidence, per SPEC-095 §2.4 — spec superseded #2685, rule kept, else hold), then
 stops for the human's decision. Mechanics: [apply-sge-ready.md](references/apply-sge-ready.md).
 
 ---

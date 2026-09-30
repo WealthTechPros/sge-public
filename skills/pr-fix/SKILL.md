@@ -307,6 +307,10 @@ For each comment, triage by severity — **must-fix** (bugs, security, missing v
 
 Don't silence a comment by suppressing the check it points at — that's the same anti-pattern as quarantining a test. Fix what the reviewer flagged, or justify the deferral in the reply.
 
+### Review-findings mode
+
+For an SGE REQUEST_CHANGES verdict, see [references/review-findings-mode.md](references/review-findings-mode.md).
+
 ---
 
 ## Spec-drift gate failures — control-preserving resolution
