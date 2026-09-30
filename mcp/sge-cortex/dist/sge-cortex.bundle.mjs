@@ -9937,7 +9937,7 @@ var require_websocket = __commonJS({
     var http = __require("http");
     var net = __require("net");
     var tls = __require("tls");
-    var { randomBytes, createHash: createHash3 } = __require("crypto");
+    var { randomBytes, createHash: createHash4 } = __require("crypto");
     var { Duplex, Readable } = __require("stream");
     var { URL: URL2 } = __require("url");
     var PerMessageDeflate2 = require_permessage_deflate();
@@ -10605,7 +10605,7 @@ var require_websocket = __commonJS({
           abortHandshake(websocket, socket, "Invalid Upgrade header");
           return;
         }
-        const digest = createHash3("sha1").update(key + GUID).digest("base64");
+        const digest = createHash4("sha1").update(key + GUID).digest("base64");
         if (res.headers["sec-websocket-accept"] !== digest) {
           abortHandshake(websocket, socket, "Invalid Sec-WebSocket-Accept header");
           return;
@@ -10974,7 +10974,7 @@ var require_websocket_server = __commonJS({
     var EventEmitter = __require("events");
     var http = __require("http");
     var { Duplex } = __require("stream");
-    var { createHash: createHash3 } = __require("crypto");
+    var { createHash: createHash4 } = __require("crypto");
     var extension2 = require_extension();
     var PerMessageDeflate2 = require_permessage_deflate();
     var subprotocol2 = require_subprotocol();
@@ -11281,7 +11281,7 @@ var require_websocket_server = __commonJS({
           );
         }
         if (this._state > RUNNING) return abortHandshake(socket, 503);
-        const digest = createHash3("sha1").update(key + GUID).digest("base64");
+        const digest = createHash4("sha1").update(key + GUID).digest("base64");
         const headers = [
           "HTTP/1.1 101 Switching Protocols",
           "Upgrade: websocket",
@@ -24610,7 +24610,7 @@ var StdioServerTransport = class {
 
 // src/db/store.ts
 import { createRequire } from "node:module";
-import { createHash } from "node:crypto";
+import { createHash as createHash2 } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname as dirname2 } from "node:path";
 
@@ -24762,24 +24762,37 @@ var RELATION_WEIGHT_MIGRATION_STATEMENTS = [
 
 // src/db/paths.ts
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, parse as parse3, resolve } from "node:path";
+import { basename, dirname, join, parse as parse3, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 var ROOT_MARKERS = [".git", "CLAUDE.md"];
 function findRepoRoot(startDir) {
   let dir = resolve(startDir);
   const { root } = parse3(dir);
-  for (let i = 0; i < 64; i++) {
+  for (let i = 0; i < 64 && dir !== root; i++) {
     if (ROOT_MARKERS.some((marker) => existsSync(join(dir, marker)))) {
-      return dir;
-    }
-    if (dir === root) {
       return dir;
     }
     dir = dirname(dir);
   }
-  return dir;
+  return null;
+}
+function findPluginRoot(startDir) {
+  let dir = resolve(startDir);
+  const { root } = parse3(dir);
+  for (let i = 0; i < 64 && dir !== root; i++) {
+    if (existsSync(join(dir, ".claude-plugin", "plugin.json"))) {
+      return dir;
+    }
+    dir = dirname(dir);
+  }
+  return null;
+}
+function isMarkedRepoRoot(dir) {
+  const abs = resolve(dir);
+  return abs !== parse3(abs).root && ROOT_MARKERS.some((m) => existsSync(join(abs, m)));
 }
 var SAFE_PATH_SEGMENT = /^[A-Za-z0-9._-]+$/;
 function isSafePathSegment(segment) {
@@ -24834,31 +24847,83 @@ function stableIdentityDbUrl(identity, homeDir) {
   const repo = parts[1] ?? identity;
   return `file:${join(homeDir, ".claude", "sge-memory", org, `${repo}.db`)}`;
 }
-function resolveDbUrl(opts = {}) {
+function isolatedWorkspaceDbUrl(workspaceDir, homeDir) {
+  const abs = resolve(workspaceDir);
+  const name = (basename(abs).replace(/[^A-Za-z0-9._-]/g, "_") || "workspace").slice(0, 64);
+  const key = process.platform === "win32" || process.platform === "darwin" ? abs.toLowerCase() : abs;
+  const hash = createHash("sha256").update(key).digest("hex").slice(0, 12);
+  return `file:${join(homeDir, ".claude", "sge-memory", "_unresolved", `${name}-${hash}.db`)}`;
+}
+var CortexDbPathError = class extends Error {
+  constructor(detail) {
+    super(
+      `[sge-cortex] cannot resolve an isolated per-repo memory DB: ${detail}. Refusing to fall back to a shared or filesystem-root DB. Launch the server from inside a git checkout with an \`origin\` remote, or set CORTEX_TARGET_REPO=<org>/<repo> (or LIBSQL_URL=file:<path>) in the MCP server env.`
+    );
+    this.name = "CortexDbPathError";
+  }
+};
+function resolveDbLocation(opts = {}) {
   const env = opts.env ?? process.env;
   const override = env.LIBSQL_URL?.trim();
   if (override) {
-    return override;
+    return { url: override, source: "LIBSQL_URL" };
   }
   const homeDir = opts.homeDir ?? homedir();
+  const getRemoteUrl = opts.getRemoteUrl ?? defaultGetRemoteUrl;
+  const identityOf = (dir) => {
+    const remoteUrl = getRemoteUrl(dir);
+    return remoteUrl ? normalizeRepoIdentity(remoteUrl) : null;
+  };
   const targetRepo = env.CORTEX_TARGET_REPO?.trim();
   if (targetRepo) {
     const identity = normalizeRepoIdentity(targetRepo);
     if (identity) {
-      return stableIdentityDbUrl(identity, homeDir);
+      return { url: stableIdentityDbUrl(identity, homeDir), source: "CORTEX_TARGET_REPO" };
     }
   }
-  const startDir = env.CLAUDE_PROJECT_DIR?.trim() || opts.moduleDir || dirname(fileURLToPath(import.meta.url));
-  const getRemoteUrl = opts.getRemoteUrl ?? defaultGetRemoteUrl;
-  const remoteUrl = getRemoteUrl(startDir);
-  if (remoteUrl) {
-    const identity = normalizeRepoIdentity(remoteUrl);
+  const projectDir = env.CLAUDE_PROJECT_DIR?.trim();
+  if (projectDir) {
+    const identity = identityOf(projectDir);
     if (identity) {
-      return stableIdentityDbUrl(identity, homeDir);
+      return { url: stableIdentityDbUrl(identity, homeDir), source: "project-dir-git-remote" };
     }
+    if (isMarkedRepoRoot(projectDir)) {
+      return {
+        url: `file:${join(resolve(projectDir), "memory", "sge-memory.db")}`,
+        source: "project-dir-repo-marker"
+      };
+    }
+    return { url: isolatedWorkspaceDbUrl(projectDir, homeDir), source: "isolated-unresolved" };
   }
-  const repoRoot = findRepoRoot(startDir);
-  return `file:${join(repoRoot, "memory", "sge-memory.db")}`;
+  const cwd = opts.cwd ?? process.cwd();
+  const cwdIdentity = identityOf(cwd);
+  if (cwdIdentity) {
+    return { url: stableIdentityDbUrl(cwdIdentity, homeDir), source: "cwd-git-remote" };
+  }
+  const moduleDir = opts.moduleDir ?? dirname(fileURLToPath(import.meta.url));
+  const pluginRoot = findPluginRoot(moduleDir);
+  if (pluginRoot) {
+    throw new CortexDbPathError(
+      `CLAUDE_PROJECT_DIR is unset and the launch directory (${cwd}) has no git origin remote; the server runs from a plugin install (${pluginRoot}), whose own identity is never used for memory`
+    );
+  }
+  const moduleIdentity = identityOf(moduleDir);
+  if (moduleIdentity) {
+    return { url: stableIdentityDbUrl(moduleIdentity, homeDir), source: "module-git-remote" };
+  }
+  const repoRoot = findRepoRoot(moduleDir);
+  if (repoRoot) {
+    return {
+      url: `file:${join(repoRoot, "memory", "sge-memory.db")}`,
+      source: "module-repo-marker"
+    };
+  }
+  throw new CortexDbPathError(
+    "CLAUDE_PROJECT_DIR is unset, neither the launch directory nor the server install directory has a git `origin` remote, and no repo-root marker (.git / CLAUDE.md) exists below the filesystem root"
+  );
+}
+function resolveDbUrl(opts = {}) {
+  return resolveDbLocation(opts).url;
 }
 function fileUrlToFsPath(url) {
   if (!url.startsWith("file:")) {
@@ -24973,7 +25038,7 @@ function resolveSupportFloor(value) {
 }
 function observationContentHash(observations) {
   const normalised = observations.map((o) => o.trim().replace(/\s+/g, " ").toLowerCase()).join("\n");
-  return createHash("sha256").update(normalised).digest("hex");
+  return createHash2("sha256").update(normalised).digest("hex");
 }
 function trigramSet(value) {
   const s = `  ${value.trim().replace(/\s+/g, " ").toLowerCase()} `;
@@ -26791,7 +26856,7 @@ async function pollBrokerToken(deviceCode, opts) {
 }
 
 // src/config.ts
-import { createHash as createHash2 } from "node:crypto";
+import { createHash as createHash3 } from "node:crypto";
 function parseActiveScopes(raw) {
   const scopes = (raw ?? "").split(",").map((s) => s.trim()).filter((s) => s.length > 0);
   if (scopes.length === 0) {
@@ -26818,7 +26883,7 @@ function parseSourceType(raw) {
 }
 function hashSessionRef(raw) {
   if (!raw) return void 0;
-  return `session-${createHash2("sha256").update(raw).digest("hex").slice(0, 16)}`;
+  return `session-${createHash3("sha256").update(raw).digest("hex").slice(0, 16)}`;
 }
 function loadConfig(env = process.env) {
   const owner = env.SGE_CORTEX_OWNER;
@@ -27448,6 +27513,13 @@ async function acquireRemoteStore(brokerUrl, owner, repo, activeScopes, provenan
   }
   throw new Error("[sge-cortex] device code expired before authorisation");
 }
+function openLocalStore(storeOpts) {
+  const { url, source } = resolveDbLocation();
+  const path = fileUrlToFsPath(url) ?? ":memory:";
+  const shown = url.startsWith("file:") || url === ":memory:" ? path : "<non-file LIBSQL_URL>";
+  console.error(`[sge-cortex] local memory DB: ${shown} (resolved via ${source})`);
+  return openStore(path, storeOpts);
+}
 async function main() {
   const config2 = loadConfig();
   const { activeScopes } = config2;
@@ -27479,10 +27551,10 @@ async function main() {
       } else {
         console.error("[sge-cortex] broker unreachable, using local store:", err);
       }
-      store = openStore(void 0, storeOpts);
+      store = openLocalStore(storeOpts);
     }
   } else {
-    store = openStore(void 0, storeOpts);
+    store = openLocalStore(storeOpts);
   }
   const server = createServer(store);
   const transport = new StdioServerTransport();
@@ -27491,7 +27563,11 @@ async function main() {
 var invokedDirectly = typeof process.argv[1] === "string" && resolve2(process.argv[1]) === fileURLToPath2(import.meta.url);
 if (invokedDirectly) {
   main().catch((err) => {
-    console.error("[sge-cortex] fatal:", err);
+    if (err instanceof CortexDbPathError) {
+      console.error(err.message);
+    } else {
+      console.error("[sge-cortex] fatal:", err);
+    }
     process.exit(1);
   });
 }
