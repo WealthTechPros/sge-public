@@ -139,6 +139,25 @@ every session with no retry/backoff and no user-visible error is a rough
 edge worth reporting upstream to the Copilot CLI team too, independent of
 SGE.
 
+## Memory (sge-memory) under Copilot CLI
+
+Copilot CLI does not set Claude Code's `CLAUDE_PROJECT_DIR`, so the
+`sge-memory` server keys its database on the git `origin` of the directory
+Copilot CLI launched it from — start `copilot` from inside the repository
+checkout. The DB lives at `~/.claude/sge-memory/<org>/<repo>.db`, one per
+repository, and stays local.
+
+- Confirm which DB a session uses: the server logs
+  `[sge-cortex] local memory DB: <path> (resolved via <tier>)` to stderr at
+  startup (visible in `~/.copilot/logs/`). No memory content is logged.
+- Launched outside a git checkout with an `origin` remote, the server refuses
+  to start rather than share one DB across repos. Set
+  `CORTEX_TARGET_REPO=<org>/<repo>` (or `LIBSQL_URL=file:<path>`) in the MCP
+  server's `env` to pin it explicitly.
+- Builds before the #2759 fix could write a shared `C:\memory\sge-memory.db`.
+  See [`sge-memory.md`](sge-memory.md#authoritative-database-location-342-677-2759)
+  for how to import and retire it.
+
 ## Compatibility notes
 
 - Everything **upstream of install** (marketplace fetch, plugin install,

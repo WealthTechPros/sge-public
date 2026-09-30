@@ -6,10 +6,10 @@ accessor, `get_policy()`. The daemon ships **neutral defaults** -- merge arming
 off, review-findings fixing off, no org, repo or path values built in -- so an
 unconfigured daemon behaves exactly as before. An operator's values (which orgs
 may be merged, which never, which paths always need a human) belong in the
-operator's deployment configuration. The source today is environment variables
-(table below); a policy-file loader (`REVIEW_DAEMON_POLICY_FILE`, standing
-orders with ids) can replace it behind `get_policy()` without touching a call
-site.
+operator's deployment configuration: either a **policy file** named by
+`REVIEW_DAEMON_POLICY_FILE` (standing orders with ids, YAML or JSON -- see
+"Policy-file shape" below) or, when that is unset, environment variables (table
+below). Without a policy file behaviour is exactly the env-configured one.
 
 After a review dispatch whose artefact verdict is PASS (the formal verdict is
 posted first), `arm_auto_merge_if_eligible(port, change)` -- the one reusable
@@ -112,7 +112,21 @@ failing-check reasons win when both apply.
 
 ## Policy-file shape
 
-A policy-file loader populates the same object: `merge_rules` -- one
+`REVIEW_DAEMON_POLICY_FILE` names a YAML (needs PyYAML) or JSON document
+`{version: 1, orders: [{id, kind, ...}], approvals: [...]}`; `kind` is one of
+`scope` (`orgs`, `never_orgs` -- narrows, never widens, `REVIEW_DAEMON_ORGS`),
+`merge` (`rules`), `routine-fix`, `hold-release` (`trigger`, `requires`,
+non-empty `exclude_categories`/`exclude_paths`), `own-failures` (its id is
+recorded on transient-retry / quarantine-release decisions), `recorded-approvals`
+and `always-escalate`. The file is re-read when it changes. **Any** error
+(unreadable, unparseable, unknown kind, duplicate id, an unpinned or
+hold-ignoring merge rule, a merge org outside the scope order) yields a policy
+that delegates **nothing** and logs why. `REVIEW_DAEMON_AUTO_MERGE=0` still
+wins. The document is handed to each dispatched agent as
+`SGE_DELEGATION_POLICY_JSON` (blank without a file), which `/sge:pr-review`'s
+hold-handling reads (`skills/pr-review/references/delegation-policy.md`).
+
+The loader populates the same object: `merge_rules` -- one
 `MergeRule` per org: `org`, `action` (`arm-auto-merge` | `never-merge`),
 `method` (`squash` | `merge` | `rebase`), `pin_head`, `block_labels`,
 `exclude_paths` (`{"owner/repo" | "*": [globs]}`), `order` (the standing-order

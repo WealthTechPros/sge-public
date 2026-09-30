@@ -88,7 +88,7 @@ ACTIVE_LANE=$(rl_lane_manifest_active "$PR" review)
 1. **`state` is `MERGED` or `CLOSED`** → stop (mechanical: `rl_idempotency_check`, #1973).
 2. **`pr-reviewed` present AND `sge-verdict` `commit:` == `headRefOid`** → stop (mechanical: `rl_idempotency_check`, #1973).
 3. **`pr-reviewing` present** → likely in flight. `start-review` refuses with **exit 3** on a fresh claim (< `SGE_REVIEW_CLAIM_TTL_MIN`, default 30 min). On exit 3, back off and report — do not bypass the script with raw label edits. Stale claims (≥ TTL) auto-take-over; `--force-claim` = takeover.
-4. **Hold-handling gate** — draft-skip (`isDraft` → the reviewer NEVER runs `gh pr ready`), human-hold → advisory (a `hold`/`do-not-merge`/`needs-human`/`blocked` label or sign-off-pending marker), `HOLD:` body-marker detection (`apply-hold`), and the fail-closed `rl_hold_check` `case` (graduates only on `ok`; every `hold:*`/unrecognised/empty value fails closed to advisory, #1347). **Run it here** — full Stage 0 rules 4 & 5 + the gate bash block: [`hold-handling.md`](references/hold-handling.md) (#1291/#1347/#1393).
+4. **Hold-handling gate** — draft-skip (`isDraft` → the reviewer NEVER runs `gh pr ready`), human-hold → advisory (a `hold`/`do-not-merge`/`needs-human`/`blocked` label or sign-off-pending marker), `HOLD:` body-marker detection (`apply-hold`), and the fail-closed `rl_hold_check` `case` (graduates only on `ok`; every `hold:*`/unrecognised/empty value fails closed to advisory, #1347). **Run it here**: [`hold-handling.md`](references/hold-handling.md) (#1291/#1347/#1393).
 
 ### Mode selection (delta / Phase 5 pass-through)
 
@@ -246,6 +246,7 @@ held_for_human: true | false # #1393 — see sge-verdict-block.md
 head_moved: true | false # #2214 — see sge-verdict-block.md
 control_bearing: true | false # #2211
 oracle_bearing: true | false # #2222
+applied_order: <id> | none
 ```
 ````
 
@@ -288,7 +289,7 @@ if [ "${VERDICT_POST_STATUS:-0}" = 0 ]; then
 fi
 # advisory (incl. a Stage 0 human hold, #1291) → verdict already posted as a comment; no label transition.
 [ "$REVIEW_MODE" = "advisory" ] && { echo "advisory: gate labels untouched (issue #754)"; exit 0; }
-# Human-hold check (#1393): if `hold` present, call `held` (releases pr-reviewing, NOT pr-reviewed) not `pass` (exit 8).
+# Hold (#1393): `held`, not `pass` (exit 8). HOLD_RELEASE_ORDER + clean: `release-hold` first (delegation-policy.md).
 PL="$SGE_ROOT/skills/pr-review/pr-labels.sh"  #: pr-labels.sh held / pr-labels.sh pass $PR $AUTOMERGE_FLAG
 HOLD_ST=$("$PL" status "$PR" 2>/dev/null) || HOLD_ST=""
 if [[ "$HOLD_ST" == *"hold=true"* ]]; then
