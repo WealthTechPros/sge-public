@@ -139,6 +139,34 @@ every session with no retry/backoff and no user-visible error is a rough
 edge worth reporting upstream to the Copilot CLI team too, independent of
 SGE.
 
+## Memory (sge-memory) under Copilot CLI
+
+Copilot CLI does not set Claude Code's `CLAUDE_PROJECT_DIR`, so the
+`sge-memory` server keys its database on the git `origin` of the directory
+Copilot CLI launched it from — start `copilot` from inside the repository
+checkout. The DB lives at `~/.claude/sge-memory/<org>/<repo>.db`, one per
+repository, and stays local.
+
+- Confirm which DB a session uses: the server logs
+  `[sge-cortex] local memory DB: <path> (resolved via <tier>)` to stderr at
+  startup (visible in `~/.copilot/logs/`). No memory content is logged.
+- Launched outside a git checkout with an `origin` remote, the server refuses
+  to start rather than share one DB across repos. Set
+  `CORTEX_TARGET_REPO=<org>/<repo>` (or `LIBSQL_URL=file:<path>`) in the MCP
+  server's `env` to pin it explicitly.
+- Earlier builds could write a shared `C:\memory\sge-memory.db`.
+  See [`sge-memory.md`](sge-memory.md#authoritative-database-location)
+  for how to import and retire it.
+
+## Token metering under Copilot CLI
+
+The plugin's token-metering hook reads a Claude Code session transcript;
+it is not validated on Copilot CLI. If no usage sidecar is written,
+`/sge:cost-guard` and `/sge:roi-report` report *metering unavailable*, not
+zero usage. Use Copilot's own usage
+reporting instead. See [`token-metering.md`](token-metering.md) for the
+details and for how to measure Cortex savings.
+
 ## Compatibility notes
 
 - Everything **upstream of install** (marketplace fetch, plugin install,
