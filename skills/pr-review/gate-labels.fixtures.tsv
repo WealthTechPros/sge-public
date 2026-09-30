@@ -1,0 +1,19 @@
+# Shared fixture table for gate-labels.sh `classify` and its Python twin
+# (services/review-daemon-poc/gate_labels.py) -- wtp-org#992 item 4.
+# Columns (TAB-separated): label  verdict_sha  head_sha  expected
+# "-" means an empty value.
+pr-reviewed	86b71074ef9ee8ecefa041527cafc4354b3b3647	86b71074ef9ee8ecefa041527cafc4354b3b3647	current
+pr-reviewed	86b7107	86b71074ef9ee8ecefa041527cafc4354b3b3647	current
+pr-reviewed	86B71074EF9EE8EC	86b71074ef9ee8ecefa041527cafc4354b3b3647	current
+pr-reviewed	deadbeefcafefeed0123456789abcdef01234567	86b71074ef9ee8ecefa041527cafc4354b3b3647	stale
+changes-requested	deadbeefcafefeed0123456789abcdef01234567	86b71074ef9ee8ecefa041527cafc4354b3b3647	stale
+changes-requested	86b71074ef9ee8ecefa041527cafc4354b3b3647	86b71074ef9ee8ecefa041527cafc4354b3b3647	current
+agent-reviewed	deadbeefcafefeed0123456789abcdef01234567	86b71074ef9ee8ecefa041527cafc4354b3b3647	stale
+agent-reviewed	86b71074	86b71074ef9ee8ecefa041527cafc4354b3b3647	current
+pr-reviewed	-	86b71074ef9ee8ecefa041527cafc4354b3b3647	unproven
+pr-reviewed	86b710	86b71074ef9ee8ecefa041527cafc4354b3b3647	unproven
+pr-reviewed	not-a-sha-at-all	86b71074ef9ee8ecefa041527cafc4354b3b3647	unproven
+pr-reviewed	86b71074ef9ee8ecefa041527cafc4354b3b3647	-	unproven
+changes-requested	-	-	unproven
+hold	deadbeefcafefeed0123456789abcdef01234567	86b71074ef9ee8ecefa041527cafc4354b3b3647	not-verdict-label
+pr-reviewing	-	86b71074ef9ee8ecefa041527cafc4354b3b3647	not-verdict-label

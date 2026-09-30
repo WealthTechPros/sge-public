@@ -1183,7 +1183,11 @@ rl_hold_check() {
   hold=$(printf '%s' "$state" | jq -r \
     '[.labels[] | select(. == "hold" or . == "do-not-merge" or . == "needs-human" or . == "blocked")] | join(",")' 2>/dev/null) \
     || { echo "hold:state-parse-failed"; return 0; }
-  [ -n "$hold" ] && { echo "hold:$hold"; return 0; }
+  # A lone `hold` may be policy-releasable (hold:hold) -- but only after the
+  # sign-off-pending comment scan below has run, so a human's "sign-off
+  # pending" comment still wins (PR #2752 review m1). Any other hold label
+  # returns immediately, as before.
+  if [ -n "$hold" ] && [ "$hold" != "hold" ]; then echo "hold:$hold"; return 0; fi
   # Comment scan — a gh error (rate-limit/403/network) is unverifiable: fail
   # closed. See the doc block above rl_hold_check for the full #2188 history;
   # this is the final, jq-and-gojq-verified filter. BOT_RE/PR_NUM injected via
@@ -1209,6 +1213,7 @@ rl_hold_check() {
           ] | first // ""' 2>/dev/null) \
     || { echo "hold:signoff-check-failed"; return 0; }
   [ -n "$sign" ] && { echo "hold:sign-off-pending-comment"; return 0; }
+  [ -n "$hold" ] && { echo "hold:$hold"; return 0; }
   echo "ok"
 }
 
@@ -2498,4 +2503,40 @@ rl_checks_status_gql() {
                        else 3 end)
              | first
              | del(._t) )' <<<"$raw"
+}
+
+# --- Delegation policy (standing orders) -- references/delegation-policy.md ---
+# Product-neutral: the operator's policy arrives as SGE_DELEGATION_POLICY_JSON or
+# SGE_DELEGATION_POLICY_FILE (helpers in delegation-policy.sh). NO policy / an
+# invalid one => every wrapper prints nothing and the hard-coded holds apply.
+_rl_dp_load() {
+  declare -F dp_policy_json >/dev/null 2>&1 && return 0
+  # shellcheck source=skills/pr-review/delegation-policy.sh
+  . "$(dirname "${BASH_SOURCE[0]}")/delegation-policy.sh"
+}
+
+# rl_policy_order <kind> [trigger] -- the id of the policy's order of <kind>
+# (and <trigger>); nothing when none / no policy.
+rl_policy_order() {
+  _rl_dp_load
+  dp_order_for "$@"
+}
+
+# rl_policy_approval_for <owner/repo#N> -- ids of recorded approvals (a
+# recorded-approvals order) whose scope names this PR; nothing when none.
+rl_policy_approval_for() {
+  _rl_dp_load
+  [ -n "$(dp_order_for recorded-approvals)" ] || return 0
+  dp_approvals_for "$1"
+}
+
+# rl_hold_release_order <pr> -- the hold-release order id when THIS review may
+# release the PR's `hold` (self-fixed security MAJOR, independent session,
+# no excluded category/path, no human-only hold); nothing otherwise.
+rl_hold_release_order() {
+  local pr="$1" repo
+  _rl_dp_load
+  repo="${GH_REPO:-$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)}" || return 0
+  [ -n "$repo" ] || return 0
+  dp_hold_release_eligible "$repo" "$pr"
 }
