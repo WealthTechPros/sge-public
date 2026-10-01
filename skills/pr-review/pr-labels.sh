@@ -87,10 +87,26 @@
 #                                             closed until the hold is removed and a
 #                                             new review cycle promotes normally.
 #                                             Reports "pass, held for human sign-off".
-#   pr-labels.sh apply-hold <pr>              apply the `hold` label (+hold); used by
+#   pr-labels.sh release-hold <pr> --order <id> --head <sha>
+#                                             remove a `hold` a DELEGATION POLICY lets
+#                                             the review release (hold-release order,
+#                                             e.g. a self-fixed security MAJOR after an
+#                                             independent clean re-review). Re-checks
+#                                             eligibility itself (delegation-policy.sh
+#                                             dp_hold_release_eligible) and refuses (exit 9) unless
+#                                             it yields exactly <id>; no policy = refuse.
+#                                             --head must be the PR's LIVE head and the
+#                                             review identity must have posted a clean
+#                                             (pass/APPROVE, 0 blockers, 0 majors)
+#                                             sge-verdict for it -- else exit 9.
+#                                             Posts one comment naming the order.
+#   pr-labels.sh apply-hold <pr> [--reason <r> --head <sha> --categories <csv> --session <id> --order <id>]
+#                                             apply the `hold` label (+hold); used by
 #                                             /sge:pr-review when a `HOLD:` marker is
 #                                             found in the PR body or a security MAJOR
-#                                             finding requires human sign-off.
+#                                             finding requires human sign-off. With
+#                                             --reason, also posts a machine-readable
+#                                             sge-hold-marker comment (delegation-policy.sh).
 #   pr-labels.sh stale <pr>                   new commits after a pass (-pr-reviewed)
 #   pr-labels.sh claim-fix <pr> [--force-claim]
 #                                             claim a CI-fix (+pr-fixing). The
@@ -101,19 +117,37 @@
 #                                             (younger than SGE_FIX_CLAIM_TTL_MIN,
 #                                             default 30 minutes). Stale claims are
 #                                             taken over; --force-claim overrides.
+#   pr-labels.sh claim-status <pr>            shared claim protocol (wtp-org#992 item 5):
+#                                             print "free", "mine lane=.. owner=.." or
+#                                             "held lane=.. owner=.. age=..s"; exit 0 when
+#                                             free or held by $SGE_AGENT_ID, 3 when another
+#                                             owner holds a live review/fix/work claim.
+#   pr-labels.sh claim-work <pr>              reserve the PR for arbitrary agent work
+#                                             (+agent-working, lane-work claim comment);
+#                                             refuses (exit 3) on any live foreign claim.
+#   pr-labels.sh release-work <pr>            release a work claim (-agent-working; the
+#                                             claim comment only if $SGE_AGENT_ID owns it).
+#   pr-labels.sh release-review <pr> [--force]
+#                                             release a review claim taken via
+#                                             start-review (-pr-reviewing, own claim
+#                                             comment); exit 3 if another owner holds it.
+#                                             Front end: scripts/pr-claim.sh.
 #   pr-labels.sh release-fix <pr>             release a CI-fix claim (-pr-fixing).
 #                                             The binding termination contract —
 #                                             /sge:pr-fix MUST call this on exit so
 #                                             a crashed fix frees the lane within
 #                                             the lease window. Idempotent.
-#   pr-labels.sh sync-check <pr> <new-head>   strip pr-reviewed when the latest
+#   pr-labels.sh sync-check <pr> <new-head>   strip every verdict gate label
+#                                             (pr-reviewed, changes-requested,
+#                                             agent-reviewed) whose latest
 #                                             sge-verdict's commit does not cover
-#                                             <new-head> (issue #1941). Called on
-#                                             pull_request:synchronize to keep the
-#                                             gate label honest after a push. Posts
-#                                             a comment naming the superseded SHA.
-#                                             No-op when pr-reviewed is absent or
-#                                             when the verdict covers the new head.
+#                                             <new-head> (issue #1941; head-scoped
+#                                             per wtp-org#992 -- the rule lives in
+#                                             gate-labels.sh). Called on
+#                                             pull_request:synchronize. Posts one
+#                                             comment naming the superseded SHA.
+#                                             No-op when no verdict label is on the
+#                                             PR or the verdict covers the new head.
 #   pr-labels.sh excluded-reviewer <pr>       independence check structurally excludes
 #                                             the available reviewer identity — release
 #                                             pr-reviewing (so future cycles can run),
@@ -268,6 +302,10 @@ set -euo pipefail
 REVIEWING="pr-reviewing"
 REVIEWED="pr-reviewed"
 FIXING="pr-fixing"
+# Shared claim protocol's generic lane (wtp-org#992 item 5): an orchestrator
+# reserving a PR for a subagent doing arbitrary work (claim-work / release-work,
+# front end scripts/pr-claim.sh). The review daemon honours a live one.
+WORKING="agent-working"
 HOLD="hold"
 CHANGES_REQUESTED="changes-requested"
 EXCLUDED_REVIEWER="excluded-reviewer"
@@ -314,6 +352,11 @@ CLAIM_HEARTBEAT_WINDOW="${SGE_REVIEW_HEARTBEAT_WINDOW:-900}"
 # (or malicious) claimant with comment access could hold the merge-gate mutex
 # forever. 4h comfortably covers the 30-50 min reviews this was built for.
 CLAIM_MAX_LIFETIME="${SGE_REVIEW_CLAIM_MAX_LIFETIME:-14400}"
+# Small forgiveness window for genuine clock skew between the commenter's and
+# the reader's clocks when validating an unauthenticated claim's `claimedAt`
+# (round-3 review of #2724): large enough to absorb ordinary drift, far too
+# small to let a forged future timestamp buy meaningful extra liveness.
+CLAIM_CLOCK_SKEW_ALLOWANCE="${SGE_REVIEW_CLAIM_CLOCK_SKEW:-60}"
 
 # Shorter TTL for a claim that already carries a posted verdict (issue #2401):
 # a normal in-flight review (no verdict yet) gets the full SGE_REVIEW_CLAIM_TTL_MIN
@@ -345,18 +388,51 @@ _claim_repo_full() {
   printf '%s' "${GH_REPO:-$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || true)}"
 }
 
-# find_claim_comment: return the latest sge-claim-metadata comment as raw JSON,
-# or empty string if none. Silent on failure — callers check for non-empty.
+# CLAIM_TRUST_JQ: the ONE trusted-claimant predicate (jq, over an issue-comment
+# object; reads env.SGE_CLAIM_TRUSTED_LOGINS so it works in gh --jq too). The SGE bots, any
+# login in SGE_CLAIM_TRUSTED_LOGINS (e.g. another App's `<slug>[bot]`, which
+# carries no repo association), or a repo OWNER/MEMBER/COLLABORATOR -- the
+# daemon's _claim_honoured rule (#2246). `wtp-agent[bot]` is the default agent
+# author App (repo association NONE, like every App), so its claims are trusted
+# by default (sge#2770 review), as is a non-default review App named by
+# SGE_REVIEW_BOT_LOGIN, whose claims would otherwise read as absent and let a
+# second review take over a heartbeat-live one. Every claim READER applies it
+# (sge-public#71 review M1): on a public repo any signed-in user can post a
+# fenced claim comment, and without the filter the newest such comment became
+# "the claim" -- parking the real owner's release or reading as someone else's.
+#   A comment carrying NO author metadata at all (neither .user nor
+# .author_association -- never the case for a real REST comment, which always
+# has both) is honoured, the daemon's "unauthenticatable is honoured" stance:
+# it cannot come from an untrusted poster, and dropping it would hide claims.
+CLAIM_TRUST_JQ='((has("user") | not) and (has("author_association") | not))
+  or ((.user.login // "") == "wtp-sge[bot]") or ((.user.login // "") == "github-actions[bot]")
+  or ((.user.login // "") == "wtp-agent[bot]")
+  or ((.user.login // "") as $l | $l != ""
+      and $l == ((env.SGE_REVIEW_BOT_LOGIN // "") | if . == "" then "wtp-sge[bot]" else . end))
+  or ((.user.login // "") as $l | $l != ""
+      and ((" " + (env.SGE_CLAIM_TRUSTED_LOGINS // "") + " ") | contains(" " + $l + " ")))
+  or (((.author_association // "") | ascii_upcase) as $a
+      | $a == "OWNER" or $a == "MEMBER" or $a == "COLLABORATOR")'
+# CLAIM_LANE_JQ: a claim comment's lane (no lane field = the historical review claim).
+CLAIM_LANE_JQ='(((.body // "") | capture("\"lane\"\\s*:\\s*\"(?<l>[a-z]+)\"").l) // "review")'
+
+# find_claim_comment [lane]: return the latest TRUSTED sge-claim-metadata
+# comment as raw JSON -- of <lane> (review | work) when given -- or empty
+# string if none. Silent on failure — callers check for non-empty. Lane-scoped
+# (sge-public#71 review M4): an orchestrator's work claim and its subagent's
+# review claim coexist, and "most recent claim on the PR" is neither of them.
 find_claim_comment() {
-  local _rf
+  local lane="${1:-}" _rf
   _rf="$(_claim_repo_full)"
   [[ -n "$_rf" ]] || { printf ''; return 0; }
-  # Fetch all comments and select those whose body starts with the fence.
-  # --paginate so a PR with many comments is fully scanned; last // empty
-  # returns the most recent claim comment or nothing.
-  gh api "repos/$_rf/issues/$PR/comments" --paginate \
-    --jq "[.[] | select(.body | ltrimstr(\"\n\") | startswith(\"\`\`\`${CLAIM_COMMENT_FENCE}\"))] | last // empty" \
-    2>/dev/null || true
+  # Filter inside gh's --jq (per page; env.* because --jq takes no --arg):
+  # each page yields its latest match as one JSON line, tail keeps the last.
+  SGE_CLAIM_LANE_FILTER="$lane" gh api "repos/$_rf/issues/$PR/comments" --paginate \
+    --jq '[.[] | select((.body // "") | ltrimstr("\n") | startswith("```'"$CLAIM_COMMENT_FENCE"'"))
+          | select('"$CLAIM_TRUST_JQ"')
+          | select((env.SGE_CLAIM_LANE_FILTER // "") == "" or '"$CLAIM_LANE_JQ"' == env.SGE_CLAIM_LANE_FILTER)]
+          | last // empty | tojson' \
+    2>/dev/null | tail -n 1 || true
 }
 
 # parse_claim_metadata <comment-json>: extract the JSON object from inside the
@@ -408,7 +484,7 @@ heartbeat_in_window() {
   # Fetch all comments, keep heartbeat-fenced ones, print "<created_at>\t<owner>".
   local rows row ts owner epoch
   rows=$(gh api "repos/$_rf/issues/$PR/comments" --paginate \
-    --jq "[.[] | select(.body | ltrimstr(\"\n\") | startswith(\"\`\`\`${HEARTBEAT_COMMENT_FENCE}\"))
+    --jq "[.[] | select(.body | ltrimstr(\"\n\") | startswith(\"\`\`\`${HEARTBEAT_COMMENT_FENCE}\")) | select($CLAIM_TRUST_JQ)
            | {created_at, body} ]
           | map(.owner = (.body | capture(\"\\\"owner\\\"\\\\s*:\\\\s*\\\"(?<o>[^\\\"]*)\\\"\"; \"\") .o // \"\"))
           | .[] | [.created_at, .owner] | @tsv" \
@@ -442,18 +518,31 @@ claim_comment_live() {
   owner=$(printf '%s' "$meta" | jq -r '.owner // empty' 2>/dev/null) || return 1
   claimed_at=$(printf '%s' "$meta" | jq -r '.claimedAt // empty' 2>/dev/null) || return 1
   ttl_val=$(printf '%s' "$meta" | jq -r '.ttl // 900' 2>/dev/null) || ttl_val=900
+  # .ttl comes from an unauthenticated comment body: only a plain positive
+  # integer, clamped to the lifetime ceiling, may reach $((...)) (issue #2727).
+  [[ "$ttl_val" =~ ^[0-9]{1,9}$ && "$ttl_val" -gt 0 ]] || ttl_val=900
+  [[ "$ttl_val" -le "$CLAIM_MAX_LIFETIME" ]] || ttl_val="$CLAIM_MAX_LIFETIME"
   [[ -n "$claimed_at" ]] || return 1
   claimed_epoch=$(_iso_to_epoch "$claimed_at") || return 1
   [[ -n "$claimed_epoch" ]] || return 1
   now_epoch=$(date -u +%s)
+  # claimedAt comes from the same unauthenticated comment body as ttl: a forged
+  # future timestamp (e.g. "claimedAt": "2030-01-01T00:00:00Z") would otherwise
+  # make claimed_epoch + ttl_val outrun now_epoch for years, DoS-ing every
+  # start-review/claim-work/claim-status caller (#2727 follow-on, round-3
+  # review of #2724). Allow only a small clock-skew margin, never an
+  # arbitrarily-future claim.
+  [[ "$claimed_epoch" -le $((now_epoch + CLAIM_CLOCK_SKEW_ALLOWANCE)) ]] || return 1
+  # CLAIM_MAX_LIFETIME is a hard ceiling on every branch, not just the
+  # heartbeat/elapsed path below — otherwise the forged-future-claimedAt case
+  # above was the only thing standing between a claim and unbounded liveness.
+  [[ $((now_epoch - claimed_epoch)) -le "$CLAIM_MAX_LIFETIME" ]] || return 1
   if [[ $((claimed_epoch + ttl_val)) -gt "$now_epoch" ]]; then
     return 0
   fi
-  # claimedAt + ttl has elapsed — not live UNLESS BOTH: a recent, owner-matched
-  # heartbeat proves the work is still genuinely in flight (#2229), AND the
-  # absolute ceiling hasn't been exceeded (no infinite extension via looping
-  # heartbeats — security review, #2229).
-  [[ $((now_epoch - claimed_epoch)) -le "$CLAIM_MAX_LIFETIME" ]] || return 1
+  # claimedAt + ttl has elapsed — not live UNLESS a recent, owner-matched
+  # heartbeat proves the work is still genuinely in flight (#2229); the
+  # CLAIM_MAX_LIFETIME ceiling above already applies to this branch too.
   heartbeat_in_window "$owner" "$claimed_epoch"
 }
 
@@ -501,11 +590,19 @@ $(gh api "repos/$_rf/issues/$PR/comments" --paginate \
 # label. Owner is SGE_AGENT_ID if set, else the system hostname. Best-effort —
 # a failure is logged but does not abort the claim (the label is the real mutex).
 post_claim_comment() {
-  local owner claimed_at body _rf
+  # Optional $1 = lane (review | fix | work) for the shared claim protocol
+  # (wtp-org#992 item 5); absent keeps the historical review-claim shape.
+  local lane="${1:-}" owner claimed_at body _rf meta
   owner="${SGE_AGENT_ID:-$(hostname 2>/dev/null || echo "unknown")}"
   claimed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  body="$(printf '```%s\n{"owner":"%s","claimedAt":"%s","ttl":%d}\n```' \
-    "$CLAIM_COMMENT_FENCE" "$owner" "$claimed_at" "$CLAIM_COMMENT_TTL")"
+  if [[ -n "$lane" ]]; then
+    meta=$(jq -cn --arg o "$owner" --arg c "$claimed_at" --argjson t "$CLAIM_COMMENT_TTL" --arg l "$lane" \
+      '{owner:$o, claimedAt:$c, ttl:$t, lane:$l}')
+    body="$(printf '```%s\n%s\n```' "$CLAIM_COMMENT_FENCE" "$meta")"
+  else
+    body="$(printf '```%s\n{"owner":"%s","claimedAt":"%s","ttl":%d}\n```' \
+      "$CLAIM_COMMENT_FENCE" "$owner" "$claimed_at" "$CLAIM_COMMENT_TTL")"
+  fi
   _rf="$(_claim_repo_full)"
   if [[ -z "$_rf" ]]; then
     echo "warning: PR #$PR could not determine repo for claim comment — skipping (issue #1312)" >&2
@@ -514,6 +611,7 @@ post_claim_comment() {
   local comment_id
   comment_id=$(gh api "repos/$_rf/issues/$PR/comments" \
     -f body="$body" --jq '.id' 2>/dev/null) || comment_id=""
+  LAST_CLAIM_COMMENT_ID="$comment_id"   # claim-work withdraws exactly this id on a lost race
   if [[ -n "$comment_id" ]]; then
     echo "PR #$PR: claim comment posted (id=$comment_id, owner=$owner, ttl=${CLAIM_COMMENT_TTL}s)" >&2
   else
@@ -553,11 +651,12 @@ post_claim_heartbeat() {
   fi
 }
 
-# delete_claim_comment: delete the latest sge-claim-metadata comment on the PR.
-# Idempotent: no-op if none is found or the deletion fails (best-effort).
+# delete_claim_comment [lane]: delete the latest trusted sge-claim-metadata
+# comment on the PR (of <lane> when given). Idempotent: no-op if none is found
+# or the deletion fails (best-effort).
 delete_claim_comment() {
   local comment_json comment_id _rf
-  comment_json=$(find_claim_comment) || return 0
+  comment_json=$(find_claim_comment "${1:-}") || return 0
   [[ -n "$comment_json" ]] || return 0
   comment_id=$(printf '%s' "$comment_json" | jq -r '.id // empty' 2>/dev/null) || return 0
   [[ -n "$comment_id" ]] || return 0
@@ -570,6 +669,84 @@ delete_claim_comment() {
   fi
   return 0
 }
+# _label_age_seconds <label>: seconds since the latest `labeled` event for
+# <label>, or nothing when it cannot be determined (shared claim protocol).
+_label_age_seconds() {
+  local _rf at epoch
+  _rf="$(_claim_repo_full)"
+  [[ -n "$_rf" ]] || return 0
+  at=$(gh api "repos/$_rf/issues/$PR/timeline" --paginate \
+    --jq ".[] | select(.event==\"labeled\" and .label.name==\"$1\") | .created_at" \
+    2>/dev/null | tail -n 1) || at=""
+  [[ -n "$at" && "$at" != "null" ]] || return 0
+  epoch=$(_iso_to_epoch "$at") || return 0
+  [[ -n "$epoch" ]] && printf '%s' $(( $(date -u +%s) - epoch ))
+}
+
+# claim_status_line [lane]: the shared claim protocol's one reader (wtp-org#992
+# item 5). Prints "free", "mine lane=<l> owner=<o> age=<s>s" or "held lane=<l>
+# owner=<o> age=<s>s"; returns 3 only for a live claim held by someone other
+# than $SGE_AGENT_ID. Each lane is read from ITS OWN latest trusted claim
+# comment (sge-public#71 review M4), so a subagent's review claim never masks
+# (or is masked by) its orchestrator's work claim; a foreign live claim in ANY
+# lane wins over the caller's own. With <lane> (review | work | fix), only that
+# lane is considered -- what release-<lane> uses. Reuses claim_comment_live
+# (TTL + owner-bound heartbeats + lifetime ceiling) for comment-backed claims
+# and the claim-fix TTL rule (SGE_FIX_CLAIM_TTL_MIN) for label-only pr-fixing.
+claim_status_line() {
+  local only="${1:-}" me l lab cj review_cj="" meta owner at epoch age labels fix_age rev_age mine_line=""
+  me="${SGE_AGENT_ID:-$(hostname 2>/dev/null || echo "unknown")}"
+  labels=$(gh pr view "$PR" --json labels --jq '[.labels[].name] | join(",")' 2>/dev/null) || {
+    echo "error: could not read labels for PR #$PR" >&2; return 1; }
+  for l in review work; do
+    [[ -z "$only" || "$only" == "$l" ]] || continue
+    lab="$REVIEWING"; [[ "$l" == "work" ]] && lab="$WORKING"
+    # A comment-backed claim only counts while its lane label is still on the
+    # PR: a finished review / released work claim whose comment lingers is not a lock.
+    [[ ",$labels," == *",$lab,"* ]] || continue
+    cj=$(find_claim_comment "$l")
+    [[ "$l" == "review" ]] && review_cj="$cj"
+    [[ -n "$cj" ]] && claim_comment_live "$cj" || continue
+    meta=$(parse_claim_metadata "$cj")
+    owner=$(printf '%s' "$meta" | jq -r '.owner // "unknown"' 2>/dev/null) || owner="unknown"
+    at=$(printf '%s' "$meta" | jq -r '.claimedAt // empty' 2>/dev/null) || at=""
+    epoch=$(_iso_to_epoch "$at" 2>/dev/null) || epoch=""
+    age="?"; [[ -n "$epoch" ]] && age=$(( $(date -u +%s) - epoch ))
+    if [[ "$owner" == "$me" ]]; then
+      [[ -n "$mine_line" ]] || mine_line="mine lane=$l owner=$owner age=${age}s"
+    else
+      echo "held lane=$l owner=$owner age=${age}s"; return 3
+    fi
+  done
+  if [[ -n "$mine_line" ]]; then echo "$mine_line"; return 0; fi
+  if [[ ( -z "$only" || "$only" == "fix" ) && ",$labels," == *",$FIXING,"* ]]; then
+    fix_age=$(_label_age_seconds "$FIXING")
+    if [[ -n "$fix_age" && "$fix_age" -lt $(( ${SGE_FIX_CLAIM_TTL_MIN:-30} * 60 )) ]]; then
+      echo "held lane=fix owner=unknown age=${fix_age}s"; return 3
+    fi
+  fi
+  if [[ ( -z "$only" || "$only" == "review" ) && ",$labels," == *",$REVIEWING,"* && -z "$review_cj" ]]; then
+    # Label-only (pre-#1312) review claim: aged by its labelled event.
+    rev_age=$(_label_age_seconds "$REVIEWING")
+    if [[ -n "$rev_age" && "$rev_age" -lt "$CLAIM_COMMENT_TTL" ]]; then
+      echo "held lane=review owner=unknown age=${rev_age}s"; return 3
+    fi
+  fi
+  echo "free"
+  return 0
+}
+
+# _own_claim_comment [lane]: 0 when the latest trusted claim comment (of <lane>
+# when given) is owned by $SGE_AGENT_ID.
+_own_claim_comment() {
+  local cj owner me
+  me="${SGE_AGENT_ID:-$(hostname 2>/dev/null || echo "unknown")}"
+  cj=$(find_claim_comment "${1:-}")
+  [[ -n "$cj" ]] || return 1
+  owner=$(parse_claim_metadata "$cj" | jq -r '.owner // empty' 2>/dev/null) || return 1
+  [[ -n "$owner" && "$owner" == "$me" ]]
+}
+
 # ---------------------------------------------------------------------------
 
 CMD="${1:-}"
@@ -1350,8 +1527,21 @@ case "$CMD" in
       esac
     done
     if [[ "$FORCE_CLAIM" != "true" ]]; then
-      # Primary: claim comment TTL check (issue #1312).
-      _CLAIM_JSON=$(find_claim_comment)
+      # A live WORK claim held by another agent blocks the review too (shared
+      # claim protocol) -- unless it is the handoff owner's own (the documented
+      # orchestrator -> subagent pattern, scripts/pr-claim.sh). The work claim
+      # is never deleted here: it belongs to its owner (sge-public#71 review M4).
+      _WORK_JSON=$(find_claim_comment work)
+      if [[ -n "$_WORK_JSON" ]] && claim_comment_live "$_WORK_JSON"; then
+        _WORK_OWNER=$(parse_claim_metadata "$_WORK_JSON" | jq -r '.owner // "unknown"' 2>/dev/null) || _WORK_OWNER="unknown"
+        if [[ "$_WORK_OWNER" != "${SGE_AGENT_ID:-$(hostname 2>/dev/null || echo unknown)}" \
+              && "$_WORK_OWNER" != "${SGE_REVIEW_CLAIM_HANDOFF_OWNER:-}" ]]; then
+          echo "refusing: PR #$PR has a live work claim (owner=${_WORK_OWNER}) — another agent is working it (wtp-org#992)" >&2
+          exit 3
+        fi
+      fi
+      # Primary: review-lane claim comment TTL check (issue #1312).
+      _CLAIM_JSON=$(find_claim_comment review)
       if [[ -n "$_CLAIM_JSON" ]]; then
         _CLAIM_LIVE=false
         claim_comment_live "$_CLAIM_JSON" && _CLAIM_LIVE=true
@@ -1423,7 +1613,7 @@ case "$CMD" in
         fi
         # Stale claim comment — delete it before re-claiming.
         echo "PR #$PR: existing claim comment is stale — deleting before re-claiming (issue #1312)" >&2
-        delete_claim_comment
+        delete_claim_comment review
       else
         # Fallback: no claim comment → label-event timestamp check (issue #699,
         # backward compat with old-style claims that predate #1312).
@@ -1980,7 +2170,7 @@ case "$CMD" in
     # Delete the claim comment before the label swap (issue #1312 AC4).
     # Clearing the metadata first ensures no concurrent agent misreads a stale
     # comment as a live claim once the pr-reviewing label is gone.
-    delete_claim_comment
+    delete_claim_comment review
     # Late hold re-check (issue #1393 review finding): the gate's first hold read
     # runs at the top of pass, but the thread gate, follow-up gate, required-check
     # guard, and head-convergence wait all make API round-trips (with sleeps) —
@@ -2081,7 +2271,7 @@ case "$CMD" in
     ensure_labels
     # Delete the claim comment before removing labels (issue #1312 AC4).
     # Clears the metadata so a subsequent start-review sees a clean slate.
-    delete_claim_comment
+    delete_claim_comment review
     remove_label "$REVIEWED"        # gate stays closed
     remove_label "$REVIEWING"       # review is over; the findings carry the state
     # Fail-closed re-check (#2238 Blocker 2): remove_label above is
@@ -2164,7 +2354,7 @@ case "$CMD" in
     else
       ensure_agent_reviewed_label
       # Delete the claim comment before the label swap (mirrors pass/fail).
-      delete_claim_comment
+      delete_claim_comment review
       remove_label "$REVIEWING"          # release the claim so future cycles can run
       remove_label "$CHANGES_REQUESTED"  # review PASSED — must not still read as failed (#2238)
       # Re-check immediately before the write (found by adversarial QA audit,
@@ -2191,8 +2381,37 @@ case "$CMD" in
     # a HOLD: marker in the PR body at review start, or when a security specialist
     # returns a MAJOR finding that requires human sign-off per standing policy.
     # Idempotent — safe to call even if hold is already present.
+    #
+    # Optional marker (delegation policy): with --reason, also post an
+    # sge-hold-marker comment recording WHY the hold was applied -- reason
+    # (self-fixed-security-major | escalate | ...), the head after any in-review
+    # fix, the finding categories and this review session -- so a LATER,
+    # independent review can release it under a hold-release standing order
+    # (release-hold). Without --reason: exactly the pre-policy behaviour.
+    _AH_REASON="" _AH_HEAD="" _AH_CATS="" _AH_SESSION="" _AH_ORDER=""
+    shift 2
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --reason) _AH_REASON="${2:-}"; shift 2 ;;
+        --head) _AH_HEAD="${2:-}"; shift 2 ;;
+        --categories) _AH_CATS="${2:-}"; shift 2 ;;
+        --session) _AH_SESSION="${2:-}"; shift 2 ;;
+        --order) _AH_ORDER="${2:-}"; shift 2 ;;
+        *) echo "error: apply-hold: unknown argument '$1'" >&2; exit 2 ;;
+      esac
+    done
     ensure_hold_label
     add_label "$HOLD"
+    if [ -n "$_AH_REASON" ]; then
+      # shellcheck source=skills/pr-review/delegation-policy.sh
+      . "$_PRL_SCRIPT_DIR/delegation-policy.sh"
+      [ -n "$_AH_SESSION" ] || _AH_SESSION="$(dp_session_id)"
+      _AH_RF="$(_claim_repo_full)"
+      if [ -n "$_AH_RF" ] && _AH_BODY="$(dp_hold_marker_body "$_AH_REASON" "$_AH_HEAD" "$_AH_CATS" "$_AH_SESSION" "$_AH_ORDER")"; then
+        gh api "repos/$_AH_RF/issues/$PR/comments" -f body="$_AH_BODY" >/dev/null \
+          || echo "warning: could not post the hold marker on PR #$PR (hold label stands; a human must release it)" >&2
+      fi
+    fi
     # hold_status is gh-label-specific; keep the confirmation echo GitHub-only,
     # matching the pass/status host-scoping (issues #1393 + #1419).
     if [[ "${_PRL_HOST:-github}" != "forgejo" ]]; then
@@ -2203,6 +2422,78 @@ case "$CMD" in
     echo "PR #$PR: '$HOLD' label applied — gate will not open until a human removes it ($HOLD_ST)"
     ;;
 
+  release-hold)
+    # Delegation policy (standing orders): release a `hold` the operator has
+    # pre-authorised the review to release -- today one trigger, a security
+    # MAJOR the reviewer FIXED in-review, re-reviewed clean by an INDEPENDENT
+    # session (hold-release order). Never a human-applied hold: eligibility is
+    # re-derived here from the policy + the PR (dp_hold_release_eligible), not trusted
+    # from the caller, and must name exactly --order. No policy => refuse.
+    _RH_ORDER="" _RH_HEAD=""
+    shift 2
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --order) _RH_ORDER="${2:-}"; shift 2 ;;
+        --head) _RH_HEAD="${2:-}"; shift 2 ;;
+        *) echo "error: release-hold: unknown argument '$1'" >&2; exit 2 ;;
+      esac
+    done
+    [ -n "$_RH_ORDER" ] || { echo "error: release-hold needs --order <id>" >&2; exit 2; }
+    [[ "$_RH_HEAD" =~ ^[0-9a-f]{40}$ ]] || { echo "error: release-hold needs --head <full 40-hex sha of the reviewed head>" >&2; exit 2; }
+    # Same mechanical backstops as `pass` (sge-public#71 review m1): an
+    # advisory or shadow dispatch never moves a gate, and releasing a hold is one.
+    if [[ "${SGE_REVIEW_ADVISORY:-}" == "1" ]]; then
+      echo "refusing: SGE_REVIEW_ADVISORY=1 — advisory (review-only) dispatch cannot release '$HOLD' (issue #754)" >&2
+      exit 4
+    fi
+    if [[ "${SGE_REVIEW_SHADOW:-}" == "1" ]]; then
+      echo "refusing: SGE_REVIEW_SHADOW=1 — shadow-mode dispatch cannot release '$HOLD' (issue #2651)" >&2
+      exit 9
+    fi
+    # shellcheck source=skills/pr-review/delegation-policy.sh
+    . "$_PRL_SCRIPT_DIR/delegation-policy.sh"
+    _RH_RF="$(_claim_repo_full)"
+    _RH_ELIG=""
+    [ -z "$_RH_RF" ] || _RH_ELIG="$(dp_hold_release_eligible "$_RH_RF" "$PR")" || _RH_ELIG=""
+    if [ "$_RH_ELIG" != "$_RH_ORDER" ]; then
+      echo "PR #$PR: refusing to release '$HOLD' under '$_RH_ORDER' -- not eligible under the delegation policy (got '${_RH_ELIG:-none}'); a human removes it" >&2
+      exit 9
+    fi
+    # Bind the release to the CURRENT head and a posted clean verdict for it
+    # (PR #2752 review M1): a push during the independent review, or a
+    # non-clean verdict, never releases the hold. Unreadable => refuse.
+    _RH_LIVE="$(gh pr view "$PR" --repo "$_RH_RF" --json headRefOid -q .headRefOid 2>/dev/null)" || _RH_LIVE=""
+    if [ -z "$_RH_LIVE" ] || [ "$_RH_LIVE" != "$_RH_HEAD" ]; then
+      echo "PR #$PR: refusing to release '$HOLD' -- --head ${_RH_HEAD:0:12} is not the live head (${_RH_LIVE:-unreadable}); a human removes it" >&2
+      exit 9
+    fi
+    # The clean verdict must be THIS independent re-review's (sge-public#71
+    # review M2): the latest review-identity verdict for the head, mode: full,
+    # posted at/after the hold marker, carrying this session's id (which
+    # dp_hold_release_eligible already proved differs from the marker's).
+    _RH_MARKER="$(dp_latest_hold_marker "$_RH_RF" "$PR")" || _RH_MARKER=""
+    _RH_SINCE="$(printf '%s' "$_RH_MARKER" | jq -r '._posted_at // empty' 2>/dev/null)" || _RH_SINCE=""
+    _RH_MSESS="$(printf '%s' "$_RH_MARKER" | jq -r '.session | if type == "string" then . else "" end' 2>/dev/null)" || _RH_MSESS=""
+    if [ -z "$_RH_SINCE" ] || [ -z "$_RH_MSESS" ] \
+       || ! dp_clean_verdict_for_head "$_RH_RF" "$PR" "$_RH_HEAD" "$_RH_SINCE" "$(dp_session_id)" "$_RH_MSESS"; then
+      echo "PR #$PR: refusing to release '$HOLD' -- the latest sge-verdict from $(dp_review_login) for ${_RH_HEAD:0:12} is not a clean (pass/APPROVE, 0 blockers, 0 majors) mode: full re-review by this session posted after the hold marker; post it first" >&2
+      exit 9
+    fi
+    # A human's "sign-off pending" comment always wins over a policy release
+    # (sge-public#71 review m1): re-run review-lib's scan in a subshell (this
+    # script deliberately never sources review-lib.sh into its own shell).
+    _RH_SIGN="$( ( . "$_PRL_SCRIPT_DIR/review-lib.sh" >/dev/null 2>&1 && GH_REPO="$_RH_RF" rl_hold_check "$PR" '{"draft":false,"labels":["hold"]}' ) 2>/dev/null )" || _RH_SIGN=""
+    if [ "$_RH_SIGN" != "hold:hold" ]; then
+      echo "PR #$PR: refusing to release '$HOLD' -- sign-off scan says '${_RH_SIGN:-unreadable}' (a human sign-off-pending comment always wins); a human removes it" >&2
+      exit 9
+    fi
+    remove_label "$HOLD"
+    gh api "repos/$_RH_RF/issues/$PR/comments" \
+      -f body="hold released under standing order $_RH_ORDER (self-fixed security MAJOR, independent clean re-review at \`${_RH_HEAD:0:12}\`)" >/dev/null \
+      || echo "warning: could not post the release comment on PR #$PR" >&2
+    echo "PR #$PR: '$HOLD' released under standing order $_RH_ORDER"
+    ;;
+
   stale)
     # New commits landed after a pass — the prior verdict no longer covers HEAD.
     remove_label "$REVIEWED"
@@ -2211,129 +2502,82 @@ case "$CMD" in
     # reversal fires would otherwise survive with the label gone, blocking
     # the next legitimate reviewer's start-review for the rest of its TTL
     # window. Best-effort, same as pass/fail's cleanup — never fatal here.
-    delete_claim_comment
+    delete_claim_comment review
     echo "PR #$PR: $REVIEWED dropped (stale — new commits since last verdict)"
     ;;
 
   sync-check)
-    # Issue #1941: on pull_request:synchronize, strip pr-reviewed when the
-    # latest sge-verdict's commit SHA does not match the new head. A label
-    # that survived a push but whose verdict was pinned to the OLD head would
-    # lie about coverage until someone noticed. The require-pr-reviewed-label
-    # workflow already fires on synchronize and would pass (the label IS
-    # present) — but it cannot know that the verdict was for a different SHA
-    # because it only reads labels, not verdict blocks. This subcommand
-    # closes that gap.
+    # Issue #1941, widened by wtp-org#992 item 4 (head-scoped gate labels): on
+    # pull_request:synchronize, strip EVERY verdict gate label (pr-reviewed,
+    # changes-requested, agent-reviewed -- `gate-labels.sh list`) whose latest
+    # trusted sge-verdict judged a different commit than the new head. The
+    # currency rule and the verdict extraction live ONCE in gate-labels.sh
+    # (shared with the daemon's Python twin and the auto-merge gate); this
+    # subcommand is only the push-time writer.
     #
-    # Reuses the same sge-verdict parsing approach as state_machine.py
-    # (reviews first, then issue comments, most-recent first) but in bash+jq
-    # rather than reimplementing the Python. The --expect-head normalisation
-    # rules from `pass` apply: prefix match >= 7 hex chars, case-insensitive.
+    # The writer strips only PROVABLY stale labels (`classify` == stale). No
+    # verdict / a malformed SHA / an unreadable API retains the label -- readers
+    # already treat an unproven label as absent (fail closed), so deleting state
+    # on an outage would add nothing but noise. Human holds are not verdict
+    # labels and are never touched here.
 
     NEW_HEAD="${3:-}"
     [[ -n "$NEW_HEAD" ]] || { echo "error: sync-check requires <pr> <new-head-sha>" >&2; exit 2; }
+    # shellcheck source=skills/pr-review/gate-labels.sh
+    source "$(dirname "${BASH_SOURCE[0]}")/gate-labels.sh"
 
-    # 1) Is pr-reviewed even present? If not, nothing to strip.
-    LS="$(label_status 2>/dev/null)" || LS=""
-    if [[ "$LS" != *"reviewed=true"* ]]; then
-      echo "PR #$PR: sync-check — no $REVIEWED label, nothing to strip"
-      exit 0
-    fi
-
-    # 2) Find the latest sge-verdict commit SHA from PR reviews + comments.
-    #    Search reviews first (where gh pr review posts), then issue comments.
-    #    Take the most recent verdict found (reversed order).
-    REPO_FULL="${GH_REPO:-$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || true)}"
-    VERDICT_SHA=""
-    if [[ -n "$REPO_FULL" ]]; then
-      # Reviews (PR review API — most reliable, where /sge:pr-review posts).
-      # Extract the commit/sha/head field from the last sge-verdict block.
-      # Uses jq to parse the verdict block directly — avoids the 3-argument
-      # match() which only gawk supports (not BSD/macOS awk).
-      # Trusted-author filter (defense-in-depth): the App/Actions bot logins
-      # (wtp-sge[bot], github-actions[bot]) OR author_association OWNER/MEMBER/
-      # COLLABORATOR — the same trust anchor as verdict_trust.py (#1373/#1444).
-      # The association leg is required: WTP is a documented solo-dev org (see
-      # SGE_GOVERNANCE_PROFILE=solo in require-pr-reviewed-label.yml) where the
-      # PAT/self-review fallback (#862) posts every real sge-verdict under the
-      # operator's own MEMBER account, never a bot login (verified empirically
-      # against PRs #1980-1994) — without this leg VERDICT_SHA is always empty
-      # here and sync-check silently never fires (the "never observed acting"
-      # class #1941's own AC warns against; see #1664). An outside, non-
-      # collaborator commenter still cannot forge a verdict this way.
-      TRUST_FILTER='.user.login == "wtp-sge[bot]" or .user.login == "github-actions[bot]"
-           or (((.author_association // "") | ascii_upcase) as $assoc
-               | $assoc == "OWNER" or $assoc == "MEMBER" or $assoc == "COLLABORATOR")'
-      VERDICT_SHA=$(gh api "repos/$REPO_FULL/pulls/$PR/reviews" --paginate \
-        --jq '
-          [.[] | select(.body != null)
-           | select('"$TRUST_FILTER"')
-           | select(.body | test("```sge-verdict"))
-           | .body | split("\n")[] | select(test("^\\s*(commit|sha|head)\\s*:"))
-           | capture(":\\s*(?<val>\\S+)") | .val
-          ] | last // empty' \
-        2>/dev/null) || VERDICT_SHA=""
-
-      # Fallback: issue comments (same trusted-author filter)
-      if [[ -z "$VERDICT_SHA" ]]; then
-        VERDICT_SHA=$(gh api "repos/$REPO_FULL/issues/$PR/comments" --paginate \
-          --jq '
-            [.[] | select(.body != null)
-             | select('"$TRUST_FILTER"')
-             | select(.body | test("```sge-verdict"))
-             | .body | split("\n")[] | select(test("^\\s*(commit|sha|head)\\s*:"))
-             | capture(":\\s*(?<val>\\S+)") | .val
-            ] | last // empty' \
-          2>/dev/null) || VERDICT_SHA=""
+    # 1) Which verdict labels are on the PR NOW (API read, never the event payload)?
+    PRESENT_LABELS="$(gl_current_labels "$PR")" || PRESENT_LABELS=""
+    ON_PR=()
+    for _gl in "${GL_VERDICT_LABELS[@]}"; do
+      if printf '%s\n' "$PRESENT_LABELS" | grep -qxF "$_gl"; then
+        ON_PR+=("$_gl")
       fi
+    done
+    if [[ ${#ON_PR[@]} -eq 0 ]]; then
+      echo "PR #$PR: sync-check — no verdict gate label (${GL_VERDICT_LABELS[*]}), nothing to strip"
+      exit 0
     fi
 
+    # 2) The latest trusted sge-verdict's commit (reviews, then issue comments).
+    REPO_FULL="$(gl_repo)" || REPO_FULL=""
+    if ! VERDICT_SHA="$(gl_latest_verdict_sha "$PR")"; then
+      echo "PR #$PR: sync-check — verdicts unreadable; labels retained (readers treat unproven labels as absent)" >&2
+      exit 0
+    fi
     if [[ -z "$VERDICT_SHA" ]]; then
-      # No verdict found at all. Cannot prove staleness — do not strip.
-      # (Fail closed: the label stays, and the require-pr-reviewed-label
-      # workflow's own head-drift check handles the "label present but no
-      # verdict" case.)
-      echo "PR #$PR: sync-check — no sge-verdict found; cannot determine coverage; label retained"
+      echo "PR #$PR: sync-check — no sge-verdict found; cannot determine coverage; labels retained"
       exit 0
     fi
 
-    # 3) Compare verdict SHA against new head (prefix match, case-insensitive,
-    #    reusing the same normalisation as --expect-head).
-    VERDICT_NORM=$(printf '%s' "$VERDICT_SHA" | tr '[:upper:]' '[:lower:]')
-    HEAD_NORM=$(printf '%s' "$NEW_HEAD" | tr '[:upper:]' '[:lower:]')
-    # Use the shorter of the two as the prefix length (both must be >= 7).
-    V_LEN=${#VERDICT_NORM}
-    H_LEN=${#HEAD_NORM}
-    if [[ "$V_LEN" -lt 7 || "$H_LEN" -lt 7 ]]; then
-      echo "PR #$PR: sync-check — SHA too short to compare (verdict=$VERDICT_SHA, head=$NEW_HEAD); label retained" >&2
-      exit 0
-    fi
-    # Hex validation (matches pass's --expect-head guard): a non-hex verdict
-    # SHA means the verdict block is malformed — do not act on it.
-    if [[ ! "$VERDICT_NORM" =~ ^[0-9a-f]+$ ]]; then
-      echo "PR #$PR: sync-check — non-hex verdict SHA '$VERDICT_SHA'; label retained" >&2
-      exit 0
-    fi
-    PREFIX_LEN=$(( V_LEN < H_LEN ? V_LEN : H_LEN ))
-    if [[ "${VERDICT_NORM:0:$PREFIX_LEN}" == "${HEAD_NORM:0:$PREFIX_LEN}" ]]; then
-      echo "PR #$PR: sync-check — verdict covers head (${VERDICT_SHA:0:12}); $REVIEWED retained"
-      exit 0
-    fi
+    # 3) Strip each provably stale verdict label.
+    STRIPPED=()
+    for _gl in "${ON_PR[@]}"; do
+      _state="$(gl_classify "$_gl" "$VERDICT_SHA" "$NEW_HEAD")"
+      case "$_state" in
+        stale)
+          remove_label "$_gl"
+          STRIPPED+=("$_gl")
+          ;;
+        current)
+          echo "PR #$PR: sync-check — verdict covers head (${VERDICT_SHA:0:12}); $_gl retained"
+          ;;
+        *)
+          echo "PR #$PR: sync-check — $_gl $_state (verdict '$VERDICT_SHA', head '$NEW_HEAD'); label retained" >&2
+          ;;
+      esac
+    done
+    [[ ${#STRIPPED[@]} -gt 0 ]] || exit 0
 
-    # 4) Stale: strip the label and post a comment.
-    remove_label "$REVIEWED"
-    # Clean up any orphaned claim comment too (issue #2193 follow-up from
-    # #2185/#2192): stripping pr-reviewed here reverses a completed review
-    # without going through pass/fail, so their claim-comment cleanup never
-    # runs. A leftover claim from a review still in flight when this fires
-    # would otherwise block the next legitimate reviewer's start-review for
-    # the rest of its TTL window. Best-effort — never fatal here.
-    delete_claim_comment
-    echo "PR #$PR: $REVIEWED stripped — verdict was pinned to ${VERDICT_SHA:0:12}, new head is ${NEW_HEAD:0:12} (issue #1941)"
+    # Stripping a verdict label reverses a completed review without going
+    # through pass/fail, so their claim-comment cleanup never runs (issue #2193
+    # follow-up): clean up any orphaned claim comment. Best-effort.
+    delete_claim_comment review
+    echo "PR #$PR: ${STRIPPED[*]} stripped — verdict was pinned to ${VERDICT_SHA:0:12}, new head is ${NEW_HEAD:0:12} (issue #1941, wtp-org#992)"
 
-    # Best-effort comment so the author sees WHY the gate reopened.
-    COMMENT_BODY="$(printf '**pr-reviewed stripped** (issue #1941)\n\nThe latest `sge-verdict` was pinned to `%s`; the new head after push is `%s`. The label cannot assert a review of a superseded SHA.\n\nA re-review that passes at the new head will restore the label automatically.' \
-      "$VERDICT_SHA" "$NEW_HEAD")"
+    # One best-effort comment so the author sees WHY the gate reopened.
+    COMMENT_BODY="$(printf '**%s stripped** (head-scoped gate labels; issue #1941)\n\nThe latest `sge-verdict` was pinned to `%s`; the new head after push is `%s`. A verdict label cannot describe a superseded commit.\n\nA re-review at the new head re-applies the right label.' \
+      "${STRIPPED[*]}" "$VERDICT_SHA" "$NEW_HEAD")"
     if [[ -n "$REPO_FULL" ]]; then
       gh api "repos/$REPO_FULL/issues/$PR/comments" -f body="$COMMENT_BODY" >/dev/null 2>&1 \
         || echo "warning: could not post staleness comment on PR #$PR (best-effort)" >&2
@@ -2507,6 +2751,16 @@ case "$CMD" in
       esac
     done
     if [[ "$FORCE_CLAIM" != "true" ]]; then
+      # Shared claim protocol (wtp-org#992 item 5): a live review/work claim by
+      # another owner blocks a fix too; the pr-fixing lane itself is aged below.
+      set +e
+      _XL=$(claim_status_line 2>/dev/null)
+      _XRC=$?
+      set -e
+      if [[ "$_XRC" -eq 3 && "$_XL" != "held lane=fix "* ]]; then
+        echo "refusing: PR #$PR has a live claim ($_XL) — another agent is working it (wtp-org#992)" >&2
+        exit 3
+      fi
       CUR_STATUS=$(fix_claim_status 2>/dev/null) || CUR_STATUS=""
       if [[ "$CUR_STATUS" == *"fixing=true"* ]]; then
         CLAIM_TTL_MIN="${SGE_FIX_CLAIM_TTL_MIN:-30}"
@@ -2622,7 +2876,7 @@ case "$CMD" in
       echo "PR #$PR: no orphaned claim — $REVIEWING not present"
       exit 0
     fi
-    _CLAIM_JSON=$(find_claim_comment)
+    _CLAIM_JSON=$(find_claim_comment review)
     _CLAIMED_EPOCH=""
     _CLAIM_OWNER=""
     if [[ -n "$_CLAIM_JSON" ]]; then
@@ -2680,7 +2934,7 @@ case "$CMD" in
     # straight to pr-reviewed would skip them entirely. A human or the next
     # /sge:pr-review cycle re-reviews from a known-safe closed gate.
     ensure_labels
-    delete_claim_comment
+    delete_claim_comment review
     remove_label "$REVIEWED"
     remove_label "$REVIEWING"
     if ! (add_label "$CHANGES_REQUESTED"); then
@@ -2694,6 +2948,152 @@ case "$CMD" in
     fi
     STATUS="$(label_status)" || STATUS="(label_status unavailable)"
     echo "PR #$PR: orphaned claim reconciled — $REVIEWING released, $CHANGES_REQUESTED applied ($STATUS)"
+    ;;
+
+  claim-status)
+    # Shared claim protocol reader (wtp-org#992 item 5). Exit 0 = free (or the
+    # caller's own claim), 3 = another owner holds a live claim, 1 = unreadable.
+    set +e
+    claim_status_line
+    _RC=$?
+    set -e
+    exit "$_RC"
+    ;;
+
+  claim-work)
+    # Reserve a PR for arbitrary agent work (wtp-org#992 item 5). Refuses on ANY
+    # live claim held by another owner -- review, fix or work -- so an
+    # orchestrator's subagent and the review daemon never work the same PR.
+    set +e
+    _ST=$(claim_status_line)
+    _RC=$?
+    set -e
+    if [[ "$_RC" -eq 3 ]]; then
+      echo "refusing: PR #$PR has a live claim ($_ST) — another agent is working it (wtp-org#992)" >&2
+      exit 3
+    fi
+    [[ "$_RC" -eq 0 ]] || { echo "error: could not determine claim state for PR #$PR" >&2; exit 1; }
+    # Re-entrant only when the caller already holds a live WORK claim: a live
+    # claim of ours in another lane (e.g. review) is not a work claim, and
+    # skipping the post there left agent-working with no backing work comment
+    # (sge-public#71 review M5).
+    _WST=$(claim_status_line work 2>/dev/null) || _WST=""
+    # Never delete another owner's claim comment here (#2724 review): a stale
+    # one is harmless (readers take the latest, which ours supersedes), and a
+    # comment that went live between our status read and a delete would be
+    # destroyed out from under its owner.
+    LAST_CLAIM_COMMENT_ID=""
+    [[ "$_WST" == mine* ]] || post_claim_comment work
+    if [[ "$_WST" != mine* && -z "$LAST_CLAIM_COMMENT_ID" ]]; then
+      echo "error: could not post PR #$PR's work claim comment — not claimed" >&2
+      exit 1
+    fi
+    # agent-working is applied only once the claim is established (re-entrant,
+    # or this call won the race below): an exit that fails or loses never adds
+    # it, so it can neither be orphaned nor strip a winner's label (sge-public#71
+    # review m2, sge#2770 review). A winner's comment briefly without its label
+    # is safe: racers resolve on comments, and readers see the label within a call.
+    _claim_work_label() {
+      gh label create "$WORKING" --color FBCA04 --description "An agent is working this PR (SGE shared claim)" --force >/dev/null 2>&1 || true
+      add_label "$WORKING"
+    }
+    # Post-then-verify (check-then-post races, #2724 review): the OLDEST live
+    # trusted work claim wins. GitHub comments have no compare-and-swap, but ids
+    # are monotonic, so every racer that re-reads after posting agrees on the
+    # same winner: an earlier poster that verifies before a later claim lands
+    # sees only its own and proceeds; the later poster then sees the earlier
+    # (older) live claim and backs off, withdrawing exactly the comment id it
+    # posted -- never anyone else's.
+    #   * Trusted authors only (the daemon's _claim_honoured rule, #2246): a
+    #     comment from outside the repo's OWNER/MEMBER/COLLABORATOR set (or the
+    #     SGE bots) can never win, so a drive-by commenter cannot park a PR.
+    #   * Only work-lane claims (and our own) compete: a live review/fix claim
+    #     was already refused by the status check above.
+    #   * Known trade-offs, both in the safe (back-off) direction: a leftover
+    #     live work comment whose label was removed still wins until its ttl
+    #     (it cannot be told apart from a racer that has not labelled yet); and
+    #     until the loser's DELETE lands, "latest claim" readers see the loser.
+    #   * SGE_CLAIM_TRUSTED_LOGINS (space-separated) adds claimant logins that
+    #     carry no repo association, e.g. another GitHub App's `<slug>[bot]`.
+    _ME="${SGE_AGENT_ID:-$(hostname 2>/dev/null || echo unknown)}"
+    if [[ "$_WST" == mine* ]]; then
+      # Re-entrant take: the status check already proved the live claim is
+      # ours and nothing was posted, so there is no race to resolve.
+      _claim_work_label
+      echo "PR #$PR: work claimed (owner=$_ME, already held)"
+      exit 0
+    fi
+    _RF="$(_claim_repo_full)"
+    _CLAIMS=""
+    [[ -n "$_RF" ]] && _CLAIMS=$(gh api "repos/$_RF/issues/$PR/comments" --paginate 2>/dev/null \
+      | jq -cs --arg f "$CLAIM_COMMENT_FENCE" --arg mine "${LAST_CLAIM_COMMENT_ID:-}" \
+          '[add[]? | select((.body // "") | ltrimstr("\n") | startswith("```" + $f))
+            | select((.id | tostring) == $mine or ('"$CLAIM_TRUST_JQ"'))]
+           | sort_by(.id) | .[]' \
+          2>/dev/null) || _CLAIMS=""
+    _WINNER=""
+    while IFS= read -r _CJ; do
+      [[ -n "$_CJ" ]] || continue
+      _O=$(parse_claim_metadata "$_CJ" | jq -r '.owner // empty' 2>/dev/null) || _O=""
+      _L=$(parse_claim_metadata "$_CJ" | jq -r '.lane // empty' 2>/dev/null) || _L=""
+      [[ "$_L" == "work" ]] || continue
+      if claim_comment_live "$_CJ"; then _WINNER="$_O"; break; fi
+    done <<< "$_CLAIMS"
+    if [[ -z "$_WINNER" ]]; then
+      echo "error: could not re-read PR #$PR's claim comments to confirm the work claim" >&2
+      [[ -n "$LAST_CLAIM_COMMENT_ID" ]] && gh api --method DELETE "repos/$_RF/issues/comments/$LAST_CLAIM_COMMENT_ID" >/dev/null 2>&1
+      exit 1
+    fi
+    if [[ "$_WINNER" != "$_ME" ]]; then
+      if [[ -n "$LAST_CLAIM_COMMENT_ID" ]]; then
+        gh api --method DELETE "repos/$_RF/issues/comments/$LAST_CLAIM_COMMENT_ID" >/dev/null 2>&1 \
+          || gh api --method DELETE "repos/$_RF/issues/comments/$LAST_CLAIM_COMMENT_ID" >/dev/null 2>&1 \
+          || echo "warning: PR #$PR could not withdraw claim comment $LAST_CLAIM_COMMENT_ID" >&2
+      fi
+      echo "refusing: PR #$PR was claimed concurrently by $_WINNER (an older live claim) — backing off (wtp-org#992)" >&2
+      exit 3
+    fi
+    _claim_work_label
+    echo "PR #$PR: work claimed (owner=${SGE_AGENT_ID:-$(hostname 2>/dev/null || echo unknown)}, ttl=${CLAIM_COMMENT_TTL}s)"
+    ;;
+
+  release-work)
+    # Never release another owner's live WORK claim unless --force. Lane-scoped
+    # (sge-public#71 review M4): a subagent's live review claim is not this
+    # lane's, and is neither a reason to refuse nor ever deleted here.
+    if [[ "${3:-}" != "--force" ]]; then
+      set +e
+      _ST=$(claim_status_line work)
+      _RC=$?
+      set -e
+      if [[ "$_RC" -eq 3 ]]; then
+        echo "refusing: PR #$PR work claim is held by another owner ($_ST); pass --force to release it anyway" >&2
+        exit 3
+      fi
+    fi
+    remove_label "$WORKING"
+    if [[ "${3:-}" == "--force" ]] || _own_claim_comment work; then delete_claim_comment work; fi
+    echo "PR #$PR: $WORKING released"
+    ;;
+
+  release-review)
+    # Release a review claim this caller took with start-review (shared claim
+    # protocol). Never releases another owner's live claim unless --force.
+    _FORCE=false
+    [[ "${3:-}" == "--force" ]] && _FORCE=true
+    if [[ "$_FORCE" != "true" ]]; then
+      set +e
+      _ST=$(claim_status_line review)
+      _RC=$?
+      set -e
+      if [[ "$_RC" -eq 3 ]]; then
+        echo "refusing: PR #$PR review claim is held by another owner ($_ST); pass --force to release it anyway" >&2
+        exit 3
+      fi
+    fi
+    remove_label "$REVIEWING"
+    if [[ "$_FORCE" == "true" ]] || _own_claim_comment review; then delete_claim_comment review; fi
+    echo "PR #$PR: $REVIEWING released"
     ;;
 
   *)

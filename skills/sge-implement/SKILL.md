@@ -294,7 +294,7 @@ The inner loop is owned by `/sge:tdd-workflow` — follow it for every acceptanc
 
 **Commit each slice** via `/sge:commit` — cadence per `/sge:tdd-workflow` Golden Rule 5 (never more than one cycle uncommitted). Pass it the spec id (`Spec: SPEC-NNN`) or the no-spec `SGE-Override` reason; it owns the trailer + quality gate.
 
-**Push early, draft early (issue #1170) — don't hold commits until Phase 6.** As soon as the **first meaningful commit** exists (enabler or first green slice), push the branch and open the PR as a **draft**, then push each green-cycle commit so every checkpoint is remotely durable (rationale + WIP rule: [`../worktrees/SKILL.md`](../worktrees/SKILL.md)).
+**Push early, draft early (issue #1170) — don't hold commits until Phase 6.** Once the **first meaningful commit** exists (enabler or first green slice), push and open a **draft** PR, then push each green-cycle commit so every checkpoint is durable (rationale + WIP rule: [`../worktrees/SKILL.md`](../worktrees/SKILL.md)).
 
 ```bash
 git push -u origin <branch>
@@ -304,8 +304,9 @@ gh pr edit --add-label hold
 ```
 
 > `Part of`, not `Closes`. Non-GitHub tracker: [close-on-merge](references/alm-close-on-merge.md).
+> Bot PR author: [author-identity](references/author-identity.md).
 
-`hold` goes on immediately (#2509, hold-first.md). PR **stays a draft**, no other label here (#699; full rule Phase 6). Phase 6 reuses it; "PR already exists" is expected.
+`hold` goes on immediately (#2509, hold-first.md). PR **stays a draft**, no other label (#699; rule in Phase 6), reused by Phase 6.
 
 Repeat per acceptance criterion.
 

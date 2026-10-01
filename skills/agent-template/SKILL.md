@@ -226,7 +226,17 @@ gate's decision strands a worktree.
 [ ] Per-Task budget ceiling stated in every Task prompt
 [ ] Draft PR after first commit (lane Rule 2); stale-lane kill on no-PR timeout
 [ ] Unattended orchestrator: export SGE_UNATTENDED=1 in every dispatched lane's prompt (#2487)
+[ ] Shared claim before a subagent touches a PR: ${CLAUDE_PLUGIN_ROOT}/scripts/pr-claim.sh check, then take --lane work --owner <id>; release on exit (${CLAUDE_PLUGIN_ROOT}/skills/lib/shared-claim-protocol.md)
 ```
+
+**Shared claim protocol.** A subagent working an existing PR must not collide
+with PR Warden or another agent. Before dispatch run
+`"$SGE_ROOT/scripts/pr-claim.sh" check owner/repo#N --owner <id>`. Exit 3 means
+the PR is held, so pick another. Otherwise run
+`take owner/repo#N --lane work --owner <id>`, pass `<id>` to the subagent so it
+can `heartbeat` on long runs, and `release … --lane work` when the lane ends.
+The details, including the review handoff env, are in
+[`../lib/shared-claim-protocol.md`](../lib/shared-claim-protocol.md).
 
 ---
 
