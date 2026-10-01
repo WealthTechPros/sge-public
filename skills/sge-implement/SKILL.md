@@ -33,7 +33,7 @@ Implement a GitHub issue end-to-end — entry-criteria preflight through TDD, in
 | Create new files | Write |
 | Spawn forked review, preflight, or the governance-trace gate | Agent (fork) |
 
-Pipeline: governance-trace (0.5) → entry criteria (`/sge:sge-preflight`) → complexity sizing → TDD (`/sge:tdd-workflow`) → verify → forked review (`/sge:sge-review`) → commit + PR (`/sge:commit`) → PR-review + fix loop to `pr-reviewed` + auto-merge → post-merge L6 UPDATE.
+Pipeline: intake gate (−1) → governance-trace (0.5) → entry criteria (`/sge:sge-preflight`) → complexity sizing → TDD (`/sge:tdd-workflow`) → verify → forked review (`/sge:sge-review`) → commit + PR (`/sge:commit`) → PR-review + fix loop to `pr-reviewed` + auto-merge → post-merge L6 UPDATE.
 
 ## Usage
 
@@ -79,6 +79,12 @@ Pipeline: governance-trace (0.5) → entry criteria (`/sge:sge-preflight`) → c
 
 ---
 
+## Phase −1: Intake gate (SPEC-126, #2782)
+
+First, before any fork, worktree or code: `bash "$SGE_ROOT/scripts/intake-check.sh" <N> --govtrace-out "$(mktemp -d)/govtrace.json"` (exact sequence: intake-gate.md). It passes only for a fresh, unedited `## SGE intake` record by an allow-listed human deciding Build or Re-scope (`rescope` → build only its `scope`). Fails → **interactive:** run `/sge:issue-intake <N>` inline, then re-check; **headless:** `outcome: "blocked"` with the check's reason, stop. No bypass; emergencies use `/sge:issue-intake --hotfix`. Detail: [`intake-gate.md`](references/intake-gate.md).
+
+---
+
 ## Phase 0: Cortex pre-flight + route
 
 **Cortex lookup (hit/miss discipline):** before reading any file or calling `gh issue view`, call `search_nodes` with the issue number and any spec id in the preloaded context. If sge-memory is unconfigured, skip silently.
@@ -110,13 +116,13 @@ This phase **owns** the governance classification — folded in by default, not 
 
 **Size pre-score — the outermost gate (#1265, #1342).** Before *any* governance work, pre-score the issue body (no fork/preflight) → `{tier, score}`. **`LARGE`** → decompose first, children classified once via `/sge:build-ready-audit`'s #872 fold (parent fork skipped, not run-then-discarded); **`AMBIGUOUS`**/empty-body → full sequence; **`SMALL`**/**`MEDIUM`** → tier gate below. Precedence: size > tier > reuse > fork. Bash + thresholds: [`verdict-handling.md`](references/verdict-handling.md#size-pre-score--the-outermost-gate-1265-1342).
 
-**Pre-fork tier gate (skip the ~73k fork for trivial work).** Tier the issue's predicted paths with the same classifier Phase 2.5 uses: **`trivial`** classifies **inline** — no fork; **`standard`**/**`critical`** fall through to the full fork (CRITICAL never down-tiers). Contract: [`verdict-handling.md`](references/verdict-handling.md#pre-fork-tier-gate-inline-classification). **Caller owns Step W (SPEC-108 §2.4a, #1938):** the inline-trivial tier-gate and an adopted front-loaded verdict never run `/sge:governance-trace`, so write Cortex directly — `create_entities` with `path: tier-gate` or `path: front-loaded` (fire-and-forget). [`cortex-write.md`](../governance-trace/references/cortex-write.md).
+**Pre-fork tier gate (skip the ~73k fork for trivial work).** Tier the issue's predicted paths with the same classifier Phase 2.5 uses: **`trivial`** classifies **inline** — no fork; **`standard`**/**`critical`** fall through to the full fork (CRITICAL never down-tiers). Contract: [`verdict-handling.md`](references/verdict-handling.md#pre-fork-tier-gate-inline-classification). **Caller owns Step W (SPEC-108 §2.4a, #1938):** the inline-trivial tier-gate and an adopted intake verdict never run `/sge:governance-trace`, so write Cortex directly — `create_entities` with `path: tier-gate` or `path: intake` (fire-and-forget). [`cortex-write.md`](../governance-trace/references/cortex-write.md).
 
-> **Orchestrator dispatch — do not double-dispatch governance-trace.** Phase 0.5 already runs the mandatory gate — the orchestrator must **not** *also* fire a parallel `/sge:governance-trace` on the same issue (doubles the ~75k cost; can block *after* coding started). To front-load a batch, use the **reuse path** below (or `/sge:build-ready-audit`).
+> **Orchestrator dispatch — do not double-dispatch governance-trace.** Phase 0.5 already runs the mandatory gate — the orchestrator must **not** *also* fire a parallel `/sge:governance-trace` on the same issue (doubles the ~75k cost; can block *after* coding started). To front-load verdicts, record them with `/sge:issue-intake` — the only adoptable source.
 
-**Front-loaded verdict fast-path — MANDATORY guard (check BEFORE any fork).** If `SGE_GOVTRACE_VERDICT` is set and structurally valid (issue-matched, known verdict, valid confidence — contamination-guarded), **adopt it and do not re-run `/sge:governance-trace`** (skip forking it); otherwise fall through to the fork. **Reuse is not a bypass** — it enters the same branch-on-verdict logic below, and a reused blocking verdict still pauses before any code is written. Full validity rules + reuse mechanics: [`orchestration.md`](references/orchestration.md).
+**Front-loaded verdict — intake record only (check BEFORE any fork).** If Phase −1 wrote a verdict file, adopt it via `fork-util.mjs register` + `join` (re-validates verdict value + issue/repo echo) and **do not re-run `/sge:governance-trace`**. `SGE_GOVTRACE_VERDICT` is **never** adopted — unverifiable provenance; ignore it and fork. **Reuse is not a bypass** — a reused blocking verdict still pauses before any code is written. Commands: [`intake-gate.md`](references/intake-gate.md#phase-05--adopt-a-verdict-only-from-the-intake-record).
 
-If no structurally valid front-loaded verdict is present, dispatch `/sge:governance-trace <issue-number> [--spec SPEC-NNN]` as a **forked, headless** subagent — verify mode when a spec was cited/entered, else classify mode. **Thread the target repo into the fork prompt (SPEC-057, #1558)** — it must `cd`/`assert-repo` there before any read/write. It returns the Step-7 verdict object (`verdict`, `matchedSpec`, `matchConfidence`, `layers`, …).
+If no intake verdict was adopted, dispatch `/sge:governance-trace <issue-number> [--spec SPEC-NNN]` as a **forked, headless** subagent — verify mode when a spec was cited/entered, else classify mode. **Thread the target repo into the fork prompt (SPEC-057, #1558)** — it must `cd`/`assert-repo` there before any read/write. It returns the Step-7 verdict object (`verdict`, `matchedSpec`, `matchConfidence`, `layers`, …).
 
 > **Dispatch tool: `Agent`, never `Skill(args=)` (#2452)** — `Skill` inlines, not forks. **Fork result contract (#2452):** no verdict JSON / missing `issue` echo / issue-repo mismatch → blocking. Detail: [`orchestration.md`](references/orchestration.md#dispatch-tool--agent-never-skillargs-issue-2452).
 
@@ -167,28 +173,7 @@ Delegate the mechanical checks to `/sge:sge-preflight <issue-number>`. It reads 
 
 On success, `export SGE_SPEC_ID=<specId>` before continuing — this lets the token-metering hook (#726) attribute usage to the right spec, and is what `/sge:cost-guard` / `/sge:roi-report` key off. Without it the meter falls back to a branch-name match, or "unattributed".
 
-If `readyToBuild` is `true` → Phase 2. If `false`, map each reported failure to its recovery options:
-
-**Spec file does not exist:**
-- Option A: "The spec is in a combined file" — read from it
-- Option B: "Create the spec first" — stop
-- Option C: "Cancel"
-
-**A dependency is not built:**
-- Option A: "Implement the dependency first"
-- Option B: "Implement anyway (stubs)" — proceed with TODO markers
-- Option C: "Cancel"
-
-**No acceptance criteria found** (issue body and spec both lack Gherkin scenarios):
-- Option A: "Use the spec's acceptance criteria"
-- Option B: "Generate criteria from the spec" — auto-generate, show for approval
-- Option C: "Proceed without criteria"
-- Option D: "Cancel"
-
-**An unresolved Open Question (QD-NN) blocks the spec** — an unresolved QD that gates the spec means it is **not ready to build**:
-- Option A: "Resolve the QD first" — stop; link the blocking QD
-- Option B: "Proceed with a recorded assumption" — state the assumption on the issue, carry it into the PR body
-- Option C: "Cancel"
+If `readyToBuild` is `true` → Phase 2. If `false`, map each reported failure (missing spec file, unbuilt dependency, no acceptance criteria, blocking QD-NN — an unresolved QD means **not ready to build**) to its lettered recovery options: [`entry-criteria-options.md`](references/entry-criteria-options.md).
 
 ---
 

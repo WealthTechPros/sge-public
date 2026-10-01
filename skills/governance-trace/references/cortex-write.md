@@ -44,7 +44,7 @@ create_entities([{
     "verdict: <VERDICT>",
     "matchedSpec: <SPEC-NNN|none>",
     "matchConfidence: <high|medium|low>",
-    "path: <full|cache-hit|tier-gate|not-onboarded|front-loaded>",
+    "path: <full|cache-hit|tier-gate|not-onboarded|front-loaded|intake>",
     "classifiedAt: <ISO8601>"
   ]
 }])
@@ -82,15 +82,16 @@ Every other terminal path writes.
 ## Front-loaded verdicts — the caller owns the write
 
 A **front-loaded verdict** is one injected by an orchestrator rather than
-derived here: `SGE_GOVTRACE_VERDICT` (the agent-template convention) or
-`/sge:sge-implement`'s Phase 0.5 fast-path, which adopts a structurally valid
-verdict and *skips the fork entirely*.
+derived here: `SGE_GOVTRACE_VERDICT` (the agent-template / team-pipeline lane
+convention, until #2782 Phase 2) or the `govtrace` in a validated `## SGE intake`
+record, which `/sge:sge-implement`'s Phase 0.5 adopts (SPEC-126) — it no longer
+adopts a bare `SGE_GOVTRACE_VERDICT` — *skipping the fork entirely*.
 
 On that path **this skill never executes**, so it cannot write. The obligation
 does not vanish with it — the **adopting caller** owns the Step W write
-(`path: front-loaded`, reinforcing the existing entity). SKILL.md's Step W
+(`path: front-loaded`, or `path: intake` for an intake-adopted verdict, reinforcing the existing entity). SKILL.md's Step W
 table records the contract; the caller-side wiring (#1938) lives in
-`/sge:sge-implement` Phase 0.5 (the front-loaded fast-path and, with
+`/sge:sge-implement` Phase 0.5 (the intake-adopted path, `path: intake`, and, with
 `path: tier-gate`, the inline-trivial tier gate), `/sge:team-pipeline`'s
 implementation lane, and the `agent-template` lane-side guard (the reference
 contract for custom fan-out orchestrators).
