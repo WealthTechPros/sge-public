@@ -2021,6 +2021,18 @@ rl_verdict_fill_session() {
     { print }'
 }
 
+# rl_verdict_field <body> <key> -- the value of the single `<key>:` line in the
+# body's FIRST sge-verdict block ("" when absent or repeated). The key matches
+# case-insensitively (`Commit:` is `commit:`), as the daemon's parsers read it.
+# UNTRUSTED text: printed, never evaluated.
+rl_verdict_field() {
+  printf '%s\n' "$1" | tr -d '\r' | awk -v k="$2" '
+    !done && /^[ \t]*```+sge-verdict[ \t]*$/ { inb = 1; next }
+    inb && /^[ \t]*```+[ \t]*$/ { inb = 0; done = 1; next }
+    inb && tolower($0) ~ "^[ \t]*" tolower(k) "[ \t]*:" { v = $0; sub(/^[^:]*:[ \t]*/, "", v); sub(/[ \t]+$/, "", v); n++ }
+    END { if (n == 1) print v }'
+}
+
 # rl_post_verdict <pr> <event> [body] -- post the review verdict.
 #   event: APPROVE | REQUEST_CHANGES | COMMENT
 #   body:  positional arg, or read from stdin when omitted.
@@ -2073,11 +2085,20 @@ rl_post_verdict() {
     echo "rl_post_verdict: REFUSING to post — the verdict declares $(rl_verdict_findings_total "$body") finding(s) but findings_comment is '$(rl_verdict_findings_ref "$body")' and no verified findings comment exists (issue #1858). Post the findings via rl_post_findings_comment first, or fold them into the verdict body and set 'findings_comment: inline'." >&2
     return 6
   fi
+  # Verdict pinned to what it judged (sge#2781). The block's `commit:` goes out
+  # as commit_id on every route: without it GitHub binds the review to whatever
+  # the head is at POST time, so a push landing just before the POST would get
+  # an approval for a commit the review never read (and branch protection's
+  # stale-approval dismissal would key off the wrong commit).
+  local vcommit
+  local -a pin=()
+  vcommit=$(rl_verdict_field "$body" commit)
+  [[ "$vcommit" =~ ^[0-9a-fA-F]{40}$ ]] && pin=(-f "commit_id=${vcommit}")
   mode=$(rl_review_identity)
   if [ "$mode" = "app" ]; then
     if tok=$(rl_app_installation_token); then
       if resp=$(GH_TOKEN="$tok" gh api --method POST "repos/${repo}/pulls/${pr}/reviews" \
-           -f "event=${event}" -f "body=${body}" 2>/dev/null); then
+           -f "event=${event}" -f "body=${body}" ${pin[@]+"${pin[@]}"} 2>/dev/null); then
         rid=$(printf '%s' "$resp" | jq -r '.id // empty' 2>/dev/null)
         echo "rl_post_verdict: posted ${event} review on PR #${pr} as the wtp-sge App -- real approval, builder != reviewer (issue #862)" >&2
         if [[ "$rid" =~ ^[0-9]+$ ]]; then
@@ -2102,7 +2123,7 @@ rl_post_verdict() {
     COMMENT)         flag="COMMENT" ;;
   esac
   if resp=$(gh api --method POST "repos/${repo}/pulls/${pr}/reviews" \
-       -f "event=${flag}" -f "body=${body}" 2>/dev/null); then
+       -f "event=${flag}" -f "body=${body}" ${pin[@]+"${pin[@]}"} 2>/dev/null); then
     rid=$(printf '%s' "$resp" | jq -r '.id // empty' 2>/dev/null)
     echo "rl_post_verdict: posted ${event} review on PR #${pr} via PAT/bot identity" >&2
     if [[ "$rid" =~ ^[0-9]+$ ]]; then
@@ -2124,7 +2145,7 @@ rl_post_verdict() {
     # anyway, but only AFTER the label already claimed otherwise).
     echo "rl_post_verdict: ${flag} rejected (self-authored PR?) -- posting as COMMENT with the recommendation stated in-body" >&2
     if resp=$(gh api --method POST "repos/${repo}/pulls/${pr}/reviews" \
-         -f "event=COMMENT" -f "body=Recommendation: ${event}"$'\n\n'"${body}" 2>/dev/null); then
+         -f "event=COMMENT" -f "body=Recommendation: ${event}"$'\n\n'"${body}" ${pin[@]+"${pin[@]}"} 2>/dev/null); then
       rid=$(printf '%s' "$resp" | jq -r '.id // empty' 2>/dev/null)
       echo "rl_post_verdict: verdict recorded as COMMENT only (PAT self-approval rejected) -- pr-reviewed must not be applied from this verdict (issue #2261)" >&2
       if [[ "$rid" =~ ^[0-9]+$ ]]; then
