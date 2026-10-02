@@ -1,5 +1,5 @@
 ---
-description: Reference template and convention guide for custom orchestrators that dispatch SGE implementation lanes. Use when building a bespoke fan-out orchestrator (not /sge:team-pipeline or /sge:issue-swarm) and you need to know the correct way to batch-classify issues, inject SGE_GOVTRACE_VERDICT, and wire the governance gate into dispatched lanes.
+description: Reference template and convention guide for custom orchestrators that dispatch SGE implementation lanes. Use when building a bespoke fan-out orchestrator (not /sge:team-pipeline or /sge:issue-swarm) and you need to know the correct way to gate dispatch on the human intake record (intake-check.sh), adopt the intake record's governance verdict, and wire the governance gate into dispatched lanes.
 argument-hint: ""
 ---
 
@@ -8,10 +8,11 @@ argument-hint: ""
 ## Role
 
 Documents the canonical conventions a **custom orchestrator** must follow when
-it dispatches SGE implementation lanes — specifically the `SGE_GOVTRACE_VERDICT`
-injection convention introduced by #1344 (batch front-loading the governance-trace
-gate). Use this as a checklist when you are building a bespoke fan-out that is not
-`/sge:team-pipeline` or `/sge:issue-swarm`.
+it dispatches SGE implementation lanes — specifically the intake gate (SPEC-126,
+#2793): dispatch only issues with a valid human intake record, and let each lane
+adopt the governance verdict carried in that record. Use this as a checklist when
+you are building a bespoke fan-out that is not `/sge:team-pipeline` or
+`/sge:issue-swarm`.
 
 > **Note:** `/sge:team-pipeline` and its Duration Mode (`/sge:issue-swarm`) already
 > implement every convention in this document (Phase 1.5 + Phase 3c). Read this
@@ -20,127 +21,51 @@ gate). Use this as a checklist when you are building a bespoke fan-out that is n
 
 ---
 
-## SGE_GOVTRACE_VERDICT injection convention (#1344)
+## Intake gate convention (SPEC-126, #2793)
 
 ### Why
 
-Each implementation lane runs `/sge:sge-implement` (or the Lean Agent Contract
-equivalent), which **must** classify the issue against SGE governance artefacts
-before writing code — the mandatory Phase 0.5 governance-trace gate. Without
-front-loading, every lane forks its own `/sge:governance-trace` subagent — a
-~73k-token, 10–15 min cost repeated N times for an N-issue wave.
+Nothing is built without a human yes. `/sge:issue-intake` records that yes as a
+`## SGE intake` comment posted from the approver's own login, and
+`scripts/intake-check.sh <N>` verifies it mechanically (newest marker, allow-listed
+human, unedited, fresh, decision `build` or `rescope`). The record also carries the
+human-approved governance verdict (`govtrace`), so a lane that adopts it skips its
+~73k-token governance-trace fork with provenance it can check.
 
-The **batch pre-classification** pattern collapses that to a single
-`/sge:build-ready-audit` call over the whole wave **before** lanes start,
-producing a verdict map the orchestrator injects at dispatch time. Each lane
-detects `SGE_GOVTRACE_VERDICT` and skips its own fork, adopting the pre-computed
-verdict instead — same gate, ~1/N of the cost.
+The retired convention — batch-classify the wave and inject the verdict into each
+lane as `SGE_GOVTRACE_VERDICT` — is removed: its shape could be checked, its
+provenance could not, so the env verdict is never adopted.
 
-### Shape of SGE_GOVTRACE_VERDICT
+### Orchestrator side: dispatch only intake-passing issues
 
-The env var (or prompt-injected field) carries compact JSON:
-
-```json
-{
-  "issue": 256,
-  "verdict": "MATCHES_EXISTING",
-  "matchedSpec": "SPEC-088",
-  "matchConfidence": "high",
-  "layers": {
-    "capability": { "status": "existing", "id": "CAP-04" },
-    "feature":    { "status": "existing", "id": "F-EXPORT" },
-    "spec":       { "status": "existing", "id": "SPEC-088" }
-  }
-}
-```
-
-**Required fields for structural validity** (the lane validates all of these):
-
-| Field | Type | Required values |
-|-------|------|-----------------|
-| `issue` | integer | must equal the lane's issue number exactly |
-| `verdict` | string | one of: `MATCHES_EXISTING` · `MATCHES_EXISTING_MODIFIED` · `NEEDS_NEW_SPEC` · `NO_SPEC_WARRANTED` · `NOT_SGE_SCOPE` · `NOT_ONBOARDED` |
-| `matchConfidence` | string | one of: `high` · `medium` · `low` |
-
-If any required field is missing, wrong type, or out of range → the lane falls
-through to a per-lane fork. Never pass a verdict for the wrong issue number.
-
-### Step-by-step: adding batch pre-classification to a custom orchestrator
-
-**Step 1 — collect the issue list** (after dependency gate + reconcile):
-
-```bash
-# Assume QUEUE is a space-separated or newline-separated list of issue numbers
-ISSUE_LIST=$(echo "$QUEUE" | tr '\n' ',' | sed 's/,$//')
-```
-
-**Step 2 — batch-classify only when ≥ 2 issues**:
-
-```bash
-GOVTRACE_MAP="{}"   # default: empty map — every lane falls through to per-lane fork
-
-QUEUE_COUNT=$(echo "$QUEUE" | wc -w)
-if [ "$QUEUE_COUNT" -ge 2 ]; then
-  BATCH_RESULT=$(/sge:build-ready-audit "$ISSUE_LIST")
-
-  # Extract governance verdicts keyed by issue number (string key)
-  GOVTRACE_MAP=$(printf '%s' "$BATCH_RESULT" \
-    | node -e '
-        let s="";
-        process.stdin.on("data",d=>s+=d).on("end",()=>{
-          const results = JSON.parse(s).results || [];
-          const map = {};
-          for (const r of results) {
-            if (r.governance && r.governance.verdict) {
-              map[String(r.issue)] = r.governance;
-            }
-          }
-          process.stdout.write(JSON.stringify(map));
-        })')
-
-  echo "[Phase 1.5] Batch-classified $QUEUE_COUNT issues"
-fi
-```
-
-**Step 3 — look up and format the per-issue verdict at dispatch time**:
-
-```bash
-# When spawning impl lane for issue N:
-GOVTRACE_VERDICT=$(node -e "
-  const map = $(printf '%s' "$GOVTRACE_MAP");
-  const g = map['$N'];
-  if (g) process.stdout.write(JSON.stringify(Object.assign({issue: $N}, g)));
-")
-# Empty string means not in map — the lane will fork its own verdict.
-```
-
-**Step 4 — inject the verdict into the lane prompt**:
-
-Include the following field in the Task prompt for `impl-<N>`:
-
-```
-SGE_GOVTRACE_VERDICT: ${GOVTRACE_VERDICT}
-```
-
-When `GOVTRACE_VERDICT` is empty, **omit the field or leave it blank** — the lane
-must still fall through to a per-lane fork (never inject a placeholder or `null`).
+After the dependency gate and reconcile, filter the queue exactly as
+team-pipeline's [intake gate](../team-pipeline/references/mechanisms.md#intake-gate)
+does: run `bash "${CLAUDE_PLUGIN_ROOT:-.}/scripts/intake-check.sh" <N>` per issue
+from the tracking repo's checkout, keep exit 0, and report the rest as awaiting
+intake. Never claim, lock or spawn a lane for an issue that fails, and never pass
+a verdict in the lane prompt.
 
 ---
 
-## Lane-side guard (what the impl lane does with the injected verdict)
+## Lane-side guard (what the impl lane does before any code)
 
-The impl lane (running `/sge:sge-implement` Phase 0.5 or the Lean Agent Contract)
-applies this guard before forking:
+The impl lane (running `/sge:sge-implement`, whose Phase −1 does this, or the Lean
+Agent Contract) re-runs the check — a record can go stale between queueing and
+spawning — and adopts the verdict only from it:
 
 ```
-if SGE_GOVTRACE_VERDICT is set AND non-empty:
-  parse as JSON
-  VALID if: verdict.issue == <lane's issue number>
-        AND verdict.verdict is one of the six known strings
-        AND verdict.matchConfidence is present and one of {high, medium, low}
-  if VALID  → adopt; skip fork; log "reused: governance-trace not re-forked"
-  else      → fall-through; dispatch per-lane fork as normal
+GT_DIR = mktemp -d
+intake-check.sh <N> --govtrace-out "$GT_DIR/govtrace.json" > "$GT_DIR/intake.json"
+  non-zero → outcome "blocked", note "intake: <FAIL reason>"; terminate, no code
+file-map  = jq -r '.acMap[].refs[]' "$GT_DIR/intake.json"   (rescope → build only .scope)
+if $GT_DIR/govtrace.json exists:
+  fork-util.mjs register --handle-id intake-<owner>-<repo>-<N> --output-file it ...; join
+  join exit 0 → adopt; skip fork; log "adopted from intake record"
+  else        → dispatch per-lane fork as normal
+else          → dispatch per-lane fork as normal
 ```
+
+Commands: [`intake-gate.md`](../sge-implement/references/intake-gate.md).
 
 > **Dispatch tool for the per-lane fork — `Agent`, never `Skill(args=)`
 > (issue #2452).** "Dispatch per-lane fork as normal" above names an
@@ -173,10 +98,10 @@ writing any code; in headless dispatch it writes `outcome:"blocked"` and
 terminates without building. The orchestrator's Phase 4 branch 4a parks it for
 a human decision.
 
-**Caller-owned cortex write (SPEC-108 §2.4a, #1938).** On the `VALID → adopt;
-skip fork` branch, `/sge:governance-trace` never runs, so its Step W write can
-never fire — the adopting lane owns it. When it adopts the front-loaded verdict,
-`create_entities` the adopted verdict with `path: front-loaded`, reinforcing the
+**Caller-owned cortex write (SPEC-108 §2.4a, #1938).** On the `join exit 0 →
+adopt; skip fork` branch, `/sge:governance-trace` never runs, so its Step W write
+can never fire — the adopting lane owns it. When it adopts the intake verdict,
+`create_entities` the adopted verdict with `path: intake`, reinforcing the
 stable `govtrace-<owner>-<repo>-<issue>` entity — fire-and-forget, never blocking
 the lane on the write, skipped silently if sge-memory is unavailable. This is the
 #1664 silent-write-loss defect one level up: an optimisation that skips the work
@@ -190,8 +115,7 @@ must not skip the memory of the work. Write shape + closed vocabulary:
 If your custom orchestrator runs unattended (`--unattended`, or
 `SGE_UNATTENDED=1` already set in its own environment), export
 `SGE_UNATTENDED=1` as an early step in **every** dispatched lane's prompt —
-same convention as `SGE_GOVTRACE_VERDICT` injection and `SGE_AGENT_ID`
-above. `hooks/design-gate.sh` and `hooks/ui-edit-tracker.sh` (SPEC-115) read
+same convention as `SGE_AGENT_ID`. `hooks/design-gate.sh` and `hooks/ui-edit-tracker.sh` (SPEC-115) read
 this var from their own process environment; those hooks are fresh
 processes spawned per hook event for the *lane's own* session, so they never
 see a var the orchestrator merely `export`ed in its own, separate session.
@@ -219,9 +143,9 @@ gate's decision strands a worktree.
 ```
 [ ] Reconcile worklist before building queue (${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/reconcile-worklist.mjs)
 [ ] Dependency gate: drop issues with unresolved blockers
-[ ] Phase 1.5: batch /sge:build-ready-audit when queue >= 2; store govtraceMap
-[ ] Phase 3c: look up govtraceMap[N]; inject SGE_GOVTRACE_VERDICT in lane prompt
-[ ] Lane adopts a front-loaded verdict → caller-owned cortex write, path: front-loaded (SPEC-108 §2.4a, #1938)
+[ ] Intake gate: queue only issues whose ${CLAUDE_PLUGIN_ROOT:-.}/scripts/intake-check.sh <N> exits 0 (SPEC-126); never claim the rest
+[ ] Lane re-runs intake-check.sh before any code; file-map from the intake acMap; no verdict in the lane prompt
+[ ] Lane adopts the intake verdict → caller-owned cortex write, path: intake (SPEC-108 §2.4a, #1938)
 [ ] Stoppable-only: every spawned agent is a named Task (not remote/detached)
 [ ] Per-Task budget ceiling stated in every Task prompt
 [ ] Draft PR after first commit (lane Rule 2); stale-lane kill on no-PR timeout
@@ -244,8 +168,6 @@ The details, including the review handoff env, are in
 
 - `/sge:team-pipeline` — the reference orchestrator that implements every convention here
 - `/sge:issue-swarm` — router to team-pipeline's Duration Mode
-- `/sge:build-ready-audit` — the batch audit skill whose #872 governance fold
-  produces the verdict map consumed here
-- `/sge:governance-trace` — the per-issue classifier; folded into build-ready-audit
-  for batch use, or dispatched directly by lanes that have no pre-loaded verdict
-- `/sge:sge-implement` — implementation lane; Phase 0.5 applies the fast-path guard
+- `/sge:issue-intake` — records the human approval (and governance verdict) the intake gate checks
+- `/sge:governance-trace` — the per-issue classifier, dispatched by lanes whose intake record carries no verdict
+- `/sge:sge-implement` — implementation lane; Phase −1 runs the intake gate, Phase 0.5 adopts its verdict
