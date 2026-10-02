@@ -416,6 +416,7 @@ tools (wtp-mcp#888, MCP-031). Field names are a cross-repo contract:
 | `verdict` | string | `approve`, `request_changes` or `none` (from the review artefact's own verdict) |
 | `needs_human` | bool | the review concluded `blocked` (supervisor escalates; never counted as a failure) |
 | `model` / `model_tier` | string | routed model and tier (`override` under `ANTHROPIC_MODEL`) |
+| `review_tier` / `review_tier_reason` | string or null | review depth `light`/`standard`/`full` and its rule, no paths (sge#2776, [`review-tier.md`](../pr-review/references/review-tier.md)); null for fix records |
 | `duration_s` | float | dispatch wall time, seconds |
 | `cost_usd` / `num_turns` | number or null | from the SDK `ResultMessage` (`total_cost_usd`, `num_turns`) |
 | `decision` | object | present when the failure classification drove an action: `{"order": <standing-order id or null>, "action": "transient-retry" \| "quarantine-released"}`. `order` is null for built-in default behaviour. A release is its own record (`kind: quarantine`, `outcome: released`, no `failure_class`) |

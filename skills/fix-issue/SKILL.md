@@ -24,6 +24,12 @@ This skill no longer owns an implementation pipeline. `/sge:sge-implement` handl
 
 > **Target repo.** The `gh issue view` below resolves against the repo in the current working directory. From a control session, resolve + `cd` via the shared helper — `cd "$(${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/with-repo-cwd.sh resolve owner/repo)" || exit 1` (fail-loud, never falls through to the ambient hub cwd) — since the fix writes code in a worktree relative to the resolved repo, so raw `git` needs cwd, not just `export GH_REPO`. See [`gh-repo`](../gh-repo/SKILL.md) for the full convention. `/sge:sge-implement` inherits it.
 
+0. **Phase −1 — intake gate (SPEC-126, #2782).** Before anything else, including Sentry calls:
+   ```bash
+   SGE_ROOT="$(bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/resolve-sge-root.sh")"
+   bash "$SGE_ROOT/scripts/intake-check.sh" <NUMBER>
+   ```
+   Non-zero → attended: run `/sge:issue-intake <NUMBER>` inline and re-check — for a **live production incident**, `/sge:issue-intake <NUMBER> --hotfix` (one confirmation, minimal acMap on the files the fix touches; SPEC-126 DR8); headless: report `blocked` with the check's `FAIL` reason and stop. There is no bypass: never route an issue without a passing intake record.
 1. Fetch the issue:
    ```bash
    gh issue view <NUMBER> --json title,body,comments

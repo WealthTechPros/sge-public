@@ -42,9 +42,9 @@ save time" — the two do not race harmlessly: it doubles the classification cos
 anyway, and the standalone trace can return a blocking verdict *after* this skill
 has already started coding, forcing an out-of-band mid-flight correction rather
 than a clean gate. If you want to front-load classification for a whole batch of
-issues in one pass, use the **pre-computed-verdict reuse path** below (or run
-`/sge:build-ready-audit`, whose #872 Step-2G fold already produces exactly this
-verdict per issue) — do not spawn a competing trace.
+issues in one pass, run `/sge:issue-intake` on them (up to 4 per question) —
+its human-confirmed record carries the verdict Phase 0.5 adopts (reuse path
+below) — do not spawn a competing trace.
 
 ## Dispatch tool — `Agent`, never `Skill(args=)` (issue #2452)
 
@@ -77,37 +77,34 @@ against a fork continuing past classification.
 
 **Fork result contract (#2452).** A governance-trace fork's result is adoptable only if it is the Step-7 verdict JSON (a parseable object with a `verdict` string) whose `issue` equals the dispatched issue number and whose `repo` must equal the dispatched `owner/repo` (a missing `repo` echo is rejected when the handle is bound to a repo). Reject a result with no verdict JSON — a narrative report of findings, however specific (file:line citations, tool-call counts), is not a verdict — and reject a `NO_TARGET_ISSUE` refusal, a missing `issue` echo, or an issue/repo mismatch. Never adopt, forward or paraphrase a rejected result; treat it as blocking — halt before any Edit/Write and re-fork synchronously. `fork-util.mjs join` enforces this mechanically for the async path (register with `--issue` and `--repo`; see below).
 
-## Reuse a front-loaded verdict (idempotent fold — builds on #872)
+## Reuse a front-loaded verdict — intake record only (SPEC-126, #2782)
 
-Before forking anything, check whether the governance verdict for **this** issue
-was already computed upstream and handed to you. `/sge:build-ready-audit` (issue
-#872) folds `/sge:governance-trace`'s classification into its Step 2G, so an
-orchestrator that already gated this issue through build-ready-audit has the
-verdict in hand and can pass it down instead of paying for a second trace:
+Phase 0.5 still skips the governance-trace fork when the verdict for **this**
+issue already exists — but the only adoptable source is now the `govtrace`
+inside a validated `## SGE intake` record (posted by an allow-listed human,
+checked by `scripts/intake-check.sh` at Phase −1, re-validated by
+`fork-util.mjs join`). Commands: [`intake-gate.md`](intake-gate.md).
 
-- **How it is passed.** The orchestrator sets `SGE_GOVTRACE_VERDICT` to either an
-  inline JSON string or a path to a JSON file carrying `/sge:governance-trace`'s
-  Step-7 shape (the same object build-ready-audit returns in each
-  `results[].governance`), annotated with the issue it belongs to, e.g.
-  `{"issue": 512, "verdict": "MATCHES_EXISTING", "matchedSpec": "SPEC-088", "matchConfidence": "high", "layers": {…}, "requirementChanges": []}`.
-- **Adopt only on an exact issue match.** Parse it; if its `issue` equals this
-  issue's number and it is a well-formed verdict, **adopt it directly and skip
-  the fork** — note `governance: reused front-loaded verdict from orchestrator
-  (build-ready-audit #872 fold) — governance-trace not re-run` in the Phase 3
-  starting map so the saving is auditable. If `SGE_GOVTRACE_VERDICT` is unset,
-  malformed, or its `issue` does not match this one, ignore it and fall through
-  to the fork (the default path). A verdict for a *different* issue is never
-  reused — that would gate this issue against the wrong classification.
-- **Reuse is not a bypass.** A reused verdict enters the **exact same**
+- **`SGE_GOVTRACE_VERDICT` is no longer adopted.** Its shape and issue echo
+  were checked (#872, #1344), its provenance never was: any orchestrator, or a
+  prompt, could set it. Orchestrators still inject or adopt it until #2782
+  Phase 2: `team-pipeline/SKILL.md`, `team-pipeline/references/dispatch-prompts.md`
+  (the lane-side adoption block), `team-pipeline/references/mechanisms.md`,
+  `issue-swarm/SKILL.md`, `agent-template/SKILL.md` (lane-side guard),
+  `build-ready-audit/references/dispatch-tool.md` and this skill's
+  `child-splitting.md`. Lanes that run `/sge:sge-implement` fork instead of
+  skipping and are blocked at Phase −1 without an intake record; **lean
+  team-pipeline lanes do not run sge-implement at all, so they still adopt
+  the env verdict and skip Phase −1** — safe only while the swarm is paused
+  (wtp-org#1021). Children created by `/sge:decompose-issue` each need their
+  own intake record (Phase 2 defines how).
+- **Reuse is not a bypass.** An adopted verdict enters the **exact same**
   branch-on-`verdict` logic in Phase 0.5, including the low-confidence check: a
   reused `MATCHES_EXISTING_MODIFIED`, `NEEDS_NEW_SPEC`, `NOT_SGE_SCOPE`, or
-  `matchConfidence: "low"` still pauses/blocks precisely as a freshly-forked one
-  would. Front-loading only removes the *redundant recomputation* — never the
-  gate itself. (`build-ready-audit` runs governance-trace with `--no-comment`, which
-  suppresses every comment, so for a reused `MATCHES_EXISTING_MODIFIED`/`NOT_SGE_SCOPE`
-  verdict the human-facing comment govtrace normally posts will not exist; if you pause on
-  a reused blocking verdict and no such comment is present on the issue, post the
-  block rationale yourself so the audit trail is not lost.)
+  `matchConfidence: "low"` still pauses/blocks exactly as a freshly-forked one.
+  Intake runs governance-trace with `--no-comment`, so when pausing on an
+  adopted blocking verdict with no govtrace comment on the issue, post the block
+  rationale yourself.
 
 ## Async fork dispatch with join-on-verdict (#1264)
 
