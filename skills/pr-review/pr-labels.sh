@@ -2539,7 +2539,7 @@ case "$CMD" in
       exit 0
     fi
 
-    # 2) The latest trusted sge-verdict's commit (reviews, then issue comments).
+    # 2) The newest trusted sge-verdict's commit, across reviews AND issue comments (sge#2729).
     REPO_FULL="$(gl_repo)" || REPO_FULL=""
     if ! VERDICT_SHA="$(gl_latest_verdict_sha "$PR")"; then
       echo "PR #$PR: sync-check — verdicts unreadable; labels retained (readers treat unproven labels as absent)" >&2

@@ -7,7 +7,7 @@ Versioned Claude Code plugin providing shared SGE methodology skills and workflo
 This repo is the home of **SGE** end-to-end — methodology first, platform second:
 
 - **`skills/`, `agents/`, `commands/`, `.claude-plugin/`** — the SGE methodology Claude Code plugin (what installs into other WTP repos). Unchanged; the plugin is scoped to these and is unaffected by `platform/`.
-- **`docs-site/`, `docs/`** — the SGE methodology docs. The published docs site is not yet live: `docs.sge.wealthtechpros.com` currently returns 404, so read the Markdown sources in this repo until it serves.
+- **`docs-site/`, `docs/`** — the SGE methodology docs. The published docs site, `docs.sge.wealthtechpros.com`, is live and org-private (WealthTech Pros org members only); if you do not have access, read the same content as Markdown sources in this repo.
 - **`platform/`** — the **SGE Platform** (the GitHub App + dashboard UI, formerly the standalone `repo-sentry` repo, merged in here with full history and then archived). The app lives under `platform/reposentry/{frontend,backend}`, infra under `platform/infra`, product docs under `platform/docs-site`. CI/CD and the RepoSentry→SGE brand/domain rename land in follow-up steps; `platform/` keeps deploying from its existing pipeline until then.
 
 ### Naming: `sgd` → `sge` — what renames and what doesn't
@@ -64,9 +64,9 @@ for the constant/package rename that superseded the `sgd-init` entry above.
 | `drift-hillclimb` | `/sge:drift-hillclimb [--target N] [--metric C..] [--dry-run]` | **Metric hill-climb loop** — the actor that *raises* the SGE Audit Score (the `/sge:sge-align` per-check governance-coherence rollup — distinct from the platform's canonical SM-2 `coherence_score`), not just measures it. Consumes `/sge:sge-align`'s scorecard, picks the highest-leverage drift gap, opens ONE bounded PR to close it, re-measures with an independent sweep, repeats until the target is hit or a bound stops it. PR-first, bounded, Governor-gated |
 | `issue-loop` | `/sge:issue-loop [--repo owner/repo] [--max-issues N] [--dry-run]` | **Serial issue-drain loop** (SPEC-065) — works the backlog one issue at a time through the full SGE pipeline (pick via `/sge:available-issues --mode autonomous-next` → gate → full `/sge:sge-implement` as a stoppable sub-agent → `/sge:pr-review` gate → merge-wait) until the queue is empty. Queue-empty-bounded serial counterpart to `/sge:issue-swarm`; the only shape that drains `serialGroups`. Thrash-skips (`loop-skip`) and systemic-halts; Governor-gated |
 
-> **Which mode runs my work?** See the **[execution-modes decision matrix](docs/execution-modes.md)** — the canonical map of when to use `sge-implement`, `team-pipeline`, `available-issues`, `fleet-dispatch`, `pr-monitor`, or Autopilot, with every skill in the plugin accounted for.
+> **Which mode runs my work?** `sge-implement` is the entry point for one issue; `team-pipeline`, `available-issues`, `fleet-dispatch`, `pr-monitor` and Autopilot build on it to work several issues at once. Each skill's `SKILL.md` says when to use it. In the source repo, the full decision matrix, with every skill in the plugin accounted for, is `docs/execution-modes.md` (it is not part of the public distribution).
 
-> **Commands first, automation later.** The skills above are the supported entry point — run them by hand, one at a time. On-demand pipelines (`team-pipeline`, `issue-swarm`, `pr-monitor`) and always-on **Autopilot** pods are an *optional, opt-in* evolution that runs the very same skills; nothing here is deprecated by them. See **[Autopilot — optional automation stage](docs/autopilot.md)** for the adoption ladder, pipeline diagram, label state machine, and human control points.
+> **Commands first, automation later.** The skills above are the supported entry point — run them by hand, one at a time. On-demand pipelines (`team-pipeline`, `issue-swarm`, `pr-monitor`) and always-on **Autopilot** pods are an *optional, opt-in* evolution that runs the very same skills; nothing here is deprecated by them.
 
 ## Agents
 
@@ -98,7 +98,7 @@ See [`docs/sge-memory.md`](docs/sge-memory.md) for details. (Wiring individual s
 
 ## Supply-chain governance (SGD-048)
 
-Two scripts implement the Zero-Trust **Supply-chain** control (see [`docs-site/governance/zero-trust-ai-agents.md`](docs-site/governance/zero-trust-ai-agents.md)):
+Two scripts implement the Zero-Trust **Supply-chain** control:
 
 - **`scripts/generate-ai-bom.sh`** — produces an OWASP CycloneDX ML-BOM (AI Bill of Materials) at `sbom/ai-bom.cdx.json`. It discovers every Anthropic Claude model referenced in `skills/`, `agents/` and `docs-site/` (so the BOM cannot silently drift from the code), plus the `wtp-mcp` Graph API surface and third-party AI tooling. Each component records name, version/model-ID, provider, use-case and the data categories it accesses.
   - `scripts/generate-ai-bom.sh` — (re)write the BOM.
@@ -210,7 +210,7 @@ git config core.hooksPath .githooks
 # or: ./scripts/install-git-hooks.sh   (bash)  /  ./scripts/install-git-hooks.ps1  (PowerShell)
 ```
 
-That wires both tracked hooks (see [`.githooks/README.md`](.githooks/README.md)):
+That wires both tracked hooks:
 
 - **`commit-msg`** — every commit in this repo must carry a `Spec: SPEC-NNN`/`SGD-NNN`/`SGE-NNN` or `SGD-Override`/`SGE-Override: <STEP>; <reason>` trailer (see `skills/sge-init/templates/change-protocol.md` — the protocol template this repo authors for every onboarded repo, and, as of this workflow, also dogfoods on itself). `/sge:commit` emits this automatically, but the hook catches commits made outside it too. It warns; it does not block. The `require-commit-trailer.yml` CI workflow is the actual enforcement point — it fails the PR check if any commit lacks the trailer, so a locally-skipped warning is still caught before merge.
 - **`prepare-commit-msg`** — appends an `Agent-Id: claude-code/<session>` trailer to **agent-authored** commits, so Zero-Trust control ZT-5 / C11 (wtp-org#373) is verifiable from git history. No-op for human commits. **Agent sessions working in this repo must enable the hook** so their commits carry the trailer.
@@ -239,7 +239,7 @@ All three read `.sge/test-map.yml` for this repo's production/test/exempt path g
 
 ## Versioning
 
-Version is set in `.claude-plugin/plugin.json`. Bump it on every breaking change to a skill. Non-breaking additions can share a version increment.
+Version is set in `.claude-plugin/plugin.json`. Contributors do not bump it per PR: after shipped plugin content lands on `main`, `.github/workflows/plugin-release-bump.yml` opens one rolling PR that bumps the patch (sge#2844). Bump minor/major by hand, in `plugin.json` and `marketplace.json` together, for a new skill or a breaking change.
 
 ## What stays in each repo's `.claude/commands/`
 
