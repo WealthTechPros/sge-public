@@ -39,6 +39,7 @@ Declared per the [loop anatomy gate](../loops/SKILL.md#loop-anatomy--the-six-par
 |------|---------|------|
 | Pick | `/sge:available-issues --mode autonomous-next` | one machine-readable next issue, or `{"issue": null}` to stop |
 | Reconcile | `/sge:reconcile-worklist` | drop the pick if it is already closed / merged before any dispatch |
+| Intake | `scripts/intake-check.sh` | dispatch only an issue with a valid human intake record (SPEC-126) |
 | Gate | `/sge:build-ready-audit` | per-issue go/no-go: `READY` \| `NOT_READY` \| `TOO_LARGE` |
 | Decompose | `/sge:decompose-issue` | split a `TOO_LARGE` issue; children re-enter the pool on the next pick |
 | Implement | **full `/sge:sge-implement <N>`** | the complete pipeline — preflight, TDD, forked review, PR, pr-review loop |
@@ -140,10 +141,12 @@ If every remaining ready issue is excluded, the queue is drained **for this run*
 
 ```bash
 /sge:reconcile-worklist --issues <N> --repo <owner/repo> --json
+bash "${SGE_ROOT:?resolve SGE_ROOT first}/scripts/intake-check.sh" <N>   # SPEC-126: exit 0 or never dispatch
 /sge:build-ready-audit <N>
 ```
 
 - Reconcile **drops** the pick (already closed, or a merged PR closes it) → record and return to step 1.
+- **Intake gate (MANDATORY, #2793):** `intake-check.sh` non-zero → do **not** dispatch. Record `awaiting-intake: <its FAIL reason>` in the ledger, add the issue to the within-run exclusion set, return to step 1 — a human records the decision with `/sge:issue-intake <N>`. Same gate as team-pipeline's ([intake gate](../team-pipeline/references/mechanisms.md#intake-gate)); the dispatched `sge-implement` re-checks it at Phase −1.
 - `READY` → step 3.
 - `NOT_READY` → record the blocker in the ledger **and add the issue to the within-run exclusion set** (the deterministic pick would otherwise return it every cycle), return to step 1. The issue is not labelled — it may become ready later, and a fresh run re-audits it; `build-ready-audit` owns telling the author why.
 - `TOO_LARGE` → `/sge:decompose-issue <N>`, record the parent as decomposed (and add it to the exclusion set if it stays open as a tracking epic), return to step 1 — the children enter the pool and are picked in dependency order on subsequent cycles. Never dispatch an un-split epic.

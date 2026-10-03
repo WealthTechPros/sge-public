@@ -1163,6 +1163,14 @@ rl_pr_state() {
 #       #862). Both exclusions run BEFORE the `.[-10:]` window slice (not
 #       after) so an excluded pipeline comment never consumes a slot a
 #       genuine human hold comment could otherwise occupy.
+#   (d) the `.[-10:]` tail window applies ONLY to untrusted candidates
+#       (sge#2780). Every remaining OWNER/MEMBER/COLLABORATOR comment is
+#       scanned regardless of age, so 10+ later filler comments (trusted or
+#       not) can never push a trusted sign-off-pending note out of the scan,
+#       and trusted comments never consume an untrusted window slot. The
+#       window still bounds untrusted authors. Every fail-closed path is
+#       unchanged: a gh error, or a jq failure on the candidate stream,
+#       returns hold:signoff-check-failed.
 #   (c) the "sign-off ... pending" pattern is word-boundaried only — "pending"
 #       no longer matches "impending"/"spending"/"depending". No proximity
 #       bound: an earlier `.{0,40}` same-line bound was found (PR #2195
@@ -1201,8 +1209,9 @@ rl_hold_check() {
   local bot_re; bot_re=$(rl_bot_login_regex)
   # --paginate (sge#2770 review): the scan gates a policy hold release, so a
   # human's comment past the first page must still be seen. Each page emits
-  # its candidate bodies one JSON string per line; the last 10 across ALL
-  # pages are then tested (a gh failure is still unverifiable: fail closed).
+  # one JSON object per candidate ({t: trusted?, b: body}); every trusted
+  # candidate plus the last 10 untrusted ones across ALL pages are then tested
+  # (sge#2780; a gh or jq failure is still unverifiable: fail closed).
   local cand
   cand=$(BOT_RE="$bot_re" PR_NUM="$pr" gh api --paginate "repos/$repo/issues/$pr/comments" \
     --jq '.[]
@@ -1212,10 +1221,17 @@ rl_hold_check() {
                    and ((.body // "") | split("\n") | any(test("^## *PR Review: *#" + env.PR_NUM + "\\b|^```+sge-verdict"; "i"))))
                | not
              )
-           | (.body // "") | tojson' 2>/dev/null) \
+           | {t: (((.author_association // "") | ascii_upcase) as $a | ($a == "OWNER" or $a == "MEMBER" or $a == "COLLABORATOR")),
+              b: (.body // "")}
+           | tojson' 2>/dev/null) \
     || { echo "hold:signoff-check-failed"; return 0; }
-  sign=$(printf '%s\n' "$cand" | { grep -v '^[[:space:]]*$' || true; } | tail -n 10 | jq -rs '
-          [ .[] | select(type == "string")
+  # sge#2780: every trusted (OWNER/MEMBER/COLLABORATOR) candidate is scanned;
+  # the `.[-10:]` tail window bounds ONLY untrusted candidates, so no volume of
+  # later comments can push a trusted sign-off-pending note out of the scan.
+  sign=$(printf '%s\n' "$cand" | { grep -v '^[[:space:]]*$' || true; } | jq -rs '
+          [ .[] | select(type == "object") ] as $all
+          | ([ $all[] | select(.t == true) ] + ([ $all[] | select(.t != true) ] | .[-10:]))
+          | [ .[] | .b | select(type == "string")
            | select(test("\\bpending\\b.*\\bsign.?off\\b|\\bsign.?off\\b.*\\bpending\\b|\\bapprov\\w*\\b.*\\bpending\\b"; "i"))
           ] | first // ""' 2>/dev/null) \
     || { echo "hold:signoff-check-failed"; return 0; }
@@ -2021,6 +2037,18 @@ rl_verdict_fill_session() {
     { print }'
 }
 
+# rl_verdict_field <body> <key> -- the value of the single `<key>:` line in the
+# body's FIRST sge-verdict block ("" when absent or repeated). The key matches
+# case-insensitively (`Commit:` is `commit:`), as the daemon's parsers read it.
+# UNTRUSTED text: printed, never evaluated.
+rl_verdict_field() {
+  printf '%s\n' "$1" | tr -d '\r' | awk -v k="$2" '
+    !done && /^[ \t]*```+sge-verdict[ \t]*$/ { inb = 1; next }
+    inb && /^[ \t]*```+[ \t]*$/ { inb = 0; done = 1; next }
+    inb && tolower($0) ~ "^[ \t]*" tolower(k) "[ \t]*:" { v = $0; sub(/^[^:]*:[ \t]*/, "", v); sub(/[ \t]+$/, "", v); n++ }
+    END { if (n == 1) print v }'
+}
+
 # rl_post_verdict <pr> <event> [body] -- post the review verdict.
 #   event: APPROVE | REQUEST_CHANGES | COMMENT
 #   body:  positional arg, or read from stdin when omitted.
@@ -2073,11 +2101,20 @@ rl_post_verdict() {
     echo "rl_post_verdict: REFUSING to post — the verdict declares $(rl_verdict_findings_total "$body") finding(s) but findings_comment is '$(rl_verdict_findings_ref "$body")' and no verified findings comment exists (issue #1858). Post the findings via rl_post_findings_comment first, or fold them into the verdict body and set 'findings_comment: inline'." >&2
     return 6
   fi
+  # Verdict pinned to what it judged (sge#2781). The block's `commit:` goes out
+  # as commit_id on every route: without it GitHub binds the review to whatever
+  # the head is at POST time, so a push landing just before the POST would get
+  # an approval for a commit the review never read (and branch protection's
+  # stale-approval dismissal would key off the wrong commit).
+  local vcommit
+  local -a pin=()
+  vcommit=$(rl_verdict_field "$body" commit)
+  [[ "$vcommit" =~ ^[0-9a-fA-F]{40}$ ]] && pin=(-f "commit_id=${vcommit}")
   mode=$(rl_review_identity)
   if [ "$mode" = "app" ]; then
     if tok=$(rl_app_installation_token); then
       if resp=$(GH_TOKEN="$tok" gh api --method POST "repos/${repo}/pulls/${pr}/reviews" \
-           -f "event=${event}" -f "body=${body}" 2>/dev/null); then
+           -f "event=${event}" -f "body=${body}" ${pin[@]+"${pin[@]}"} 2>/dev/null); then
         rid=$(printf '%s' "$resp" | jq -r '.id // empty' 2>/dev/null)
         echo "rl_post_verdict: posted ${event} review on PR #${pr} as the wtp-sge App -- real approval, builder != reviewer (issue #862)" >&2
         if [[ "$rid" =~ ^[0-9]+$ ]]; then
@@ -2102,7 +2139,7 @@ rl_post_verdict() {
     COMMENT)         flag="COMMENT" ;;
   esac
   if resp=$(gh api --method POST "repos/${repo}/pulls/${pr}/reviews" \
-       -f "event=${flag}" -f "body=${body}" 2>/dev/null); then
+       -f "event=${flag}" -f "body=${body}" ${pin[@]+"${pin[@]}"} 2>/dev/null); then
     rid=$(printf '%s' "$resp" | jq -r '.id // empty' 2>/dev/null)
     echo "rl_post_verdict: posted ${event} review on PR #${pr} via PAT/bot identity" >&2
     if [[ "$rid" =~ ^[0-9]+$ ]]; then
@@ -2124,7 +2161,7 @@ rl_post_verdict() {
     # anyway, but only AFTER the label already claimed otherwise).
     echo "rl_post_verdict: ${flag} rejected (self-authored PR?) -- posting as COMMENT with the recommendation stated in-body" >&2
     if resp=$(gh api --method POST "repos/${repo}/pulls/${pr}/reviews" \
-         -f "event=COMMENT" -f "body=Recommendation: ${event}"$'\n\n'"${body}" 2>/dev/null); then
+         -f "event=COMMENT" -f "body=Recommendation: ${event}"$'\n\n'"${body}" ${pin[@]+"${pin[@]}"} 2>/dev/null); then
       rid=$(printf '%s' "$resp" | jq -r '.id // empty' 2>/dev/null)
       echo "rl_post_verdict: verdict recorded as COMMENT only (PAT self-approval rejected) -- pr-reviewed must not be applied from this verdict (issue #2261)" >&2
       if [[ "$rid" =~ ^[0-9]+$ ]]; then

@@ -45,11 +45,40 @@ For a PR whose diff touches the UI-file glob:
    the PR description (since that file is git-ignored session scratch, not committed), or a comment
    quoting it, timestamped/associated with a commit SHA reachable from the PR's current head. No
    artifact found → **flag**.
-2. **The artifact reads `VERDICT: PASS`.** A `VERDICT: FAIL` or missing first line → **flag**, same
-   as a missing artifact — do not treat a FAIL as partial credit.
+2. **The artifact reads `VERDICT: PASS`, or its FAIL passes the base-relative rule.** A missing
+   first line → **flag**, same as a missing artifact. A `VERDICT: FAIL` is evaluated by the
+   base-relative rule below; when that rule does not pass it → **flag** — never partial credit.
 3. **The artifact is not stale.** If the PR has new commits after the verdict was posted that touch
    the UI glob again, the verdict no longer covers the current diff → treat as missing (mirrors the
    QA-evidence staleness rule in §4.3: a report vouches only for the commit it exercised).
+
+### Base-relative rule for a FAIL verdict (#2837, SPEC-115 I3)
+
+design-reviewer judges the rendered page, so a PR that edits one file on a page that already
+carries design debt gets a FAIL for problems it did not introduce. Blocking that PR forces an
+unrelated redesign into a small change, or teaches people to skip the gate. So design-reviewer
+also scores the PR's merge-base on the same routes and viewports and tags each finding
+`[introduced]` or `[pre-existing]` (`agents/design-reviewer.md`, "Base comparison"). A FAIL
+verdict **passes** the gate only when all of these hold:
+
+- a base score was actually captured (`Base: NN/16 @ <sha>`, not `Base: not captured`);
+- no `[introduced]` finding scores a rubric category at 0 (an untagged 0 counts as introduced, and
+  so does a category base scored higher than head);
+- the head score is not below the base score.
+
+Otherwise the FAIL **flags**. With no base captured the absolute rule applies: any FAIL flags.
+A stale verdict never passes under either rule (SPEC-115 I2). Evaluate the pasted verdict with
+the deterministic helper rather than by eye:
+
+```bash
+# save the verdict text from the PR body/comment to a file first
+node "${CLAUDE_PLUGIN_ROOT}/scripts/design-verdict-gate.mjs" verdict.md [--stale] --json
+# exit 0: pass | base-relative-pass, 1: flag, 2: bad args
+```
+
+A base-relative pass does not waive the debt. Record
+`design_evidence: base-relative-pass@<commit> (head NN/16, base NN/16)` in the verdict notes and
+list each `[pre-existing]` finding as a `minor` follow-up, so it stays visible in the review.
 
 **Unattended exemption — deliberately NOT granted (SPEC-115 §"Unattended PRs still require design
 evidence at merge").** A PR produced with `SGE_UNATTENDED=1` has its session-time hooks stood down by
@@ -57,16 +86,24 @@ design (`ui-edit-tracker.sh`/`design-gate.sh` both exit 0 immediately when `SGE_
 for exactly those PRs, this Phase 4.5 check is the *only* enforcement point left. Do not skip it on
 an unattended PR; if anything, its absence there is more likely, not less relevant.
 
-**Severity & posture** (consistent with Phase 4.2's advisory-for-non-SGE stance and the seam-evidence
-gate's major-not-blocker posture):
+**Severity & posture — this finding blocks `pr-reviewed` (settled #2837).** SPEC-115 §4 said a
+fresh FAIL "blocks pr-reviewed", while this file used to call it a non-blocking `major` (the
+seam-evidence posture). The base-relative rule settles the conflict: since pre-existing debt no
+longer fails the gate, what remains flagged is attributable to the PR (or is missing evidence), so
+it blocks.
 
-- UI-touching PR, verdict artifact **missing, stale, or FAIL** →
+- UI-touching PR, verdict artifact **missing or stale, or a FAIL the base-relative rule does not pass** →
   `{severity:"major", category:"traceability", finding:"UI-touching PR with no passing design-reviewer verdict"}`.
-  A `major` does not by itself refuse a `pass`, but it is a fix-inline / comment finding the verdict
-  must carry — never silently dropped.
+  `traceability` because the finding schema has no `design` category. While this finding stands the
+  review must not reach `pr-labels.sh pass` (verdict `REQUEST_CHANGES`). It clears only when a fresh
+  passing verdict (PASS or base-relative pass) for the current head is posted. Phase 6.5 cannot fix it
+  inline, because design-reviewer must re-run against the rendered app.
 - Non-UI-touching PR → no check, nothing recorded.
 - Verdict artifact **present and PASS, not stale** → record `design_evidence: pass@<commit-or-timestamp>`
   in the verdict notes; nothing to flag.
+- **FAIL that passes the base-relative rule, not stale** → record
+  `design_evidence: base-relative-pass@<commit>` plus head/base scores; each `[pre-existing]`
+  finding becomes a `minor` follow-up; nothing blocks.
 
 ## Genericisation rule
 
