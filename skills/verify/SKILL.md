@@ -8,6 +8,18 @@ argument-hint: "[--tier trivial|standard|critical]"
 Run post-implementation verification for a change, scaling the verification
 depth to the change's complexity tier.
 
+## Role
+
+Run the quality suite and check the diff against the acceptance criteria, at
+the depth the change's tier calls for (inline for `trivial`, a forked
+`/sge:sge-review` for `standard`/`critical`).
+
+## Out of scope
+
+- Fixing what verification finds — report it back to the calling lane.
+- The merge-gate review and label state machine (that is `/sge:pr-review`).
+- Runtime/behavioural QA against a live build (that is `/sge:qa-audit`).
+
 ## Usage
 
 ```

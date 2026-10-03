@@ -36,6 +36,19 @@ This skill no longer owns an implementation pipeline. `/sge:sge-implement` handl
 
 > **Target repo.** The `gh issue view` below resolves against the repo in the current working directory. From a control session, resolve + `cd` via the shared helper — `cd "$(${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/with-repo-cwd.sh resolve owner/repo)" || exit 1` (fail-loud, never falls through to the ambient hub cwd) — since implementation writes code in a worktree relative to the resolved repo, so raw `git` needs cwd, not just `export GH_REPO`. See [`gh-repo`](../gh-repo/SKILL.md) for the full convention. `/sge:sge-implement` inherits it.
 
+### Phase −1 — Intake gate (SPEC-126, #2782; run before anything else)
+
+Route nothing without a valid human intake record:
+
+```bash
+SGE_ROOT="$(bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/resolve-sge-root.sh")"
+bash "$SGE_ROOT/scripts/intake-check.sh" <NUMBER>
+```
+
+- **Exit 0** → continue to Step 0 (`/sge:sge-implement` re-runs the same check as its own Phase −1).
+- **Non-zero, attended** → run `/sge:issue-intake <NUMBER>` inline; continue only once the check passes.
+- **Non-zero, unattended** → tier (c): write a BLOCKED report quoting the check's `FAIL` reason ("needs `/sge:issue-intake <NUMBER>` by an approver") and exit — never run intake headless.
+
 ### Step 0 — State check (run first; 1–2 `gh` calls; cheap)
 
 Before grepping for a SPEC reference, verify the issue has not already been addressed. This avoids launching a full implementation lane against work that is already done or in flight.
