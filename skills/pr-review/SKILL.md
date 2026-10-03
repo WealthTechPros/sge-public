@@ -1,6 +1,6 @@
 ---
 description: "Use when a pull request needs the SGE merge-gate review — before merging any PR, when a PR is review-blocked (`mergeStateStatus: BLOCKED` or the `pr-reviewed` label is missing), when /sge:pr-monitor routes a lane PR here, or when new commits have landed on an already-reviewed PR and a delta re-review is needed."
-argument-hint: <pr-number> [--advisory | --no-fix | --no-automerge | --shadow]
+argument-hint: <pr-number> [--advisory | --no-fix | --no-automerge | --shadow] [--review-tier light|standard|full]
 allowed-tools: Read, Grep, Glob, Edit, Write, Bash, Agent, Task, mcp__plugin_sge_sge-memory__search_nodes, mcp__plugin_sge_sge-memory__create_entities
 ---
 
@@ -16,7 +16,7 @@ allowed-tools: Read, Grep, Glob, Edit, Write, Bash, Agent, Task, mcp__plugin_sge
 
 **Cortex discipline (SPEC-108 §2.4, #1929).** At start `search_nodes` (review-lane gotchas); at every terminal path `create_entities` for any `pattern`/`convention`/`gotcha`. Skip if sge-memory unavailable. [`../lib/cortex-review-lane.md`](../lib/cortex-review-lane.md).
 
-> **Execution model — deliberately NOT `context: fork`** (#732): it spawns review subagents (Phases 2–3), and a forked context cannot spawn subagents, so it runs inline. `/sge:qa-audit` and `/sge:sge-align` declare `context: fork`, resolving the same constraint the other way — one doctrine, either side of the fork boundary.
+> **Execution model — deliberately NOT `context: fork`** (#732): it spawns review subagents (Phases 2–3) and a forked context cannot spawn subagents; `/sge:qa-audit`/`/sge:sge-align` fork instead — one doctrine.
 
 > **Worktree enforcement — never touch the main workspace.** Anything mutating the working tree (Phase 6.5 fixes, Phase 7 CI) MUST happen in an isolated worktree on the PR's head branch — never the main checkout. Create it lazily (first fix), remove in Phase 9. Repo-specific (`CLAUDE.md`).
 >
@@ -25,7 +25,7 @@ allowed-tools: Read, Grep, Glob, Edit, Write, Bash, Agent, Task, mcp__plugin_sge
 ## Usage
 
 ```
-/sge:pr-review <pr-number> [--advisory | --no-fix | --no-automerge | --shadow] [--tier0]
+/sge:pr-review <pr-number> [--advisory | --no-fix | --no-automerge | --shadow] [--tier0] [--review-tier <t>]
 ```
 
 `$ARGUMENTS` is the PR number; if omitted, resolve from the branch.
@@ -34,7 +34,7 @@ allowed-tools: Read, Grep, Glob, Edit, Write, Bash, Agent, Task, mcp__plugin_sge
 
 Default = merge-gate owner (claims gate, moves labels, fixes safe issues inline, arms auto-merge). Flags narrow it, mechanically enforced: `--no-fix`, `--no-automerge`, `--advisory` (review-only), `--shadow` (#2651). **Backstop:** `SGE_REVIEW_ADVISORY=1`/`SGE_REVIEW_SHADOW=1` set **inline on each `pr-labels.sh` call** (no cross-call shell state, #2656); `pass` refuses (**exit 4**/**9**). **Prose is NOT equivalent (sge#2508)** — `pass` applies the label regardless; use `--advisory`. Matrix + incident: [`mode-selection.md`](references/mode-selection.md#mode-flags-issue-754--no-automerge-per-spec-090).
 
-**Target repo (cross-repo / control-session):** act on the CWD repo; from elsewhere `cd "$("$SGE_ROOT/scripts/with-repo-cwd.sh" resolve owner/repo)" || exit 1` — **or** `export GH_REPO=owner/repo` for `gh`-only work (every `gh` call/script honours it; #662, `cd` preferred). Same-repo: unset. `$SGE_ROOT` resolved per Stage 0 below. [`gh-repo`](../gh-repo/SKILL.md).
+**Target repo (cross-repo / control-session):** act on the CWD repo; from elsewhere `cd "$("$SGE_ROOT/scripts/with-repo-cwd.sh" resolve owner/repo)" || exit 1` — **or** `export GH_REPO=owner/repo` for `gh`-only work (#662; `cd` preferred). Same-repo: unset. `$SGE_ROOT` resolved per Stage 0 below. [`gh-repo`](../gh-repo/SKILL.md).
 
 ### Context (collected at invocation)
 
@@ -63,10 +63,7 @@ case " $ARGUMENTS " in
   *" --no-fix "*) REVIEW_MODE="no-fix" ;;
   *" --no-automerge "*) REVIEW_MODE="no-automerge" ;;
 esac
-# Pod-gate guard (issue #1374): pod owns the gate, so a stray implementer (SGE_GATE_OWNER=pod
-# or its alias SGE_REVIEW_OWNER=daemon, issue #1313, but no SGE_POD_REVIEW=1) is forced
-# advisory rather than racing the pod for pr-reviewing.
-# Rationale: sge-implement/references/pod-gate-mode.md.
+# Pod-gate guard (#1374, #1313): sge-implement/references/pod-gate-mode.md.
 if { [ "${SGE_GATE_OWNER:-}" = "pod" ] || [ "${SGE_REVIEW_OWNER:-}" = "daemon" ]; } && [ "${SGE_POD_REVIEW:-}" != "1" ]; then
   REVIEW_MODE="advisory"
   echo "SGE pod-gate guard: gate owner is the pod/daemon (SGE_GATE_OWNER=pod or SGE_REVIEW_OWNER=daemon) without SGE_POD_REVIEW — forcing advisory (should have stopped at sge-implement Phase 6.5)."
@@ -100,15 +97,17 @@ Before claiming the gate, pick the review mode: a prior `sge-verdict` on **this 
 
 **Stacked-PR/partial-merge/reversion hazards (Stage 3).** [`../lib/stacked-pr-hazards.md`](../lib/stacked-pr-hazards.md).
 
-### Rescued/resumed-worktree distrust (#951)
-
-A PR from a **rescued or resumed worktree** may carry stale `tsc`/test claims. Set `RESCUED_ENV=1` on rescue markers in the body; **Phase 3 gates are mandatory**; run `"$SGE_ROOT/skills/worktrees/rescue-guard.sh" assess "$WORKTREE_PATH" origin/main` on P6.5 fix worktrees. Record `rescued_env: true`.
+**Rescued/resumed worktree (#951):** rescue markers in the body → `RESCUED_ENV=1`, Phase 3 gates mandatory, `"$SGE_ROOT/skills/worktrees/rescue-guard.sh" assess "$WORKTREE_PATH" origin/main` on P6.5 worktrees, `rescued_env: true`.
 
 ## Phase 2: Parallel Agent Review
 
 ### Diff risk classification & dispatch scaling (drives cost — #688)
 
 `DIFF_RISK=$(rl_diff_risk "$PR" <bot_hot>)` — tier (`prose`/`trivial`/`generated`/`low`/`medium`/`high`): **low risk + clean bot review can skip fresh specialist dispatch**; **high risk (auth/payments/migrations/data-isolation) always gets full treatment** regardless of bot signal; never downgrade `high`-risk on bot review alone; all gates fail closed; Phase 5 pass-through wins. Tier table, security-path glob, mechanics (#984, #973, #1757, #2215): [`dispatch-scaling.md`](references/dispatch-scaling.md). `GOVERNANCE_TIER` `T0`/`T1` additionally caps dispatch below this table, never above/over `high`: [`tier-scaling.md`](references/tier-scaling.md).
+
+### Review tier (#2776)
+
+**Required:** `RT=$("$SGE_ROOT/skills/pr-review/review-tier.sh" pr "$PR" --floor "${ARG_TIER:-light}" --risk "$DIFF_RISK")` → `REVIEW_TIER`/`REVIEW_TIER_REASON`. Set `ARG_TIER` first with the `ARG_TIER=` parse of `--review-tier` in [`review-tier.md` § Computing it](references/review-tier.md#computing-it); depth per tier is there too.
 
 `CONTROL_BEARING=$(rl_diff_control_bearing "$PR")` (#2211): selected tier, dispatches `/sge:qa-audit --adversarial`: [details](references/behavioral-verification-tier.md).
 
@@ -136,7 +135,7 @@ Run review in three layers — **native floor → bundled specialists → repo s
 
 **Layer 1 — native engine (always; the floor).** `/code-review <effort>` (correctness/bugs), `/security-review` (when `rl_security_files "$PR"` non-empty). `<effort>`: `low`/`medium` (≤ ~150 lines), `high` (typical), `max` (large/security), `ultra` (release-critical).
 
-**Layer 2 — bundled specialists (ship with the SGE plugin, every repo).** **@code-reviewer** (quality pass; matches implementation to the linked issue) and **@security-auditor** (OWASP-style; security-path match **or** any `medium`/`high` dispatch tier). Repo MAY override via `.claude/agents/<name>.md`. **Never route security below opus**; model tiers: [`reviewer-lanes.md`](references/reviewer-lanes.md).
+**Layer 2 — bundled specialists (ship with the SGE plugin, every repo).** **@code-reviewer** (quality pass; matches implementation to the linked issue) and **@security-auditor** (OWASP-style; security-path match **or**, at review tier `full`, a `medium`/`high` dispatch tier). Repo MAY override via `.claude/agents/<name>.md`. **Never route security below opus**; model tiers: [`reviewer-lanes.md`](references/reviewer-lanes.md).
 
 **Layer 3 — repo-specific specialists.** Same batch, only when the repo ships the agent AND the trigger matches. Skip undefined agents silently. Roster + triggers: [`reviewer-lanes.md`](references/reviewer-lanes.md).
 
@@ -156,7 +155,7 @@ A `[]` from an agent that ran **no tools** mimics a clean pass. Before folding *
 
 ### Bounded wait & stall detection (issue #686)
 
-`idle_notification` is **not a completion signal**. A reviewer with no structured findings within ~10 min or 3 `idle_notification` pings is **stalled**: never nudge the same agent — **re-dispatch a fresh** one-shot/fork with the identical prompt (discard late replies), emit interim status ("still waiting on N/M reviewers") not a loop. [`reviewer-lanes.md`](references/reviewer-lanes.md).
+`idle_notification` is **not completion**. No structured findings within ~10 min or 3 pings = **stalled**: never nudge — **re-dispatch a fresh** one-shot/fork, same prompt (discard late replies); interim status update, not a loop. [`reviewer-lanes.md`](references/reviewer-lanes.md).
 
 **Verify blockers.** Confirm every would-be **Blocker** independently (a second agent or higher `/code-review` effort); one with no concrete failure path downgrades.
 
@@ -238,6 +237,8 @@ diff_risk: prose | trivial | generated | low | medium | high
 suite_order: default | randomized | not-run
 mutation_gate: <pct> | not-run | not-applicable
 specialist_dispatch: skipped | reduced | full
+review_tier: light | standard | full
+review_tier_reason: <one line>
 bot_findings_folded: <count>
 findings_comment: <comment-url> | inline | none
 budget_exceeded: true | false

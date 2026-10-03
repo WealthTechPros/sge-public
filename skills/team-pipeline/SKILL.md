@@ -103,14 +103,14 @@ Dispatch prompts carry the GraphQL-first / floor-check / switch-on-403 rules:
 ## Lean Agent Contract (MANDATORY — applies to every impl agent)
 
 > Dispatched impl agents follow three rules, always. The contract is **not** a
-> full `/sge:sge-implement` dispatch, but keeps its one non-negotiable gate:
-> before building, every lane runs `/sge:governance-trace` headlessly and parks
-> the issue `outcome: "blocked"` on a blocking verdict/low-confidence match
-> (Phase 3c Step 2). Speed comes from capping recon and deferring the full
+> full `/sge:sge-implement` dispatch, but keeps its non-negotiable gates:
+> before building, every lane passes `intake-check.sh` and the governance-trace
+> gate, parking the issue `outcome: "blocked"` on a failed intake or a blocking
+> verdict/low-confidence match (Phase 3c Step 2). Speed comes from capping recon and deferring the full
 > battery — never from skipping governance.
 
-**Rule 1 — Capped reconnaissance.** Orient from ONLY the issue's file-map (or
-preflight comment); **no open-ended searches** (`grep -r`, `find`, `rg --glob`,
+**Rule 1 — Capped reconnaissance.** Orient from ONLY the file-map in the issue's
+intake acMap (`refs`, Phase 3c Step 2); **no open-ended searches** (`grep -r`, `find`, `rg --glob`,
 recursive reads). Read only file-map files + files you directly edit; if no
 file-map, read ≤ 5 files to locate the surface, then build.
 
@@ -156,9 +156,8 @@ front end over the raw list: discover via `/sge:available-issues`, reconcile
 `/sge:build-ready-audit` before any claim** — **READY** → queue, **NOT_READY** →
 drop (blocker in `failedIssues`; never lock/spawn), **TOO_LARGE** →
 `/sge:decompose-issue` (re-gate children, merge READY ones, never claim the
-parent). That build-ready pass is also the **Phase 1.5 batch pre-classification**
-(#1266): its #872 fold's `governance` verdicts front-load `SGE_GOVTRACE_VERDICT`
-into each lane. **Re-fill** when the queue runs low, only if
+parent). The [intake gate](references/mechanisms.md#intake-gate) drops every
+candidate without a passing `intake-check.sh` before any claim — no fallback. **Re-fill** when the queue runs low, only if
 `time_remaining >= MIN_AGENT_RUNWAY`. [Full steps + fallbacks](references/mechanisms.md).
 
 **Spawn gate overlay (Phase 3).** A new impl lane spawns only if `now < DEADLINE`
@@ -338,17 +337,14 @@ stale queue. **Never omit this guard.** Store the result as an ordered array in
 `/tmp/team-pipeline-queue.json`. Exact discovery, dependency-gate, and reconcile
 commands: [mechanisms](references/mechanisms.md).
 
-### Phase 1.5 — Batch pre-classification (front-load governance; DEFAULT)
+### Phase 1.5 — Intake gate (MANDATORY, SPEC-126)
 
-Once the queue is stored, **batch-classify the whole wave in ONE hop** before
-fanning out: run `/sge:build-ready-audit` over the queued issues (its #872 fold
-runs `/sge:governance-trace` per issue, returning a `governance` verdict each). Store verdicts by issue; Phase 3c injects
-each into its lane as `SGE_GOVTRACE_VERDICT`, which the lane's gate **adopts**
-instead of forking — removing the 10–15 min/lane fork (#10729); gate
-stays. **Opt-out/fallback:** any issue the batch can't classify (dropped,
-errored, `--skip-governance`) arrives with no `SGE_GOVTRACE_VERDICT` and its lane
-falls through to a per-lane fork exactly as before — the gate is never skipped,
-only its fork front-loaded away. Full contract: [dispatch-prompts](references/dispatch-prompts.md).
+Once the queue is reconciled, keep **only** issues whose `scripts/intake-check.sh`
+passes; the rest are `awaiting-intake` in `failedIssues` — never claimed. The
+human-approved governance verdict travels in the intake record and each lane
+adopts it there (Phase 3c Step 2), so no per-lane fork runs for it; no lane is
+ever handed an `SGE_GOVTRACE_VERDICT` (never adopted — provenance unknown).
+Commands: [intake gate](references/mechanisms.md#intake-gate).
 **Same pass, run `resolve-tier.sh` per issue, store the result** (#2488) — [commands](references/mechanisms.md#per-lane-model-tier-2488).
 
 ---
@@ -420,9 +416,10 @@ budget target, the full **Lean Agent Contract** (Rules 1–3), and these Steps
 (full template: [dispatch-prompts](references/dispatch-prompts.md)):
 
 1. Export `SGE_AGENT_ID=impl-<N>` + `SGE_UNATTENDED=1` if unattended (#2487); cd worktree; read issue.
-2. **Governance-trace gate (MANDATORY, before writing any code):** adopt the
-   front-loaded `SGE_GOVTRACE_VERDICT` (Phase 1.5) when it matches this issue,
-   else run `/sge:governance-trace <N>` via `Agent`, never `Skill(args=)`
+2. **Intake + governance-trace gate (MANDATORY, before writing any code):** run
+   `intake-check.sh <N>` before any code — non-zero → `blocked` (`note:"intake: …"`);
+   file-map = its acMap. Adopt the record's verdict via `fork-util.mjs`
+   join, else run `/sge:governance-trace <N>` via `Agent`, never `Skill(args=)`
    (#2452); branch per `/sge:sge-implement` Phase 0.5's *Headless completion contract*.
    MATCHES_EXISTING
    / NO_SPEC_WARRANTED / NOT_ONBOARDED with `matchConfidence` not low → proceed.
@@ -430,7 +427,7 @@ budget target, the full **Lean Agent Contract** (Rules 1–3), and these Steps
    `/tmp/team-pipeline-agent-<N>.json` (`"outcome":"blocked","prNumber":null`,
    `note:"governance-trace: <why>"`) and **terminate WITHOUT building** (Phase 4
    4a parks it; never auto-override). **Caller owns Step W (§2.4a, #1938):** on
-   adoption `create_entities` the adopted verdict, `path: front-loaded`
+   adoption `create_entities` the adopted verdict, `path: intake`
    (fire-and-forget).
    **Fork result contract (#2452):** no verdict JSON / no `issue` echo / issue-repo mismatch → blocked ([ref](references/dispatch-prompts.md)).
 3. Implement the change (TDD per AC) per the Lean Agent Contract — draft PR on
@@ -639,7 +636,7 @@ Recovery for "No issues found", "Worktree already exists", "Agent stalled",
 - `/sge:available-issues`, `/sge:build-ready-audit`, `/sge:decompose-issue` — discover/gate/decompose
 - `/sge:tidy-worktrees` — Phase 0.5 non-flush hand-off (never pushed)
 - `/sge:sge-implement [N]` — single issue end-to-end (blocked-fix path)
-- `/sge:governance-trace [N]` — pre-build gate; batched (Phase 1.5) as `SGE_GOVTRACE_VERDICT` (#1266)
+- `/sge:governance-trace [N]` — pre-build gate; verdict adopted from the intake record when it has one
 - `/sge:pr-monitor`, `/sge:pr-review [PR]`, `/sge:pr-fix [PR]` — shepherd/review/drive green
 - `/sge:cleanup`, `/sge:reap-orphans` — dev-box reset+reaper (`/loop 30m` hygiene)
 

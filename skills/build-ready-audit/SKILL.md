@@ -451,8 +451,8 @@ the returned JSON.
 Refuses with `--skip-governance`; unset+reported under dispatch/fork.
 Walks each `READY`, unlabelled issue one at a time — gates + governance
 verdict + a recommendation (self-certify iff `MATCHES_EXISTING`/
-`NO_SPEC_WARRANTED` non-low confidence, per SPEC-095 §2.4 — spec superseded #2685, rule kept, else hold), then
-stops for the human's decision. Mechanics: [apply-sge-ready.md](references/apply-sge-ready.md).
+`NO_SPEC_WARRANTED` non-low confidence, else hold), then stops for the
+human's decision; self-certify = intake record + label, one act (#2793). Mechanics: [apply-sge-ready.md](references/apply-sge-ready.md).
 
 ---
 
