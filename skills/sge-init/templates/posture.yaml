@@ -37,9 +37,30 @@
 #                    reviews — committing enters it into the exclusion set and
 #                    invalidates its own verdicts (sge#2288).
 #
-# Format: plain YAML — parsed by check-review-independence.sh using
-# dependency-free awk/grep (no yq or python required).  Keep to scalar
-# values only; no nested mappings or flow sequences.
+# enforcement        (optional, SPEC-128) onboarding | enforced
+#                    onboarding — every SGE gate is advisory.  This is the
+#                            default: an absent key means onboarding.
+#                    enforced  — explicit opt-in; the gates listed in
+#                            skills/sge-init/references/enforcement-profile.md
+#                            block.  Promote only once the sge-init Step 9
+#                            graduation criteria are met.
+#                    Any other value is an error, never a silent onboarding.
+#
+# enforcement_exceptions (optional, SPEC-128) repo-level, dated gate
+#                    exceptions.  A block list; each entry is ONE quoted line:
+#                      - "<gate> | <reason> | <approver> | <YYYY-MM-DD expiry>"
+#                    gate: commit-msg | tdd-guard | require-commit-trailer |
+#                          require-test-evidence | branch-protection
+#                    approver: the GitHub login that approved it.
+#                    Commit-level overrides keep the SGE-Override: trailer.
+#                    Read it with scripts/read-enforcement-profile.sh.
+#
+# Format: plain YAML — parsed by the reviewer-posture checks and
+# scripts/read-enforcement-profile.sh using dependency-free awk/grep/bash
+# (no yq or python required).  Keep to scalar values only; no nested
+# mappings or flow sequences.  The sole exception is the
+# enforcement_exceptions block list, whose entries are one-line quoted
+# scalars so each stays one grep/awk-parseable line.
 #
 # AI proposes, human disposes — /sge:sge-init proposes this draft; a human
 # reviews and writes it only after confirming the reviewer identity is
@@ -48,3 +69,6 @@
 # profile: solo
 # review_independence: declared-exception
 # reviewer_identity: <github-login-of-dedicated-reviewer-bot>
+# enforcement: onboarding
+# enforcement_exceptions:
+#   - "require-test-evidence | legacy importer has no harness yet | <approver-login> | 2026-12-31"
