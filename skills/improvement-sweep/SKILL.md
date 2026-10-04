@@ -16,7 +16,7 @@ this skill decides *which* dial to climb this week; `/sge:drift-hillclimb` does
 the climbing.
 
 This makes **F-EFFICACY (SGD-044)** real: SGD-044's A/B protocol
-(`platform/docs/sgd-build/specs/SGD-044-ab-efficacy-protocol.md`) pre-registers
+(`docs/sgd-build/specs/SGD-044-ab-efficacy-protocol.md`) pre-registers
 *how* to measure whether SGE causes improvement; this sweep supplies the
 *cadence* that produces a steady, A/B-comparable stream of measured before→after
 deltas — one per week, per dial, per skill version (SkillRunRecords, #727, make

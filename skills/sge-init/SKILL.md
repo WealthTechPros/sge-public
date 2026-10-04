@@ -495,6 +495,8 @@ Output a single summary the human can read in under five minutes:
   | `.sge/test-map.yml` + `require-test-evidence.yml` (Step 7c, if adopted) | advisory | 2 weeks of green advisory runs, or a stated coverage/compliance threshold the team picks |
   | `.sge/regulated-paths.yml` + `require-regulated-signoff.yml` (Step 7d, if adopted) | advisory | first regulated release candidate, or 2 weeks of green advisory runs, whichever comes first |
 
+  Profile key + promotion path: [`references/enforcement-profile.md`](references/enforcement-profile.md).
+
   For each seeded gate, propose recording the graduation decision as a **QD
   record** in `docs/sge/questions.md` (see Step 6) — e.g. "QD-01: when does
   `require-test-evidence.yml` graduate advisory → blocking?" with the

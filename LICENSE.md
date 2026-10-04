@@ -74,4 +74,4 @@ This licence is governed by the laws of England and Wales.
 ---
 
 To become a Subscriber, or for any licensing enquiry:
-<https://sge.wealthtechpros.com>
+<https://wealthtechpros.com>
