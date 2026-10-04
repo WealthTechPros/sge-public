@@ -100,6 +100,38 @@ documented in that script's header). Layout:
 6. The verdict's third line must read
    `Evidence: static — <dir> @ <commit or "no commit">, screenshot-based, no live interaction`.
 
+## Base comparison — pre-existing vs introduced (#2837, SPEC-115 I3)
+
+You judge the rendered page, so a PR that touches one file on a page that
+already carries design debt would FAIL for problems it did not make. To
+keep the merge gate fair without waiving that debt, also score the PR's
+BASE revision (its merge-base with the target branch) when the dispatcher
+gives you base evidence:
+
+- **Static mode** — the dispatcher names a second evidence directory for
+  the base, captured with `capture-design-evidence.mjs capture
+  --commit <merge-base sha>` against the same routes and viewports. Apply
+  the same refusal checks (schema, non-empty, commit matches the named base
+  sha).
+- **Live mode** — the dispatcher names a base dev URL serving the
+  merge-base build. Repeat Workflow step 3 against it on the same routes.
+- **No base evidence named, or it fails a refusal check** — do not guess a
+  base score. Write `Base: not captured — <reason>`; the gate then applies
+  the absolute rule (a FAIL blocks).
+
+With base evidence, score every rubric category on base as well as head,
+and tag each category scoring below 2 on head:
+
+- `[pre-existing]` — the same problem is visible on base at the same route
+  and viewport, and base scored that category no higher than head. Cite
+  the base screenshot or measurement.
+- `[introduced]` — anything else, including a problem you could not find
+  on base. When unsure, tag `[introduced]`.
+
+A category head scores lower than base is always `[introduced]`. Score
+the rubric honestly on head either way: the base comparison changes how
+the merge gate reads a FAIL, never what you score.
+
 ## Rubric — score each 0 (fail), 1 (weak), 2 (solid)
 
 - R1 Token discipline: every color, font, spacing, radius comes from
@@ -135,11 +167,18 @@ suffix) in exactly this shape:
 VERDICT: PASS | FAIL
 Score: NN/16
 Evidence: live | static — <dir> @ <commit>, screenshot-based, no live interaction
-R1 Token discipline: N — one-line evidence
+Base: NN/16 @ <merge-base sha> | not captured — <reason>
+R1 Token discipline: N (base N) — one-line evidence [introduced | pre-existing]
 ... (all eight)
 
 Top fixes (max 5, most damaging first):
 1. [file or selector] — what is wrong — what to change
 ```
+
+Drop `(base N)` when no base was captured. The tag is required on every
+category below 2 when a base was captured. Lead Top fixes with
+`[introduced]` findings; list `[pre-existing]` ones after them as
+follow-up debt. `scripts/design-verdict-gate.mjs` parses exactly this
+shape for the `/sge:pr-review` gate, so do not reword the field labels.
 
 Be specific enough that the main agent can act without re-investigating.
