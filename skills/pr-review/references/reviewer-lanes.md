@@ -227,3 +227,13 @@ cite a path the diff carries only under its old name.
 **Fails closed.** An unreadable findings file, an unfetchable diff, or an
 unparseable array all return `unverifiable`, which blocks exactly as `bleed`
 does. Unverified provenance is precisely the state that shipped both incidents.
+
+## Review layers (moved from SKILL.md)
+
+Moved from `SKILL.md` Phase 2 (issue #2825); `SKILL.md` keeps a condensed one-paragraph summary.
+
+**Layer 1 — native engine (always; the floor).** `/code-review <effort>` (correctness/bugs), `/security-review` (when `rl_security_files "$PR"` non-empty). `<effort>`: `low`/`medium` (≤ ~150 lines), `high` (typical), `max` (large/security), `ultra` (release-critical).
+
+**Layer 2 — bundled specialists (ship with the SGE plugin, every repo).** **@code-reviewer** (quality pass; matches implementation to the linked issue) and **@security-auditor** (OWASP-style; security-path match **or**, at review tier `full`, a `medium`/`high` dispatch tier). Repo MAY override via `.claude/agents/<name>.md`. **Never route security below opus**; model tiers: [`reviewer-lanes.md`](reviewer-lanes.md).
+
+**Layer 3 — repo-specific specialists.** Same batch, only when the repo ships the agent AND the trigger matches. Skip undefined agents silently. Roster + triggers: [`reviewer-lanes.md`](reviewer-lanes.md).

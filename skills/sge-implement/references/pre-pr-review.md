@@ -32,3 +32,12 @@ The review returns a JSON object with `verdict` (`"pass"`/`"fail"`), `blockers[]
 - **`verdict: "pass"`** — address warnings at your discretion, then proceed.
 
 **Capture the Phase 5 verdict.** Record the reviewer's `sha` (`git rev-parse HEAD`), `verdict`, and `blockers` count — you embed these in the PR body in Phase 6 so `/sge:pr-review` can skip a redundant re-review if nothing changed.
+
+## Pre-PR checks — skeptic pass + advisory review (sge#2829)
+
+On **`standard`/`critical` tiers only** (the `trivial`-tier cap above, #1267, still applies — no extra pass there), after the forked `/sge:sge-review` passes and **before** the PR leaves draft for review, the builder runs two more checks and fixes every blocker/major they raise first (TDD, re-run Phase 4):
+
+1. **Adversarial skeptic pass.** A forked, fresh-context subagent is told to *refute* the change, not review it: find the input, path or state where the fix does not hold, and prove each claimed fix with a **reverted-fix test** — run the change's own regression test(s) against the pre-change revision and confirm they FAIL there. Reuse `/sge:qa-audit --adversarial`'s Step 4 pre-change run for this (a `git worktree add --detach <base-sha>` checkout, the same corpus on both sides, results recorded as `pre_fix_status`/`post_fix_status`) rather than building a second harness. A regression test that also passes on the unfixed code is a **major**: the test proves nothing.
+2. **`/sge:pr-review "$PR" --advisory`** on the draft PR. Advisory mode never claims the gate, moves a label or arms auto-merge (#754) — it only posts the would-be verdict. Fix its blockers/majors, record or decline its minors per the [follow-up cap](../../lib/follow-up-cap.md), then hand the PR to the real gate.
+
+Record both in the PR body (`<!-- sge-prepr: {"skeptic": "pass|fail", "reverted_fix": "fails-on-base|passes-on-base|n/a", "advisory": "<verdict>"} -->`) so the merge-gate reviewer can see what was already tried. Branch updates during this loop follow [merge-not-rebase](../../lib/merge-not-rebase.md).
