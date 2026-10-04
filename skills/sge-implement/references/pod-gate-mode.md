@@ -100,9 +100,12 @@ Phases 7/8 (pr-review + merge-gate) are owned exclusively by the Autopilot revie
 After Phase 6's commit + draft PR:
 
 1. Resolves `GATE_OWNER` (env var → `.claude/sge.json` fallback).
-2. If `pod`: posts a handoff comment on the PR, skips Phases 7 and 8 entirely,
-   emits a `SkillRunRecord` with `verdict "handed-off"` / `phaseReached "Phase 6.5"`,
-   and returns with the summary "Gate owned by pod — handed off as draft PR #N."
+2. If `pod`: posts a handoff comment on the PR, then marks it ready and removes
+   `hold` (`"$SGE_AUTHOR_WRAPPER" gh pr ready`, #2806 — the author lane is the single
+   owner of undrafting, and PR Warden never selects a draft or a held PR), skips
+   Phases 7 and 8 entirely, emits a `SkillRunRecord` with `verdict "handed-off"` /
+   `phaseReached "Phase 6.5"`, and returns with the summary "Gate owned by pod —
+   handed off as ready PR #N."
 3. If unset / not `pod`: continues to Phase 7 as before (self-drive).
 
 **The implementer never touches `pr-reviewing` or `pr-reviewed`.** The pod has
@@ -145,7 +148,7 @@ solo-repo pipeline works identically.
 
 | Mode | SkillRunRecord verdict | phaseReached | Summary |
 |---|---|---|---|
-| Pod-gate (gate owner = pod) | `handed-off` | `Phase 6.5` | "Gate owned by pod — handed off as draft PR #N" |
+| Pod-gate (gate owner = pod) | `handed-off` | `Phase 6.5` | "Gate owned by pod — handed off as ready PR #N" |
 | Self-drive (gate owner unset / not pod) | `merged` (success) / `blocked` | `Phase 8` / `Phase 0.5` | (unchanged) |
 
 ## Phase 5 is not suppressed in pod mode (issue #1324)

@@ -86,7 +86,7 @@ A PR enters a lane only if **all** of these hold:
 
 1. **Not spec-only.** Resolve the repo's specification globs from its `CLAUDE.md` (spec/feature/capability/docs artefact paths) â€” do **not** hardcode a glob; only fall back to common conventions (`features/**`, `docs/**`) if `CLAUDE.md` is silent. A PR is spec-only if **every** changed file matches â€” that check is `is_spec_pr <pr>` in [`monitor-lib.sh`](monitor-lib.sh); export the resolved alternation as `SPEC_GLOB_RE` before calling it.
 
-2. **Not a draft â€” with two orphan carve-outs.** `sge-implement` opens every PR as a draft, undrafted only by `/sge:pr-review` Phase 8; when that chain never runs the draft is label-less forever, so a categorical skip would orphan it. Two carve-outs admit a draft that has **neither** `pr-reviewing` nor `pr-reviewed`: **(a, #755)** quiet â‰¥ `DRAFT_ORPHAN_MINUTES` (30) â†’ a **first** `/sge:pr-review`; **(b, #1248)** commit older than `STALE_DRAFT_MINUTES` (45), no CI in flight â†’ the **stale-draft lane**. A draft the author is actively pushing to is never carved in.
+2. **Not a draft â€” with two orphan carve-outs.** `sge-implement` opens every PR as a draft, undrafted only by its author lane at the end of its run (#2806); when that lane dies first the draft is label-less forever, so a categorical skip would orphan it. Two carve-outs admit a draft that has **neither** `pr-reviewing` nor `pr-reviewed`: **(a, #755)** quiet â‰¥ `DRAFT_ORPHAN_MINUTES` (30) â†’ a **first** `/sge:pr-review`; **(b, #1248)** commit older than `STALE_DRAFT_MINUTES` (45), no CI in flight â†’ the **stale-draft lane**. A draft the author is actively pushing to is never carved in.
 3. **Not exclusively claimed by another session.** A work-in-flight label (`pr-reviewing`, plus any fix-in-flight label the repo's `CLAUDE.md` defines) means another run owns this PR â€” **mutex: skip** and re-check next cycle. The monitor never strips a **fresh** lock, but a dead session's claim must not deadlock the lane forever â€” a *stale* lock is reclaimed (see **Stale-claim takeover**).
 4. **Not held for human sign-off (issue #1393).** A `hold` label = reviewed clean but awaiting human sign-off (co#2393). **Skip** and report `HELD`. When the operator removes `hold`, the next cycle dispatches `/sge:pr-review`, which finds the clean prior verdict and promotes via the delta fast-path.
 
@@ -273,17 +273,13 @@ Same-repo only â€” cross-repo `owner/repo#N` won't auto-close (flag for man
 
 ## Admin-bypass detection (issue #2384, admin-bypass half of #2209)
 
-`gh pr merge --admin` cannot be prevented at the GitHub API level â€” branch protection has no "except when I say so" audit hook. This is **fail-loud detection, not prevention**: per the 2026-08-19 decision recorded on #2209, a merge that landed via admin bypass on a repo with required contexts red should never be silently indistinguishable from a routine merge, regardless of *why* the verdict path was broken (App outage, missing operator credentials, #2219's independence-exclusion case). This pairs with #2219's declared-exception model â€” an override should always be an explicit, recorded exception, never a normalized default path.
-
-**Mechanism** â€” [`scripts/detect-admin-bypass.sh`](../../scripts/detect-admin-bypass.sh): for a merged PR, resolve the base branch's required status-check contexts, fetch check-runs (+ legacy statuses) for the PR's **head SHA** (the commit that carried the pre-merge verdicts â€” the merge commit itself has no check-run history), collapse to the latest conclusion per named check, and compare against the required set. `success`/`neutral`/`skipped` (e.g. a legitimately path-filtered job) count as satisfying a context, matching GitHub's own branch-protection semantics; anything else (`failure`/`cancelled`/`timed_out`/`pending`/missing) on a PR that nonetheless merged is only reachable via an admin override.
-
-Run it every time the **MERGED** row fires:
+`gh pr merge --admin` cannot be prevented, so this is fail-loud **detection, not prevention**: a merge over red required contexts must never look like a routine merge. Run it every time the **MERGED** row fires:
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/scripts/detect-admin-bypass.sh --pr "$pr"
 ```
 
-On detection it appends an NDJSON record to the rolling log (`$ADMIN_BYPASS_LOG`, default `/tmp/admin-bypass.ndjson`) **and** posts an idempotent (head-SHA-marker-keyed) comment on the PR naming the specific context(s) that were not green at merge time â€” never re-posted for the same head SHA. Exit is always 0: the merge already happened, there is nothing left to block; the flagged PR comment/log line is the actionable signal, not a gate. A repo-wide sweep (`--scan [--since <ISO8601>]`, default lookback 24h) is available for a periodic audit pass outside the per-merge hook.
+On detection it appends NDJSON to `$ADMIN_BYPASS_LOG` and posts an idempotent PR comment naming the non-green contexts; exit is always 0 (a signal, not a gate). Mechanism, rationale and the `--scan` sweep: [`admin-bypass-detection.md`](references/admin-bypass-detection.md).
 
 ---
 

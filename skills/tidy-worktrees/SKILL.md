@@ -180,10 +180,13 @@ Build a table — one row per worktree/branch — with verdict, reason, and **ti
 
 ### Default mode — per-item rescue
 
-Present the audit table. For **each 🟥 VALUABLE item**, ask the user (AskUserQuestion, one per item or batched) which rescue fits:
+Present the audit table. For **each 🟥 VALUABLE item**, ask the user (AskUserQuestion, one question per item) which rescue fits.
+
+> **No PRs from leftover branches (issue #2866).** A cleanup session never opens PRs in bulk: each rescue PR needs the user's own per-item choice — no batched "push all" decision, and never "capture every unmerged branch for review". The safe outcomes for a leftover branch are **Discard** (record the tip SHA first) and **Keep** (locally). **Push + draft PR** is offered only when `rescue-guard.sh supersession` reports `live` and the linked issue is still open; `superseded` → **Discard** (record the tip SHA first), `unknown` → **Keep**. On 2026-10-03 a cleanup session opened 8 PRs (wtp-org #1043–#1061) "captured for review before cleanup"; all 8 duplicated work already on `main`.
+
 
 1. **Commit** — commit the changes on the branch with a descriptive message.
-2. **Push + draft PR** — push the branch and open a draft PR so the work has a remote copy. **Before pushing, run the supersession preflight, then the rescued-worktree guard below** — a rescued/resumed worktree is exactly the case that is already merged elsewhere, and/or stale, and/or serving a junctioned build.
+2. **Push + draft PR** — only in default mode, only on a `live` supersession verdict with the linked issue still open (see above). Push the branch and open a draft PR so the work has a remote copy. **Before pushing, run the supersession preflight, then the rescued-worktree guard below** — a rescued/resumed worktree is exactly the case that is already merged elsewhere, and/or stale, and/or serving a junctioned build.
 3. **Keep** — leave the worktree/branch untouched; it stays out of Phase 4.
 4. **Discard** — explicit, per-item. Before executing any confirmed discard, **record the recovery SHA** (branch tip, and stash SHAs via `git rev-parse stash@{n}`) in the summary — reflog/dangling objects make committed work recoverable for a grace period; quote the SHA so it actually is.
 
@@ -207,9 +210,9 @@ bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/worktrees/r
 
 - **`superseded`** (`surviving_commits:0` — every commit is already in `main` by patch-id — **or** `files_diff:empty` — the touched files already match `main`): switch the item's decision from **Push + draft PR** to **Discard** (option 4). Record the branch tip SHA in the summary first (reflog recovery), then note *why*: "superseded — already in `origin/main`". Do not open the PR.
 - **`live`**: the branch carries work not yet in `main`; proceed to the rescued-worktree guard below, then push.
-- **`unknown`**: `origin/main` could not be resolved (offline / no fetch). The supersession question is unanswerable — **fail safe**: neither push nor delete. Fetch the base and re-run, or hand the item back for a manual check.
+- **`unknown`**: `origin/main` could not be resolved (offline / no fetch). The supersession question is unanswerable — **fail safe**: switch the decision to **Keep** (neither push nor delete). Fetch the base and re-run, or hand the item back for a manual check.
 
-A cross-check the git guard cannot make: if the item's branch names an issue, confirm that **linked issue is still open** before pushing. A closed issue plus a superseded diff is the clearest delete-not-PR signal.
+A cross-check the git guard cannot make: if the item's branch names an issue, confirm that **linked issue is still open** before pushing. If it is closed, do not push — offer **Discard** (tip SHA recorded) or **Keep**. A closed issue plus a superseded diff is the clearest delete-not-PR signal.
 
 ### Mandatory rescued-worktree guard — rebase onto base + isolated install before any verification claim (issue #951)
 
@@ -255,6 +258,7 @@ Build a **single deletion plan** covering every ⬜ SAFE worktree/branch *plus* 
 - Items with **uncommitted changes or attributed stashes are excluded** from the plan and listed separately — a SHA cannot recover an uncommitted file. The user may explicitly add one to the plan; that is their discard decision.
 - `main`, open-PR branches, and the current worktree are never in the plan.
 - Present the plan, ask **one** confirmation, then execute it in full. No silent additions afterwards — anything discovered later means re-audit, not improvise.
+- `--force` never pushes a branch or opens a PR (issue #2866). Its only outcomes are delete-with-SHA (in the plan) and keep (excluded). A branch that might deserve a rescue PR is kept and reported; the user re-runs in default mode to rescue it per item.
 
 `--force` is exactly the old "sweep everything not tied to an open PR" behaviour, minus its data-loss bugs: audit first, local before remote, SHAs recorded, one human gate.
 
@@ -350,7 +354,8 @@ When given several repo directories, **fan out the read-only part, keep the dest
 7. **Every deletion quotes a recovery SHA.** When in doubt, keep and report — a slightly untidy repo is cheap; lost work is not.
 8. **Windows junction guard is mandatory on Windows.** NTFS directory junctions inside a worktree are followed by `git worktree remove` and recursive deletes, destroying real target files. Always run Steps 4a–4b (detect junctions, unlink with `cmd /c rmdir`, verify gone) before any worktree removal on Windows.
 9. **A rescued/resumed worktree is rebased onto base and isolated-installed before its work is pushed or verified** (issue #951). The `../worktrees/rescue-guard.sh` guard is a default action on the Phase 3 "Push + draft PR" path, not an optional troubleshooting step — a stale branch must not merge behind main, and a junctioned `node_modules` must not let main's stale build masquerade as the worktree's verification.
-10. **A rescue is checked for supersession before it is pushed at all** (issue #1538). The `../worktrees/rescue-guard.sh supersession` preflight runs FIRST on the "Push + draft PR" path — a branch already merged elsewhere is Discarded (tip SHA recorded), never pushed as a duplicate or reverting PR (the 2026-07-23 incident: 3/3 rescued PRs superseded, one would have reverted ~1,808 lines).
-11. **Live ownership claims are sacrosanct** (issue #1759). A worktree carrying a fresh `.sge-wt-claim` (within TTL) is **never** in the deletion plan — not in default mode, not in `--force`. The claim file is the primary signal that a running worker owns the worktree; the recency guard (directory mtime within 10 min) is a secondary net for the case where no claim was written yet. An expired claim self-heals: the worktree falls through to normal audit. The recency guard carries the same immunity under `--force`.
-12. **Sweeps never mutate merge-gate labels** (issue #1759). A sweep must **never** add, remove, or modify GitHub labels on PRs — specifically `pr-reviewing` and `pr-reviewed`. These labels are the property of the review plane (`/sge:pr-review`'s termination contract), and a sweep that strips `pr-reviewing` mid-review corrupts the review's state machine. The sweep's job is worktree/branch lifecycle only; label state is out of scope.
-13. **No open-PR set, no deletions** (sge-public#47). The open-PR list comes from the repo's real host via `fpr_open_pr_heads` (GitHub `gh`, or the Forgejo adapter's `list-prs`), never an assumed `gh`. If it cannot be obtained or may be truncated, the sweep refuses to delete anything — an empty list from a failed call would mark every live PR branch SAFE.
+10. **A cleanup session never opens PRs in bulk** (issue #2866). Leftover branches are Discarded (tip SHA recorded) or Kept; a "Push + draft PR" rescue is a per-item user choice, in default mode only, on a `live` supersession verdict with the linked issue still open. `--force` never pushes or opens a PR.
+11. **A rescue is checked for supersession before it is pushed at all** (issue #1538). The `../worktrees/rescue-guard.sh supersession` preflight runs FIRST on the "Push + draft PR" path — a branch already merged elsewhere is Discarded (tip SHA recorded), never pushed as a duplicate or reverting PR (the 2026-07-23 incident: 3/3 rescued PRs superseded, one would have reverted ~1,808 lines).
+12. **Live ownership claims are sacrosanct** (issue #1759). A worktree carrying a fresh `.sge-wt-claim` (within TTL) is **never** in the deletion plan — not in default mode, not in `--force`. The claim file is the primary signal that a running worker owns the worktree; the recency guard (directory mtime within 10 min) is a secondary net for the case where no claim was written yet. An expired claim self-heals: the worktree falls through to normal audit. The recency guard carries the same immunity under `--force`.
+13. **Sweeps never mutate merge-gate labels** (issue #1759). A sweep must **never** add, remove, or modify GitHub labels on PRs — specifically `pr-reviewing` and `pr-reviewed`. These labels are the property of the review plane (`/sge:pr-review`'s termination contract), and a sweep that strips `pr-reviewing` mid-review corrupts the review's state machine. The sweep's job is worktree/branch lifecycle only; label state is out of scope.
+14. **No open-PR set, no deletions** (sge-public#47). The open-PR list comes from the repo's real host via `fpr_open_pr_heads` (GitHub `gh`, or the Forgejo adapter's `list-prs`), never an assumed `gh`. If it cannot be obtained or may be truncated, the sweep refuses to delete anything — an empty list from a failed call would mark every live PR branch SAFE.

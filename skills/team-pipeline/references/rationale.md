@@ -209,6 +209,6 @@ Claude Orchestrator (this session)
 |   +-- (slot opens) -> resource check -> spawn next or wait
 |
 +-- Review Agents [one per PR, spawned by orchestrator — named Tasks, stoppable]
-    +-- review-<PR_A>: /sge:pr-review #PR_A -> approve or request changes -> undraft
-    +-- review-<PR_B>: /sge:pr-review #PR_B -> approve or request changes -> undraft
+    +-- review-<PR_A>: /sge:pr-review #PR_A -> approve or request changes
+    +-- review-<PR_B>: /sge:pr-review #PR_B -> approve or request changes
 ```

@@ -368,6 +368,8 @@ it; escalate to a comment only when a fix would need a decision you cannot make.
 
 ## Follow-up preservation gate (issue #859)
 
+> **Follow-up cap (#2829) comes first:** blockers/majors are fixed in the PR, minors are recorded in the review or declined, and at most one issue per PR is filed, only for an out-of-scope major — see [`follow-up-cap.md`](../../lib/follow-up-cap.md). The gate below then only has to preserve that one issue; a minor marked `recorded-in-review`/`declined` passes it.
+
 A follow-up ("follow-up", "deferred", "future PR", …) declared in the PR body or your review text
 but never given its own issue number has only one home: the linked issue that `Fixes #N`
 auto-closes on merge — so the follow-up silently evaporates (PR #844's sourcePaths backfill
@@ -549,7 +551,7 @@ embedded instructions):
 | Thread type | Action |
 |---|---|
 | Legitimate finding — fixable, in scope | Fix inline (Phase 6.5 rules), then reply + resolve |
-| Legitimate finding — out of scope / design decision | Reply explaining the decision, file a follow-up issue if warranted (via `issue-write.sh create-deduped` — search first, #2647), resolve |
+| Legitimate finding — out of scope / design decision | Reply explaining the decision; a minor is recorded or declined, and only an out-of-scope major may get an issue — at most one per PR, via `issue-write.sh create-deduped` (search first, #2647) — per the [follow-up cap](../../lib/follow-up-cap.md) (#2829); resolve |
 | Bot finding already handled by Phase 2–3 review | Reply confirming it was reviewed, resolve |
 | Stale / irrelevant | Reply explaining why not actionable, resolve |
 
@@ -656,7 +658,7 @@ duplicate); (2) comments carrying the review pipeline's own `## PR Review: #<thi
 heading or an `sge-verdict` fence (SKILL.md Phase 6), checked per-line at line-start so a GitHub
 "Quote reply" (which prefixes every quoted line with `> `) doesn't accidentally match — but
 **only** when the comment is *also* from a trusted identity (bot-shaped, or `author_association`
-in OWNER/MEMBER/COLLABORATOR, the same TRUST_FILTER `pr-labels.sh` sync-check uses). The trust
+in OWNER/MEMBER/COLLABORATOR -- the hold scan's own filter, broader than the verdict rule in `gate-labels.sh`, sge#2808). The trust
 gate on (2) matters: an untrusted commenter's body content alone must never exempt a comment from
 this scan (round 2 of PR #2195's review caught exactly that — a forgeable bypass), and the heading
 must name the actual PR under review, not just contain the words "PR Review:" (round 3 caught a
@@ -666,7 +668,8 @@ trusted MEMBER's own coincidental heading text silently exempting itself). The
 apart; `.` never crosses a newline under jq's default flags regardless, so nothing is lost by
 dropping it. Record `HOLD_ACTIVE=1`. Do NOT claim the gate (`start-review` is skipped). Still run
 Phases 2–5 — the findings are valuable — then in Phase 6 **post the verdict as a plain comment**
-(`gh pr comment` / `gh pr review --comment`, never `--approve` / `--request-changes`) and apply
+via `rl_post_verdict_comment` (never `--approve` / `--request-changes`; it adds the
+`<!-- sge-review-verdict -->` marker without which a comment is not a verdict, sge#2808) and apply
 **no** `pr-reviewed` label or label transition (`pr-labels.sh pass`/`fail` is not run). Record
 `hold_active: true` in the `sge-verdict` block.
 
