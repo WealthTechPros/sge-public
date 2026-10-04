@@ -27,10 +27,11 @@ where that is not guaranteed.
    `/sge:pr-review` in self-drive mode. Reaching Phase 7 in self-drive mode (Phase 6.5 already confirmed
    gate owner ≠ pod) is itself the decision that a real, non-advisory, merge-authoritative review should
    run now; removing `hold` at that exact point is what signals it.
-3. **Pod-gate mode never removes it here.** Phase 6.5 hands off to the pod without touching any label —
-   the pod inherits a held PR and manages `hold` (and `pr-reviewed`) itself. This is not a gap: a pod
-   that never receives `hold` off is a pod that was never told this PR is ready, which is the safe
-   default, not a stuck one.
+3. **Pod-gate mode removes it at the handoff (#2806).** Phase 6.5 posts the handoff comment, then marks
+   the PR ready and removes `hold` — the author lane's last act. PR Warden is the pod reviewer and never
+   selects a draft or a held PR, so a handoff that left either in place stranded the PR unreviewed
+   (sge#2795 sat a day that way). The handoff IS the decision that the work is done; it never touches
+   `pr-reviewing`/`pr-reviewed`.
 
 This composes with `/sge:pr-review`'s own Stage 0 hold gate
 ([`hold-handling.md`](../../pr-review/references/hold-handling.md)), which treats a live `hold` label as
@@ -42,7 +43,7 @@ graduating review — not a workaround for the absence of enforcement, a deliber
 
 ## What NOT to do
 
-Do not remove `hold` earlier than Phase 7.1 "to be safe" — every phase before it is exactly the window
-this label protects. Do not add `hold` removal to Phase 6 (final commit) or Phase 6.5 (pod-gate check):
-both run before self-drive mode is confirmed, and Phase 6.5's whole point is to hand off untouched when
-the gate owner is a pod.
+Do not remove `hold` earlier than the author lane's finish line — Phase 7.1 (self-drive) or the Phase
+6.5 handoff (pod) — every phase before it is exactly the window this label protects. Do not add `hold`
+removal to Phase 6 (final commit). In Phase 6.5 it is removed only on the pod branch, after the handoff
+comment, together with `gh pr ready`.

@@ -32,5 +32,12 @@ through it and the right trailer is emitted automatically.
 
 ## Enforcement
 
-- `commit-msg` hook — warns today; becomes **blocking** in Phase 2.
+- `commit-msg` hook — follows the repo's enforcement profile in
+  `.sge/posture.yaml` (SPEC-128). Under `onboarding` (the default: no file or
+  no `enforcement:` key) it warns and the commit continues. Under
+  `enforcement: enforced` it rejects a commit with neither trailer, unless a
+  dated `commit-msg` exception in `.sge/posture.yaml` covers it.
+- Promotion from `onboarding` to `enforced` is one reviewed PR, made once each
+  gate's graduation criterion is met. The steps are in the SGE plugin's
+  `skills/sge-init/references/enforcement-profile.md` ("Promotion path").
 - The SGE coherence gate in CI fails the build on blocking spec / ADR / test drift.
