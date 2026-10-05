@@ -9,14 +9,14 @@ context: fork
 
 ## Role
 The **cadence layer** for SGE efficacy. Once a week, unattended, it turns the
-three drift **dials** the platform already measures into ONE bounded
+three drift **dials** the plugin already measures into ONE bounded
 improvement PR — the highest-leverage one — then re-measures and records the
 delta. It is the scheduler/selector that sits *above* `/sge:drift-hillclimb`:
 this skill decides *which* dial to climb this week; `/sge:drift-hillclimb` does
 the climbing.
 
 This makes **F-EFFICACY (SGD-044)** real: SGD-044's A/B protocol
-(`platform/docs/sgd-build/specs/SGD-044-ab-efficacy-protocol.md`) pre-registers
+(`docs/sgd-build/specs/SGD-044-ab-efficacy-protocol.md`) pre-registers
 *how* to measure whether SGE causes improvement; this sweep supplies the
 *cadence* that produces a steady, A/B-comparable stream of measured before→after
 deltas — one per week, per dial, per skill version (SkillRunRecords, #727, make

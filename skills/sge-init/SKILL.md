@@ -221,10 +221,10 @@ TODO: fill in the real expected value from <source>` comment rather than inventi
 it looks covered and isn't (this is exactly the gap SGE#762 exists to close: a test
 tagged with a scenario's name that only asserts "page renders" while the spec's real
 business rule goes untested). The human fills in the real assertion before the spec's
-status moves to `implemented` — `platform/app/backend/scripts/validation-coverage-lint.ts`
-(docs/specs/README.md, "Coverage gate") hard-fails an `implemented` spec whose declared
-`## Validation` invariants don't hold, so a stub left unfinished past that point is
-caught mechanically, not just by review.
+status moves to `implemented`. Run `/sge:spec-validate` before that status change: it
+evaluates the declared `## Validation` invariants against their fixtures, so a stub left
+unfinished is caught by the check, not only by review. (The CI lint that used to hard-fail
+this, sge#762, went with the hosted platform in #2899.)
 
 Every spec **must** open with this front-matter — these are the machine-readable cascade
 citation keys `/sge:sge-align` check C7 reads, so seeded repos pass the sweep from day one:
@@ -494,6 +494,8 @@ Output a single summary the human can read in under five minutes:
   | `.githooks/commit-msg` + `require-commit-trailer.yml` (Step 7) | advisory (warn-only hook; CI backstop enforces the trailer regex but not blocking merge on it) | 2 weeks of green advisory runs with no missing-trailer PR merged |
   | `.sge/test-map.yml` + `require-test-evidence.yml` (Step 7c, if adopted) | advisory | 2 weeks of green advisory runs, or a stated coverage/compliance threshold the team picks |
   | `.sge/regulated-paths.yml` + `require-regulated-signoff.yml` (Step 7d, if adopted) | advisory | first regulated release candidate, or 2 weeks of green advisory runs, whichever comes first |
+
+  Profile key + promotion path: [`references/enforcement-profile.md`](references/enforcement-profile.md).
 
   For each seeded gate, propose recording the graduation decision as a **QD
   record** in `docs/sge/questions.md` (see Step 6) — e.g. "QD-01: when does

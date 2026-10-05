@@ -325,7 +325,7 @@ the dispatcher parses it:
   disproportionate to the diff size. Count from the start of Step 0 through the
   end of Step 8; the human-readable report in this step does not count.
 
-Before returning the JSON above, append one `SkillRunRecord` (schema, `platform/packages/token-governance` — #727) to `memory/skill-runs.jsonl` — the join key `sessionId` is what lets a later `/sge:roi-report`/`/sge:cost-guard` run tell "this session's spend produced a passed review" from "this session's spend produced a failed one":
+Before returning the JSON above, append one `SkillRunRecord` (schema: the field contract in `skills/sge-implement/references/skill-run-record.md` (#727)) to `memory/skill-runs.jsonl` — the join key `sessionId` is what lets a later `/sge:roi-report`/`/sge:cost-guard` run tell "this session's spend produced a passed review" from "this session's spend produced a failed one":
 
 ```bash
 jq -nc \

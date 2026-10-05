@@ -190,7 +190,7 @@ Keep the lock advisory and self-expiring — never let a forgotten lock wedge an
 
 ## Step 0.6: Claim the fix (`pr-fixing` mutex)
 
-Before touching the branch, claim the fix so a **second** driver (another `/sge:pr-fix`, or a `/sge:pr-monitor` lane that classified this PR CODE FAIL) does not dispatch a duplicate fix agent onto a branch you are about to force-push — the racing-fixers hazard of issue #1174.
+Before touching the branch, claim the fix so a **second** driver (another `/sge:pr-fix`, or a `/sge:pr-monitor` lane that classified this PR CODE FAIL) does not dispatch a duplicate fix agent onto a branch you are about to push to — the racing-fixers hazard of issue #1174.
 
 ```bash
 "$SGE_ROOT/skills/pr-review/pr-labels.sh" claim-fix $1 || exit 3
@@ -199,7 +199,7 @@ Before touching the branch, claim the fix so a **second** driver (another `/sge:
 - **Exit 3** — another run holds a *fresh* `pr-fixing` claim (< `SGE_FIX_CLAIM_TTL_MIN`, default 30 min). **Back off; do not race.** Someone else owns this PR's fix.
 - **Proceeds** — no claim, or a *stale* one (crashed session) you take over. `--force-claim` overrides deliberately.
 
-**Lane manifest (issue #2214, ask 3).** Also post an advisory lane-manifest claim — `source .../pr-review/review-lib.sh; rl_post_lane_manifest $1 fix` — so a reviewer landing on this PR while you are force-pushing fix commits sees `role: fix` is live and defers, rather than reviewing content mid-rewrite. Fire-and-forget; never blocks the fix.
+**Lane manifest (issue #2214, ask 3).** Also post an advisory lane-manifest claim — `source .../pr-review/review-lib.sh; rl_post_lane_manifest $1 fix` — so a reviewer landing on this PR while you are pushing fix commits sees `role: fix` is live and defers, rather than reviewing content mid-rewrite. Fire-and-forget; never blocks the fix.
 
 `pr-fixing` is a self-expiring **lease**, honoured by `/sge:pr-monitor`'s `CLAIM_LABELS_RE` so its lanes skip a PR you are fixing. You **must** release it on exit (see [When to exit](#when-to-exit)) — a crashed session's claim frees itself within the lease window, but an explicit release frees the lane immediately.
 
@@ -270,7 +270,7 @@ Before every push, run the repo's own auto-fix and static checks locally. A lint
 1. **Auto-fix** — run the repo's lint-fix command (the `--fix`/`--write` variant in its `CLAUDE.md`). This clears formatting, unused-import, and style violations for free.
 2. **Verify clean** — re-run lint with no auto-fix; resolve any remaining errors by hand. **Do not push with known lint errors.**
 3. **Type-check / static analysis** — run the repo's type-check. If it fails, fix it before pushing; don't spend a CI cycle discovering a type error you could see locally.
-4. **Rebase onto base if behind** — if the branch is behind its base, rebase (prefer rebase to keep history linear; fall back to merge only when a rebase is genuinely intractable). Any conflicts go through [AI conflict resolution](#ai-conflict-resolution).
+4. **Merge base in if behind** — `git fetch origin <base> && git merge --no-edit origin/<base>`, then a plain push. **Never rebase or force-push an open PR's branch** — PR Warden's approval carry (#2743) survives a merge, not a rewrite ([`merge-not-rebase.md`](../lib/merge-not-rebase.md), #2829). Conflicts go through [AI conflict resolution](#ai-conflict-resolution).
 
 Only push once auto-fix is clean and the type-check passes. This trades <1 min of local work for the 30–60 min a trivial-violation CI round-trip would otherwise burn.
 
@@ -278,17 +278,17 @@ Only push once auto-fix is clean and the type-check passes. This trades <1 min o
 
 ## AI conflict resolution
 
-When a rebase or merge conflicts — whether from dirty-PR detection (Step 0), the pre-push rebase, or a later mergeability fix — resolve it by **reading both sides and reasoning about intent**. Never `git checkout --ours`/`--theirs` or `merge -X theirs` to make it go away: those silently discard real work.
+When a merge conflicts — whether from dirty-PR detection (Step 0), the pre-push base merge, or a later mergeability fix — resolve it by **reading both sides and reasoning about intent**. Never `git checkout --ours`/`--theirs` or `merge -X theirs` to make it go away: those silently discard real work.
 
-1. **Rebase first** (`git fetch origin <base> && git rebase origin/<base>`) to keep history linear. Fall back to `git merge` only if the rebase cascades conflicts across many commits and becomes ambiguous.
+1. **Merge, never rebase** (`git fetch origin <base> && git merge --no-edit origin/<base>`) — an open PR's history is never rewritten (#2829).
 2. **List conflicts** — `git diff --name-only --diff-filter=U`.
 3. **For each file, read both sides** and decide:
    - Independent changes → keep both.
    - One side supersedes the other (e.g. base renamed a function this PR calls) → take the new form, preserving this PR's intent.
    - Both modified the same structure → merge the two sets of changes deliberately.
-4. **Remove every conflict marker** (`<<<<<<<`, `=======`, `>>>>>>>`) with the Read/Edit tools, then `git add <file>` and `git rebase --continue` (or `git merge --continue`).
+4. **Remove every conflict marker** (`<<<<<<<`, `=======`, `>>>>>>>`) with the Read/Edit tools, then `git add <file>` and `git merge --continue`.
 5. **Lockfiles are regenerated, not hand-merged** — after resolving the manifest (`package.json`/equivalent) conflict, re-run the repo's install to regenerate the lockfile rather than editing it.
-6. **Push the resolved branch** with `git push --force-with-lease` (never a plain force-push — see anti-patterns).
+6. **Push the resolved branch** with a plain `git push` — the merge commit fast-forwards it, so no force is ever needed.
 
 If a conflict's correct resolution is genuinely ambiguous (e.g. two divergent schema/migration changes), don't guess — stop and ask, or open a tracking issue and hand it back.
 
@@ -358,32 +358,7 @@ This keeps the PR's scope honest while ensuring the discoveries are governed, no
 
 ## Batch mode — `--all-prs`
 
-Triage and fix **every** open PR in one pass, classifying upfront so no time is wasted on PRs that are already good or can't be touched.
-
-1. **Pre-classify with one API call** (no model cost):
-
-   ```bash
-   gh pr list --state open \
-     --json number,title,headRefName,mergeable,mergeStateStatus,isDraft,updatedAt,labels,statusCheckRollup --limit 500
-   ```
-
-2. **Bucket each PR:**
-
-   | Bucket | Condition | Action |
-   |---|---|---|
-   | CLEAN | mergeable, all checks pass | skip — already good |
-   | FAILING | mergeable, has failed checks | fix queue (priority) |
-   | DIRTY | `mergeable: CONFLICTING` | conflict queue |
-   | DRAFT (orphaned) | `isDraft: true` AND no `pr-reviewing`/`pr-reviewed` label AND `updatedAt` quiet ≥ `DRAFT_ORPHAN_MINUTES` (default 30) | route to `/sge:pr-review` (first pass; undrafts on a clean pass — issue #755) |
-   | DRAFT | `isDraft: true` (not orphaned — labelled, or active within the window) | skip |
-   | PENDING | checks still running | wait queue |
-   | MERGED/CLOSED | done | skip |
-
-3. **Process FAILING first** (highest value), then **DIRTY** (resolve conflicts, then re-enter the loop), then **re-check PENDING** once the others settle. Run each through the single-PR Loop above.
-4. **Fix systemic failures once.** If the same check is broken across several PRs, fix it in the **oldest** PR and let rebase propagate — never fix N copies of one bug.
-5. While one PR's CI is being watched, you can triage or start the next — the watches are the clock ([wait-for-condition loop](../loops/SKILL.md#b-wait-for-condition-loop)).
-
-For ongoing, unattended shepherding of a backlog (review gates, auto-merge, lane discipline), prefer `/sge:pr-monitor` — it owns the rolling-window merge-queue duty. `--all-prs` is a one-pass batch fix, not a standing monitor.
+Fix **every** open PR in one pass: pre-classify with one `gh pr list` call, bucket each PR (CLEAN / FAILING / DIRTY / orphaned DRAFT / DRAFT / PENDING / MERGED), process FAILING first, then DIRTY, then re-check PENDING, each through the single-PR Loop above. Fix a systemic failure once, in the oldest PR. Bucket table and steps: [references/batch-mode.md](references/batch-mode.md). For standing, unattended shepherding prefer `/sge:pr-monitor`; `--all-prs` is a one-pass batch fix.
 
 ---
 
@@ -420,7 +395,7 @@ The general rule: **never suppress a signal to make it green** — fix what the 
 - **Linter-suppression comments or rule deactivation** (any linter, any language) as a workaround — fix the violation, or configure the rule correctly repo-wide if the lint is genuinely wrong (e.g. honouring an `_`-prefix unused convention).
 - **Loosening thresholds** — lowering coverage minimums, raising allowed-warning counts, widening timeouts to mask a race.
 - **Conflict resolution that discards a side** — `checkout --ours`/`--theirs` or `merge -X theirs` to clear a conflict without reading it.
-- **Force-push** to rewrite history — use new commits; when a rebase genuinely requires it, use `--force-with-lease`, never a bare `--force`.
+- **Force-push or rebase** an open PR's branch — use new commits and merge the base in; a rewrite drops PR Warden's approval carry (#2743, #2829).
 - **`--no-verify`** to bypass hooks — investigate the hook (see *Commit conventions* above).
 - **Marking a check non-blocking to dodge a real failure.** Only make a check non-blocking when it is *structurally* impossible to pass (see below) — never to hide a bug.
 

@@ -38,7 +38,7 @@ Map SGE **feature specs and capabilities** to the **named FCA / UK-regulatory ob
 
 1. Read the repo's `CLAUDE.md` for an SGE-artefact path convention, then locate, per `/sge:sge-align` Step 0:
    - **Specs** — `docs/specs/*.md` or `docs/features/*.md` (YAML frontmatter with `id`/`ref`, `capability`, `status`, `success_measure_moved`).
-   - **Capability model** — `.claude/product-context/capability-model.yaml` or `platform/docs/sgd-build/capability-model.yaml`.
+   - **Capability model** — `.claude/product-context/capability-model.yaml` or `docs/sgd-build/capability-model.yaml`.
 2. **Obligation catalogue** — the canonical id list lives at `skills/regulatory-trace/assets/obligations-catalogue.yaml` under the plugin root resolved via `scripts/resolve-sge-root.sh` (the controlled vocabulary; every mapping must reference an id that exists there, and never one flagged `retired: true`).
 3. **Traceability matrix store** — the per-repo mapping register. Place it beside the capability model as `regulatory-trace.yaml` (or under `docs/sge/regulatory-trace.yaml` if that is the repo's SGE-artefact home) and **record the chosen path in `CLAUDE.md`** so `/sge:sge-align` C12 and future runs find it. Seed from `assets/regulatory-trace.template.yaml` if absent.
 

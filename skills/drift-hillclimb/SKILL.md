@@ -1,5 +1,5 @@
 ---
-description: Use when a repo's SGE Audit Score (the `/sge:sge-align` per-check governance-coherence rollup — an operational fleet-audit signal, distinct from and NOT the platform's canonical SM-2 `coherence_score`) or a specific drift metric needs to be actively raised, not just measured — closing the loop the SGE platform's daily drift snapshot and `/sge:sge-align` only open. Picks the highest-leverage drift gap, opens ONE bounded PR to close it, re-measures with an independent sweep, and repeats until the target is hit or a bound stops it. Comparative-goal, metric-hill-climb loop. Advisory, PR-first, bounded.
+description: Use when a repo's SGE Audit Score (the `/sge:sge-align` per-check governance-coherence rollup, which is SM-2 since ADR-0018) or a specific drift metric needs to be actively raised, not just measured — closing the loop `/sge:sge-align` only opens. Picks the highest-leverage drift gap, opens ONE bounded PR to close it, re-measures with an independent sweep, and repeats until the target is hit or a bound stops it. Comparative-goal, metric-hill-climb loop. Advisory, PR-first, bounded.
 argument-hint: "[--target <n>] [--metric C3|C4|C5|C6|orphan_rate|…] [--dimension token-economy|skill-quality] [--max-rounds <n>] [--min-gain <n>] [--dry-run] [--fleet <org>/*]"
 allowed-tools: Read, Glob, Grep, Agent, Bash(git status:*), Bash(git log:*), Bash(git rev-parse:*), Bash(git ls-files:*), Bash(git diff:*), Bash(git checkout:*), Bash(git branch:*), Bash(node:*), Bash(gh issue list:*), Bash(gh issue view:*), Bash(gh pr list:*), Bash(gh pr view:*), Bash(gh pr checks:*), Bash(gh api:*)
 context: fork
@@ -8,7 +8,7 @@ context: fork
 # Drift Hill-Climb
 
 ## Role
-Take a coherence/drift **number** and move it in the right direction — one bounded PR per cycle — until it hits a stated target or a bound stops the loop. This is the **actor** for SGE's Comparative goal type: `/sge:sge-align` and the platform's `sgdDriftSnapshotJob` *measure* drift; this skill *reduces* it.
+Take a coherence/drift **number** and move it in the right direction — one bounded PR per cycle — until it hits a stated target or a bound stops the loop. This is the **actor** for SGE's Comparative goal type: `/sge:sge-align` *measures* drift; this skill *reduces* it.
 
 This is the [Metric Hill-Climb loop](../loops/SKILL.md#loop-anatomy--the-six-parts-every-loop-declares) made concrete. Read [`loops`](../loops/SKILL.md) first — this skill is one instance of that discipline and every guardrail there applies.
 
@@ -236,7 +236,7 @@ Stop conditions are the shared Governor's: no eligible `worst` remains (executab
 
 Audit Score is a **trend, not a snapshot** — one climb raises it once; keeping it up needs re-climbing as new drift accrues. Wrap this skill in the [recurring loop](../loops/SKILL.md#d-recurring--cross-session-loop): `/loop <interval> /sge:drift-hillclimb --target 85` (e.g. weekly), or a `send_later` self-check-in that re-measures, climbs if below target, and re-arms silently when already at/above it. Safe to loop because Step 1 re-measures from current state and Step 3 dedupes by `sge-drift-key`.
 
-Pairs naturally with the platform's daily `sgdDriftSnapshotJob`: the job measures overnight, this skill climbs on the schedule you set, and the trend file / dashboard shows the line bending up.
+Pairs naturally with a scheduled `/sge:sge-align` sweep (for example the weekly `autopilot-coherence-sweep.yml`, SPEC-100): the sweep measures, this skill climbs on the schedule you set, and `docs/sge/drift-trend.jsonl` shows the line bending up.
 
 ## Safety
 
