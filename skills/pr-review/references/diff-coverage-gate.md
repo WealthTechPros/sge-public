@@ -20,8 +20,7 @@ When `.sge/test-map.yml` declares an optional `coverage_floor:` percentage:
 1. `git diff origin/main...HEAD --unified=0` to get each changed file's **added/changed** line
    numbers. Deleted lines carry no coverage obligation — nothing remains to execute.
 2. Intersect against the coverage report the suite's own run just produced — whatever line-level
-   format the repo emits (e.g. this repo's `platform/app/backend` vitest run emits v8-provider
-   `lcov`/`json` coverage). No per-tool parser is hard-coded centrally; read what the repo already
+   format the repo emits (e.g. a vitest run with the v8 provider emits `lcov`/`json` coverage). No per-tool parser is hard-coded centrally; read what the repo already
    produces, matching SPEC-070 §8's "no per-stack catalogue centrally" posture.
 3. `diff_coverage = covered_changed_lines / total_changed_lines`.
 

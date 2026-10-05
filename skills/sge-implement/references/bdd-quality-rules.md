@@ -8,4 +8,4 @@ When generating or reviewing Gherkin acceptance-criteria scenarios (spec, issue 
 4. Anchor `Given` to observable system state, not private bug references.
 5. One unhappy-path scenario per happy-path cluster, with a concrete `Then`.
 
-Rationale, examples, and audit evidence: [`platform/docs/sgd-build/bdd-quality-rules.md`](../../../platform/docs/sgd-build/bdd-quality-rules.md).
+Rationale, examples, and audit evidence: [`docs/sgd-build/bdd-quality-rules.md`](../../../docs/sgd-build/bdd-quality-rules.md).

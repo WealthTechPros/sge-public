@@ -83,7 +83,7 @@ Never ships a built-in default pattern list — a glob that is safe in one repo'
    clean-root: <repo> (<path or "whole tree">)
 
    Tier 1 — identical to main, safe to delete (2):
-     platform/.claude/design-review/DESIGN.md
+     app/.claude/design-review/DESIGN.md
 
    Tier 2 — matches clean-root-patterns (5):
      gate-backend-tests.log

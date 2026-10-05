@@ -64,7 +64,7 @@ test('coherence: at/above target → zero leverage', () => {
 
 test('coherence: reads the #834 audit_score key (primary); legacy sm2_sample still accepted as fallback', () => {
   // Post-#834 rows carry `audit_score`; select-gap must read it as the coherence
-  // dial's sample. The plugin composite is the Audit Score (NOT SM-2).
+  // dial's sample. The plugin composite is the Audit Score (SM-2 since ADR-0018).
   const d = readCoherenceDial(parseSurface('{"audit_score":90}\n{"audit_score":68}'), { sm2Target: 85 });
   assert.equal(d.available, true);
   assert.equal(d.current, 68);

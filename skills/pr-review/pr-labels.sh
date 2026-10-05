@@ -1297,10 +1297,18 @@ assert_followups_preserved() {
   # from the prefix BEFORE it is split into words, so contracted negations
   # ("isn't"/"doesn't"/"can't") collapse to their bare forms and match.
   negations="${SGE_FOLLOWUP_NEGATIONS:-no|not|never|isnt|arent|wasnt|werent|doesnt|dont|didnt|hasnt|havent|wont|wouldnt|cannot|cant|without}"
+  # Follow-up cap (issue #2829): a MINOR finding the reviewer recorded in the
+  # review comment, or declined with a reason, already has a durable home (the
+  # review itself) and needs no tracking issue. A marker line that names a
+  # minor AND carries one of these dispositions passes without an issue ref. A
+  # line that also names a major/blocker never qualifies — majors are fixed in
+  # the PR or get an issue, so the cap cannot launder one through "declined".
+  local minor_disp
+  minor_disp="${SGE_FOLLOWUP_MINOR_DISPOSITIONS:-recorded[ -]in[ -]review|declined}"
 
   local report
   report=$(printf '%s\n%s\n' "$body" "$extra" | awk \
-      -v markers="$markers" -v issueref="$issueref" -v look="$look" -v negations="$negations" '
+      -v markers="$markers" -v issueref="$issueref" -v look="$look" -v negations="$negations"       -v minordisp="$minor_disp" '
     { sub(/\r$/, ""); line[NR] = $0 }
     END {
       n = NR; bad = 0
@@ -1333,6 +1341,10 @@ assert_followups_preserved() {
           base = base + adv - 1
           s = substr(s, adv)
         }
+        # #2829: a minor marked recorded-in-review / declined is dispositioned.
+        if (active && lo ~ /(^|[^a-z])minor([^a-z]|$)/ && lo ~ minordisp             && lo !~ /(^|[^a-z])(major|blocker)s?([^a-z]|$)/) {
+          active = 0
+        }
         if (active) {
           found = 0
           hi = i + look; if (hi > n) hi = n
@@ -1356,7 +1368,7 @@ assert_followups_preserved() {
     echo "refusing: PR #$PR declares $bad follow-up item(s) with no issue reference — will NOT open the $REVIEWED gate or arm auto-merge (issue #859):" >&2
     printf '%s\n' "$report" | awk -F'\t' '$1=="UNPRESERVED"{print "  - " $2}' >&2
     echo "A declared follow-up with no issue number evaporates when the linked issue auto-closes on merge (this happened on PR #844 → salvaged as #847)." >&2
-    echo "File a tracking issue for each follow-up first, put its #number beside the follow-up in the PR body (or review text), then re-run pass. Bypass: --skip-followup-check." >&2
+    echo "File a tracking issue for each follow-up first, put its #number beside the follow-up in the PR body (or review text), then re-run pass. A MINOR may instead be marked recorded-in-review or declined on its line (issue #2829). Bypass: --skip-followup-check." >&2
     return 1
   fi
   return 0
@@ -2539,7 +2551,7 @@ case "$CMD" in
       exit 0
     fi
 
-    # 2) The latest trusted sge-verdict's commit (reviews, then issue comments).
+    # 2) The newest trusted sge-verdict's commit, across reviews AND issue comments (sge#2729).
     REPO_FULL="$(gl_repo)" || REPO_FULL=""
     if ! VERDICT_SHA="$(gl_latest_verdict_sha "$PR")"; then
       echo "PR #$PR: sync-check — verdicts unreadable; labels retained (readers treat unproven labels as absent)" >&2

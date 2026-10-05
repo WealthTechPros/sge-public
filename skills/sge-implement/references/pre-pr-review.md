@@ -32,3 +32,13 @@ The review returns a JSON object with `verdict` (`"pass"`/`"fail"`), `blockers[]
 - **`verdict: "pass"`** — address warnings at your discretion, then proceed.
 
 **Capture the Phase 5 verdict.** Record the reviewer's `sha` (`git rev-parse HEAD`), `verdict`, and `blockers` count — you embed these in the PR body in Phase 6 so `/sge:pr-review` can skip a redundant re-review if nothing changed.
+
+## Pre-PR adversarial pass (sge#2914)
+
+**Lean flow: PR Warden is the one reviewer.** The builder adds no other review layer before it. There is no skeptic subagent and no advisory pr-review run on the draft PR (both came from sge#2829 and were removed by sge#2914: with the forked `/sge:sge-review` and PR Warden they stacked up to four reviews on one PR).
+
+**The one exception: security- or control-bearing diffs.** When the diff touches auth, secrets or credentials, a permission or policy gate, or a hook, script or CI check that enforces a control, run **one adversarial pass** after the forked `/sge:sge-review` passes and before the PR leaves draft. The `trivial`-tier cap above (#1267) still applies: no extra pass there.
+
+One adversarial pass means a forked, fresh-context subagent is told to *refute* the change, not review it: find the input, path or state where the fix does not hold, and prove each claimed fix with a **reverted-fix test**. Run the change's own regression test(s) against the pre-change revision and confirm they FAIL there. Reuse `/sge:qa-audit --adversarial`'s Step 4 pre-change run for this (a `git worktree add --detach <base-sha>` checkout, the same corpus on both sides, results recorded as `pre_fix_status`/`post_fix_status`) rather than building a second harness. A regression test that also passes on the unfixed code is a **major**: the test proves nothing. Fix its blockers/majors first (TDD, re-run Phase 4), and record or decline its minors per the [follow-up cap](../../lib/follow-up-cap.md). Run it once: don't loop it, and don't add a second reviewer after it.
+
+Record it in the PR body (`<!-- sge-prepr: {"adversarial": "pass|fail|n/a", "reverted_fix": "fails-on-base|passes-on-base|n/a"} -->`) so PR Warden can see what was already tried. Branch updates follow [merge-not-rebase](../../lib/merge-not-rebase.md).

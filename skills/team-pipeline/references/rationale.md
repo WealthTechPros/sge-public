@@ -200,7 +200,7 @@ Claude Orchestrator (this session)
 +-- State: /tmp/team-pipeline-state.json   <- local, ephemeral
 +-- Issue locking: GitHub agent-lock label <- durable, cross-agent safe
 |
-+-- PR Monitor Agent [always-on, spawned first — named Task, stoppable]
++-- PR Monitor Agent [bounded pass, spawned first — named Task, stoppable]
 |   +-- /sge:pr-monitor loop -> /sge:pr-fix as needed -> reports to state file
 |
 +-- Implementation Agents [0..N, resource-gated — named Tasks, stoppable]
@@ -209,6 +209,6 @@ Claude Orchestrator (this session)
 |   +-- (slot opens) -> resource check -> spawn next or wait
 |
 +-- Review Agents [one per PR, spawned by orchestrator — named Tasks, stoppable]
-    +-- review-<PR_A>: /sge:pr-review #PR_A -> approve or request changes -> undraft
-    +-- review-<PR_B>: /sge:pr-review #PR_B -> approve or request changes -> undraft
+    +-- review-<PR_A>: /sge:pr-review #PR_A -> approve or request changes
+    +-- review-<PR_B>: /sge:pr-review #PR_B -> approve or request changes
 ```

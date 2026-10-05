@@ -200,7 +200,7 @@ still produce an empty whitespace-only diff.
 | Fix a typo in an error message (1 file, no tests needed) | no-spec | 2 | low | **T0** |
 | Add a retry helper + 3 unit tests | no-spec | 9 | low | **T0** |
 | Add a new REST endpoint + service method + 4 scenarios | no-spec | 22 | low | **T1** |
-| One-line fix to `platform/src/auth/session.ts` | no-spec | 1 | **high** | **T2** |
+| One-line fix to `src/auth/session.ts` | no-spec | 1 | **high** | **T2** |
 | Fix a typo in `docs/compliance/ai-policy.md` | no-spec | 1 | **high** | **T2** |
 | Any issue citing `SPEC-042` | spec | (any) | (any) | **T2** |
 | Score-42 no-spec refactor, no risk path | no-spec | 42 | low | **T2** (Large — decompose first) |

@@ -90,10 +90,15 @@ them. For each:
    the issue number/title/URL, the four Step-2 gate results, the governance
    verdict + matched spec + confidence, the one-line rationale, and the
    recommendation from step 3 with its reasoning spelled out (do not just
-   say "recommend: yes" — say *why*, citing the governance verdict). Then
+   say "recommend: yes" — say *why*, citing the governance verdict). Show,
+   in the same question, exactly what Self-certify would record: every acMap
+   row (AC, `met`/`partial`/`absent`, its `path:LINE` refs) and the verdict
+   JSON's `verdict`, `matchedSpec` and `matchConfidence` — build the acMap
+   before asking, so the human's one yes covers the record as posted. Then
    offer the human a concrete choice — do not accept free-text as the primary
    path; the options are:
-   - **Self-certify** — apply `DISPATCH_LABEL` now.
+   - **Self-certify** — record the intake approval and apply `DISPATCH_LABEL`
+     now, as one human act (step 5).
    - **Hold** — do nothing; record it as a reported governance hold, same as
      an automatic hold would be (Step 3R does not touch READY issues, so no
      routing label is written — this just means "no dispatch label either").
@@ -114,20 +119,47 @@ them. For each:
    overriding the recommendation. Self-certifying a `MATCHES_EXISTING_MODIFIED`
    issue against the recommendation is the human's prerogative (they may know
    something the classifier doesn't); record that it was an **override** in
-   the traceability comment (step 7) and the Step 5 result, so the audit
+   the intake comment (step 7) and the Step 5 result, so the audit
    trail is honest about which self-certifications matched the machine
    recommendation and which didn't.
-   ```bash
-   gh issue edit "$N" --repo "$TARGET" "--add-label=${DISPATCH_LABEL}"
-   ```
+
+   **Self-certify is one human act with two writes (SPEC-126, #2793):** the
+   `## SGE intake` record and the dispatch label. `sge-ready` alone no longer
+   lets anything build — every dispatch path runs `scripts/intake-check.sh` —
+   so a label without a record would only mislead. The single answer
+   authorises both; do not ask a second question. It authorises only what
+   step 4 showed: if the acMap or verdict changes after the question (a
+   re-run, a fixed ref), ask again rather than post the changed record. In order, from the human's
+   own login (never `gh-as-agent.sh` or a bot token):
+   1. **Login check** — `gh api user --jq '.type + " " + .login'` must print
+      `User <login>` with `<login>` in `intakeApprovers` on the default
+      branch (`/sge:issue-intake` Hard rules). Otherwise write **nothing**,
+      report why, and move on.
+   2. **Post the intake record** exactly as `/sge:issue-intake` Step 5 does
+      (same `jq` marker builder and neutraliser): decision `build`, an acMap
+      built per its Step 2 (every row anchored on `path:LINE` refs that exist
+      at `mainSha`), and `govtrace` = this audit's Step 2G verdict JSON
+      verbatim.
+   3. **Check, then label** — run `intake-check.sh`; apply the label only when
+      it passes (exit 0), so the label never outruns a valid record:
+      ```bash
+      GH_REPO="$TARGET" bash "${SGE_ROOT:?resolve SGE_ROOT first}/scripts/intake-check.sh" "$N" \
+        && gh issue edit "$N" --repo "$TARGET" "--add-label=${DISPATCH_LABEL}"
+      ```
+      `GH_REPO="$TARGET"` makes the check fail closed when the checkout's
+      `origin` is not the repo being labelled.
+      On failure report the check's reason (most often: login not on the
+      approver list) and record `selfCertified: false`.
 6. **Never apply it to a `NOT_READY` or `TOO_LARGE` issue.** Step 3S only
    ever runs on the `READY` branch — those issues already got a routing
    verdict label in Step 3R and are not re-litigated here.
-7. **Always post a traceability comment** when the human chooses self-certify:
-   `Applied sge-ready via /sge:build-ready-audit --apply-sge-ready (human
+7. **The intake comment is the traceability record** when the human chooses
+   self-certify — include in its body, above the marker:
+   `Approved via /sge:build-ready-audit --apply-sge-ready (human
    decision, interactive) — build-readiness gates passed; governance verdict
    <verdict> (confidence: <level>); recommendation was <self-certify|hold>
-   <matched|overridden>.` A transient JSON field is not a durable record once
+   <matched|overridden>.` Never edit it afterwards (an edited marker fails
+   the check). A transient JSON field is not a durable record once
    the run ends — the comment is what lets a later reader tell an
    interactively-approved `sge-ready` apart from a human's own direct
    attestation, and tell a matched recommendation apart from an override.
@@ -141,6 +173,8 @@ them. For each:
 - Never write the dispatch label without an explicit per-issue human answer
   obtained in this run. No default-yes, no timeout-applies, no "recommended
   so I proceeded."
+- Never write the dispatch label without the intake record, or before
+  `intake-check.sh` passes for it.
 - Never batch multiple issues into a single yes/no prompt — one issue, one
   decision, every time. Grouping "these 5 all look the same, apply to all?"
   defeats the purpose of putting a human in the loop per issue.

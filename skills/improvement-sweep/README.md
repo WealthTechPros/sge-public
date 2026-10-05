@@ -8,7 +8,7 @@ dimension for **one bounded PR**, re-measures, and appends the measured delta.
 - Skill: [`SKILL.md`](./SKILL.md) — `/sge:improvement-sweep`
 - Picker (deterministic): [`assets/select-gap.mjs`](./assets/select-gap.mjs) + its test
 - Workflow: [`.github/workflows/improvement-sweep.yml`](../../.github/workflows/improvement-sweep.yml)
-- Parent: SGD-044 (`platform/docs/sgd-build/specs/SGD-044-ab-efficacy-protocol.md`), issue #676; slices #831 (S1), #832 (S2), #833 (S3)
+- Parent: SGD-044 (`docs/sgd-build/specs/SGD-044-ab-efficacy-protocol.md`), issue #676; slices #831 (S1), #832 (S2), #833 (S3)
 
 ## The three dials
 

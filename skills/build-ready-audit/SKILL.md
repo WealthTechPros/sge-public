@@ -71,28 +71,7 @@ prepared to walk one issue at a time.
 
 ### Authoring-time pre-check (shift the gate left)
 
-The full audit runs during a triage sweep — long after an issue is written. To
-score an issue's four build-ready gates **the moment it is authored** (not only
-during a sweep), run the dependency-free pre-check over its body. `$SGE_ROOT`
-below is resolved via the bootstrap `_sge_root()` function — the copy-verbatim
-source of truth is `scripts/resolve-sge-root.sh`'s header comment; never a bare
-`${CLAUDE_PLUGIN_ROOT}`, which is empty whenever unset:
-
-```bash
-gh issue view 256 --json body --jq .body | node "$SGE_ROOT/skills/lib/build-ready-prescorer.mjs"
-node "$SGE_ROOT/skills/lib/build-ready-prescorer.mjs" --body "<draft body>" --json   # structured
-```
-
-It names **which** gate failed and why — `criteria` (2A), `scope` (2B, the
-out-of-scope section that keeps a PR diff tight), `dependencies` (2D), `decisions`
-(2C) — mapped to the [`Task` issue form](../../.github/ISSUE_TEMPLATE/task.yml)'s
-structured sections. It is a fast heuristic that reads only the body: it does
-**not** run the governance pass (Step 2G) or the sizing heuristic
-([`issue-prescorer.mjs`](../lib/issue-prescorer.mjs)), and it **advises — it never
-blocks issue creation** (exit 0 on either verdict; blank issues stay enabled). A
-`NOT_READY` here means the same author who has the context can fix the gap before
-the sweep ever sees it; a clean issue produces one quiet `READY` line. The
-authoritative gate is still this skill's full Step 2 run at dispatch time.
+To score an issue's four gates **the moment it is authored**, run the advisory, body-only `build-ready-prescorer.mjs` (never blocks issue creation; no Step 2G governance pass or [sizing heuristic](../lib/issue-prescorer.mjs)). Commands and limits: [authoring-precheck.md](references/authoring-precheck.md). The authoritative gate is still the full Step 2 run.
 
 ---
 
@@ -451,8 +430,8 @@ the returned JSON.
 Refuses with `--skip-governance`; unset+reported under dispatch/fork.
 Walks each `READY`, unlabelled issue one at a time — gates + governance
 verdict + a recommendation (self-certify iff `MATCHES_EXISTING`/
-`NO_SPEC_WARRANTED` non-low confidence, per SPEC-095 §2.4 — spec superseded #2685, rule kept, else hold), then
-stops for the human's decision. Mechanics: [apply-sge-ready.md](references/apply-sge-ready.md).
+`NO_SPEC_WARRANTED` non-low confidence, else hold), then stops for the
+human's decision; self-certify = intake record + label, one act (#2793). Mechanics: [apply-sge-ready.md](references/apply-sge-ready.md).
 
 ---
 

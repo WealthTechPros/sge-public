@@ -359,7 +359,7 @@ parses it):
 - `readyToBuild` — `true` only when all gates pass (or gaps were explicitly
   accepted via Option B and documented in `openQuestions[]`).
 
-Before returning the JSON above, append one `SkillRunRecord` (schema, `platform/packages/token-governance` — #727) to `memory/skill-runs.jsonl` so this preflight run is attributable to its session's spend alongside the implementation run it gates:
+Before returning the JSON above, append one `SkillRunRecord` (schema: the field contract in `skills/sge-implement/references/skill-run-record.md` (#727)) to `memory/skill-runs.jsonl` so this preflight run is attributable to its session's spend alongside the implementation run it gates:
 
 ```bash
 jq -nc \

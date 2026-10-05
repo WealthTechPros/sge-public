@@ -1,5 +1,5 @@
 ---
-description: Use when installing the SGE Traceability Module (SPEC-054) into the current repo — copies the traceability data builder and interactive chart page, wires the docs Pages workflow, and opens a draft install PR. Run from inside a cloned SGE-governed repo checkout when the user asks to "install the traceability chart/module". For the web-UI install use the SGE Modules tab instead; this skill does not build or audit traceability data itself.
+description: Use when installing the SGE Traceability Module (SPEC-054) into the current repo — copies the traceability data builder and interactive chart page, wires the docs Pages workflow, and opens a draft install PR. Run from inside a cloned SGE-governed repo checkout when the user asks to "install the traceability chart/module". This skill is the only install path (the hosted Modules tab was decommissioned in #2899); it does not build or audit traceability data itself.
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash(mkdir:*), Bash(cp:*), Bash(node:*), Bash(git status:*), Bash(git checkout:*), Bash(git add:*), Bash(git commit:*), Bash(git push:*), Bash(gh repo view:*), Bash(gh auth token:*), Bash(gh pr create:*)
 ---
 

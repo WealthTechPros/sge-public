@@ -105,12 +105,12 @@ matches the denylist.
 | `**/CLAUDE.md`, `**/AGENTS.md` | repo instructions that steer every agent in that subtree |
 
 **Segment anchoring, not root anchoring.** A repo can host more than one Claude
-Code root, and this one does: `platform/` carries its own
-`platform/.claude/agents/*.md`, `platform/.claude/skills/*/SKILL.md` (59 tracked
-files) and `platform/AGENTS.md`. A root-anchored `^\.claude/` matched only the
-top-level copies, so a PR editing `platform/.claude/agents/security-auditor.md`
-— the security reviewer's own instructions — classified as prose and would have
-merged unreviewed. `(^|/)` still refuses false positives: `myskills/x.md` and
+Code root. This one did until #2899 deleted its hosted-app subtree, which carried
+its own `.claude/agents/*.md`, `.claude/skills/*/SKILL.md` (59 tracked files) and
+`AGENTS.md`. A root-anchored `^\.claude/` matched only the top-level copies, so a
+PR editing `<subdir>/.claude/agents/security-auditor.md` — the security
+reviewer's own instructions — classified as prose and would have merged
+unreviewed. Consumer repos with nested roots still need the segment match. `(^|/)` still refuses false positives: `myskills/x.md` and
 `docs/specs-old/x.md` need a separator immediately before the segment.
 
 **Case-insensitive on the deny side only.** On a case-insensitive filesystem

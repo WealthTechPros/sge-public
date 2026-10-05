@@ -4,7 +4,7 @@
  * weekly improvement sweep (sge#833, parent #676).
  *
  * The sweep is the *cadence layer* that makes F-EFFICACY (SGD-044) real. Once a
- * week it reads the three drift **trend surfaces** the platform already
+ * week it reads the three drift **trend surfaces** the plugin already
  * produces, normalises each dial's headline gap onto a comparable [0,1]
  * leverage scale, and picks the SINGLE highest-leverage dial. The chosen dial
  * maps to exactly one `/sge:drift-hillclimb` invocation bounded to ONE round —
@@ -14,9 +14,9 @@
  *   - coherence     — docs/sge/drift-trend.jsonl rows (`audit_score`, 0..100;
  *                     legacy rows: `sm2_sample`), the Audit Score trend #724
  *                     (CLOSED) writes. Below-target Audit Score is the gap; the
- *                     lever is `/sge:drift-hillclimb`. NB: the Audit Score is the
- *                     plugin's per-check rollup, NOT the platform's canonical
- *                     SM-2 `coherence_score` (decision #834).
+ *                     lever is `/sge:drift-hillclimb`. The Audit Score is the
+ *                     plugin's per-check rollup and, since ADR-0018 (#2916),
+ *                     the canonical SM-2.
  *   - token-economy — score-token-economy.mjs trendRow (`worstTokensPerSuccess`,
  *                     sge#831). Tokens-per-success above budget is the gap; the
  *                     lever is `/sge:drift-hillclimb --dimension token-economy`.
@@ -131,8 +131,8 @@ export function readCoherenceDial(rows, { sm2Target = 85 } = {}) {
   // The coherence dial reads the Audit Score (`audit_score`) written by
   // `/sge:sge-align` (decision #834). Legacy rows carry the pre-#834 key
   // `sm2_sample` (or `sm2`) — accepted as a fallback so historical trend
-  // files keep working. NB: the Audit Score is the plugin's per-check
-  // governance-coherence rollup, NOT the platform's canonical SM-2.
+  // files keep working. The Audit Score is the plugin's per-check
+  // governance-coherence rollup and, since ADR-0018 (#2916), the canonical SM-2.
   const score = (r) => num(r.audit_score) ?? num(r.sm2_sample) ?? num(r.sm2);
   const withScore = rows.filter((r) => score(r) !== null);
   if (withScore.length === 0) {
