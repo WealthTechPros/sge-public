@@ -19,7 +19,7 @@ Phase 2 reviewers get one prompt and return one structured reply, so prefer one-
 a repo agent genuinely needs multi-turn; if named dispatch is unavoidable, the bounded-wait rule
 still applies.
 
-**Model tier** (`agents/agent-registry.md`): `@code-reviewer` → **sonnet**, escalating to
+**Model tier** (`docs/agent-registry.md`): `@code-reviewer` → **sonnet**, escalating to
 **opus** on a security-path match; `@security-auditor` is CRITICAL-path and runs at **opus**.
 Never route a security review below opus.
 
@@ -156,8 +156,8 @@ its structured findings.
 A dispatched review lane twice returned findings about a **completely different
 diff** than the PR under review:
 
-- reviewing `coherence-review#34`, a lane returned findings about
-  `infra/cloudflare/__main__.py` — a `wtp-org` file, from the hub/control
+- reviewing a product repo's #34, a lane returned findings about
+  `infra/cloudflare/__main__.py` — a hub-repo file, from the hub/control
   session that dispatched the review;
 - reviewing `project-management#50`, the first lane returned DNS/Cloudflare
   Pages content matching nothing in that PR.
@@ -227,3 +227,13 @@ cite a path the diff carries only under its old name.
 **Fails closed.** An unreadable findings file, an unfetchable diff, or an
 unparseable array all return `unverifiable`, which blocks exactly as `bleed`
 does. Unverified provenance is precisely the state that shipped both incidents.
+
+## Review layers (moved from SKILL.md)
+
+Moved from `SKILL.md` Phase 2 (issue #2825); `SKILL.md` keeps a condensed one-paragraph summary.
+
+**Layer 1 — native engine (always; the floor).** `/code-review <effort>` (correctness/bugs), `/security-review` (when `rl_security_files "$PR"` non-empty). `<effort>`: `low`/`medium` (≤ ~150 lines), `high` (typical), `max` (large/security), `ultra` (release-critical).
+
+**Layer 2 — bundled specialists (ship with the SGE plugin, every repo).** **@code-reviewer** (quality pass; matches implementation to the linked issue) and **@security-auditor** (OWASP-style; security-path match **or**, at review tier `full`, a `medium`/`high` dispatch tier). Repo MAY override via `.claude/agents/<name>.md`. **Never route security below opus**; model tiers: [`reviewer-lanes.md`](reviewer-lanes.md).
+
+**Layer 3 — repo-specific specialists.** Same batch, only when the repo ships the agent AND the trigger matches. Skip undefined agents silently. Roster + triggers: [`reviewer-lanes.md`](reviewer-lanes.md).

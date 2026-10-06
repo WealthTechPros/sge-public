@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # validate-file-map.sh — validate a decompose-issue file map against the real tree.
 #
-# Issue #1271: when /sgd:decompose-issue emits a child's file map (the `Owns:`
+# Issue #1271: when /sge:decompose-issue emits a child's file map (the `Owns:`
 # footprint), the paths are not checked against the actual repository. In the
 # 2026-07-16 swarm, issue #1236's map named `skills/lib/forgejo-adapter.sh` and
 # `skills/**/with-repo-cwd.sh` — but `skills/lib/` does not exist and the

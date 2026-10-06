@@ -1,5 +1,5 @@
 ---
-description: Use when onboarding a new product or a greenfield repo onto SGE — when a repo has no Vision, capability model, or feature specs yet; when the user asks to set up SGE, seed governance artefacts, or run product intake; or when an intake/brief document needs turning into SGE seed artefacts. Not for auditing an already-seeded repo — that is /sge:sge-align.
+description: Use when onboarding a new product or greenfield repo onto SGE — no Vision, capability model or feature specs yet; "set up SGE", seed governance artefacts, run product intake, or turn a brief into seed artefacts. Not for auditing a seeded repo (/sge:sge-align).
 argument-hint: "[intake-doc path]"
 ---
 
@@ -131,11 +131,11 @@ below cites this file.
 ## Step 3 — Draft the Capability Model
 
 Decompose the journey into L1 domains (3–6) and L2 capabilities (2–6 each), down to L3
-features, with stable `CAP-xx` IDs. Mark each L3 `[MVP]` or `[post-MVP]` against the MVP
-framing. Give the model a top-level `version:` field (start at `1.0.0`; bump on any
-structural change) — specs pin the version they were drafted against. Follow the repo's
-existing capability-model conventions and IDs; reuse overlapping capabilities rather than
-duplicating. If a model already exists, output a delta.
+features, with stable `CAP-xx` IDs, each L3 `[MVP]` or `[post-MVP]`. Give the model a
+top-level `version:` (start `1.0.0`; bump on structural change); specs pin it. Reuse the
+repo's conventions, IDs and overlapping capabilities. If a model exists,
+output a delta. Seed `docs/sgd-build/architecture.yaml` from `templates/architecture.yaml`:
+components, the `CAP-xx` ids each realises, its code paths (SPEC-131).
 
 ## Step 4 — Draft 3–5 Anchor Specs (parallel fan-out)
 
@@ -167,84 +167,7 @@ holds.
 
 ### `## Scenarios` + test-stub generation (issue #762 Phase 1)
 
-For **every** Gherkin acceptance criterion drafted above, also emit an explicit `##
-Scenarios` section restating it as a named `Given/When/Then` block, plus a companion
-test-stub file that encodes it as a **real assertion** — not a smoke test that merely
-proves the code runs. Detect the repo's test stack (from the background-subagent repo
-scan in Step 1, or ask if greenfield) and match its idiom; the shape is the same
-regardless of language:
-
-```markdown
-## Scenarios
-
-### S1 — <scenario name, matches its Gherkin acceptance criterion>
-
-Given <precondition>
-When <action>
-Then <the concrete, checkable outcome — the actual expected value/state, not "it works">
-```
-
-```typescript
-// tests/<slug>.spec.test.ts — companion to spec S1 above
-test('S1 — <scenario name>', () => {
-  // TODO: arrange <precondition>
-  // act: <action>
-  // assert the concrete outcome named in the Gherkin "Then" — e.g.:
-  expect(result.total).toBe(expectedTotal); // not expect(result).toBeDefined()
-});
-```
-
-**Verify the stub is actually discoverable by the repo's test runner (issue #2312)
-— never just write the file and hope.** A generated stub that sits outside the
-repo's own test-glob (from the Step 1 repo scan, or the repo's `jest.config`/
-`pytest.ini`/equivalent) is invisible to CI: "executable specification" that
-nothing ever executes is exactly the gap #2206/#2220 found. Before presenting the
-draft, confirm the stub's path matches the repo's actual discovery pattern (e.g.
-`**/*.test.ts`, `tests/**/*_test.py`) — if it does not, either relocate it to a
-path the runner covers, or flag the mismatch explicitly in the Review Package
-(Step 9) rather than silently shipping an orphaned file.
-
-**Scenarios describing not-yet-built behaviour are `skip`-marked with a reason,
-never silently included as a stub that could pass or fail depending on the test
-framework's handling of an empty/TODO body.** Use the repo's idiom's skip
-primitive (`test.skip('S2 — <scenario name>', () => { /* not yet built: <reason> */ })`
-in Jest/Vitest, `@pytest.mark.skip(reason="not yet built: <reason>")` in pytest,
-`pending` in RSpec, or the closest equivalent) so the ratio of executed-to-skipped
-scenarios is an honest, publishable coverage figure per spec (per #2220's own ask)
-— a scenario is only ever a bare unskipped stub once real implementation work on
-it has actually started.
-
-**Same honesty rule as the `## Validation` stub:** when the spec's real expected
-values aren't yet known from the interview, generate the stub with an explicit `//
-TODO: fill in the real expected value from <source>` comment rather than inventing one
-— a stub asserting a fabricated number is worse than an openly-unfinished stub, because
-it looks covered and isn't (this is exactly the gap SGE#762 exists to close: a test
-tagged with a scenario's name that only asserts "page renders" while the spec's real
-business rule goes untested). The human fills in the real assertion before the spec's
-status moves to `implemented` — `platform/app/backend/scripts/validation-coverage-lint.ts`
-(docs/specs/README.md, "Coverage gate") hard-fails an `implemented` spec whose declared
-`## Validation` invariants don't hold, so a stub left unfinished past that point is
-caught mechanically, not just by review.
-
-Every spec **must** open with this front-matter — these are the machine-readable cascade
-citation keys `/sge:sge-align` check C7 reads, so seeded repos pass the sweep from day one:
-
-```yaml
----
-ref: SPEC-001                  # stable spec ID, sequential
-title: <feature title>
-capability: CAP-03             # the L1-model capability this spec serves
-capability_model_version: 1.0.0  # model version the spec was drafted against
-status: draft                  # draft | approved | implemented | superseded
-success_measure_moved: SM-2    # the Vision success-measure ID this feature moves
-questions: [QD-01, QD-04]      # open QD-NN refs, [] when none
----
-```
-
-When the subagents return, **schema-validate every draft's front-matter** (all seven keys
-present; `capability`, `success_measure_moved`, and `questions[]` resolve to real IDs in
-the sibling drafts) — repair or re-dispatch any that fail — then present **all drafts
-together** for one combined user review, not one-by-one.
+For every Gherkin acceptance criterion, also emit a `## Scenarios` block and a companion test stub that asserts the concrete outcome (not a smoke test), discoverable by the repo's test runner. Templates and rules: [`references/scenarios-and-test-stubs.md`](references/scenarios-and-test-stubs.md).
 
 ## Step 5 — Draft ADR-0001
 
@@ -366,76 +289,23 @@ Package if the repo has no CI or is a library with no MCP/agent surface.
 
 ## Step 7c — Scaffold the TDD test-evidence gate (issue #784)
 
-Propose adding the test-evidence gate alongside the change-protocol guardrails (AI proposes, human disposes — write only after approval):
-
-- `.sge/test-map.yml` — from `${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/sge-init/templates/test-map.yml`. Tailor the commented-out `production_paths`/`test_paths` globs to the repo's actual languages and layout before uncommenting them; leave `mode: advisory` — never seed a new repo straight into blocking (Step 9 proposes a concrete graduation criterion — don't leave "Phase 2" undefined).
-- The CI workflow, copied from this framework repo's own `.github/workflows/require-test-evidence.yml` (it has no repo-specific content — same install mechanism as any other CI file: copy it into the onboarded repo's `.github/workflows/`).
-
-The gate reads `.sge/test-map.yml` for its production/test path classification, or falls back to built-in language-aware defaults if the file is absent or left with no uncommented lists — so it produces *some* signal even before this file is tailored. The in-session companion (`hooks/tdd-guard.sh`, ships with the plugin, no per-repo install needed) reads the same file for its warn-by-default nudge.
-
-Skip this step and note it in the Review Package if the repo has no CI, or is a docs-only/ideation-stage repo with no runtime code to gate (see `org-context.md`'s "SGE ideation only" repos).
+Propose `.sge/test-map.yml` (from `templates/test-map.yml`, `mode: advisory`; Step 9 proposes a concrete graduation criterion) plus a copy of `.github/workflows/require-test-evidence.yml`; skip for repos with no CI or no runtime code. Detail: [`references/step7c-test-evidence.md`](references/step7c-test-evidence.md).
 
 ## Step 7d — Scaffold the regulated-output sign-off gate (SPEC-071, issue #1062)
 
-Only for repos that render **regulated numbers to end users** (client valuations, cohort counts, suitability figures). Propose alongside 7c (AI proposes, human disposes):
-
-- `.sge/regulated-paths.yml` — from `${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/sge-init/templates/regulated-paths.yml`. Tailor the commented-out `regulated_paths` globs to the files that render regulated numbers, and set the `signers:` list to the GitHub handles authorised to sign off. Leave `mode: advisory` — never seed a new repo straight into blocking (Step 9 proposes a concrete graduation criterion — don't leave "Phase 2" undefined).
-- The CI workflow, copied from this framework repo's own `.github/workflows/require-regulated-signoff.yml` (no repo-specific content — same copy-in install as any other CI file).
-
-The gate requires a PR touching a `regulated_paths` file to carry a human sign-off, in either form: a **`signed-off` label** on the PR, or a **`Regulated-Sign-Off: @handle; <what you verified, ≥10 chars>`** trailer in the PR body or a commit. When a `signers:` list is declared, the sign-off must be **authenticated** — only the GitHub actor who applied the `signed-off` label may satisfy it (a trailer's `@handle` is free text and cannot self-sign); a repo that wants the lightweight trailer form declares no `signers:`. In advisory mode it warns only; a repo that declares no `regulated_paths` gets a permanently inert check — absence is not a gap.
-
-Skip and note it in the Review Package for repos that render no regulated numbers.
+Only for repos that render regulated numbers to end users: propose `.sge/regulated-paths.yml` (from `templates/regulated-paths.yml`, `mode: advisory`; Step 9 proposes a concrete graduation criterion) plus a copy of `.github/workflows/require-regulated-signoff.yml`. Detail: [`references/step7d-regulated-signoff.md`](references/step7d-regulated-signoff.md).
 
 ## Step 7e — Propose applying branch protection with a default required-checks list (solo-dev posture)
 
-Branch protection rulesets are typically GitHub-side only — no PR, no diff, no review trail when an admin changes what gates a merge. Seeding gates in Steps 7/7c/7d without ever *requiring* them leaves every one of them opt-in: nothing stops a merge with a failing or absent check. Close that gap here — don't just point at the doc, **propose actually applying it** (AI proposes, human disposes — write only after approval, same pattern as every other artefact in this skill):
-
-- Reference: [`docs/branch-protection-solo-dev.md`](../../docs/branch-protection-solo-dev.md) — a `github.BranchProtection` snippet adapted from `WealthTechPros/wtp-org`'s live `infra/github/__main__.py`, encoding PR-required / `required_approving_review_count=0` / no-force-push / no-delete / linear-history, **plus a default `required_status_checks` list** (`"Require pr-reviewed label"`, `"Require commit trailer"`, `"Require test evidence"` — scoped to whichever of Steps 7/7c the repo actually adopted). Don't leave `required_status_checks` as an unscoped fill-in-the-blank — start from that default list and adjust for the repo's actual adopted gates.
-- If the new repo's team is solo-dev (the common WTP case), propose adopting the Pulumi GitHub-provider pattern rather than configuring protection by hand. This is a solo-dev posture specifically — a multi-reviewer team should raise `required_approving_review_count` above 0 instead of adopting the snippet verbatim.
-- **No Pulumi/infra pipeline available** (repo outside the `wtp-org`-managed fleet): propose the equivalent directly via `gh api repos/<org>/<repo>/branches/main/protection --method PUT` with the same fields (PR required, the default required-checks list above, no force-push, no deletion, linear history) — same content, no infra dependency, so repos outside the Pulumi-managed fleet aren't silently exempted from this step.
-- Skip this step and note it in the Review Package if the repo already has protection-as-code in place, or if the team isn't solo-dev (note in that case that `required_approving_review_count` should be raised instead).
+Propose actually applying branch protection with a default `required_status_checks` list scoped to the gates the repo adopted (Pulumi pattern per [`docs/branch-protection-solo-dev.md`](../../docs/branch-protection-solo-dev.md), or `gh api .../branches/main/protection` without infra). Detail: [`references/step7e-branch-protection.md`](references/step7e-branch-protection.md).
 
 ## Step 7f — Propose a recurring drift-check cadence
 
-`sge-init`'s output (Steps 1–7e) is a **governance snapshot at t=0** — Vision, capability model, specs, ADRs, the QD registry, and (where adopted) the Step 7b C11 posture baseline, explicitly seeded "so future sweeps can report a delta." A snapshot with an intended delta but no scheduled re-measurement is a delta of one: nothing in Steps 1–9 proposes *when* that next data point gets produced. `/sge:sge-align` (drift detection) and `/sge:improvement-sweep` (the scheduled hill-climb cadence) both already exist in the plugin — this step just proposes wiring the freshly onboarded repo into them.
-
-Propose one of the following (AI proposes, human disposes — write only after approval), same tier-by-repo-capability judgement as Step 7b:
-
-1. **Preferred, if the repo has CI:** propose adding `.github/workflows/improvement-sweep.yml`, copied from this framework repo's own `.github/workflows/improvement-sweep.yml` (dependency-free Node picker + a guarded climb step that only fires when `ANTHROPIC_API_KEY` is configured — inert-safe without it). Templatize the one repo-specific value it carries: the `--repo <name>` arg passed to `select-gap.mjs` inside the `pick` job. This gives the repo the same weekly (`cron: '0 7 * * 1'`) cadence this framework repo runs on itself, appending a visible delta row every cycle — acted, skipped, or failed, never silent.
-2. **Fallback, if the repo has no CI or isn't ready for the full sweep asset tree:** propose, at minimum, a recorded decision in the Review Package (Step 9): "drift re-check cadence: `<proposed interval>`, owner: `<stakeholder>`" — so the absence of automation is a visible, deliberate choice, not a silent gap.
-
-Skip and note in the Review Package only if the repo is explicitly ideation-stage with no runtime code and no near-term implementation planned (drift has nothing to measure yet) — otherwise always propose at least option 2.
+Propose wiring the onboarded repo into a recurring drift re-check: preferably copy `.github/workflows/improvement-sweep.yml` (weekly, `--repo <name>` templatized); without CI, at minimum record "drift re-check cadence, owner" in the Review Package. Detail: [`references/step7f-drift-cadence.md`](references/step7f-drift-cadence.md).
 
 ## Step 7f — Seed the review-independence posture declaration (solo-dev repos)
 
-This step is a sibling to Step 7e (branch-protection-as-code) — both address solo-developer
-posture but from different angles. Step 7e handles branch protection (structural gate);
-this step handles **review independence** (who may satisfy the SGE merge gate).
-
-If the repo is solo-dev (same question as Step 7e — do not ask twice; carry the answer
-forward), propose writing `.sge/posture.yaml` from the template at
-`${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/sge-init/templates/posture.yaml` (AI proposes, human
-disposes — write only after approval):
-
-- `profile: solo` — declares this is a single-primary-author repo.
-- `review_independence: declared-exception` — the repo explicitly opts into a declared,
-  PR-reviewable exception in place of the legacy opaque `SGE_GOVERNANCE_PROFILE=solo`
-  repo-variable bypass (sge#2219).
-- `reviewer_identity: <github-login>` — record the intended name of the dedicated
-  non-committing reviewer identity here.  **Do not attempt to create or provision that
-  identity in this step** — provisioning is handled separately (S2 of sge#2219,
-  docs/reviewer-identity-provisioning.md once that doc exists).  The field value is a
-  placeholder until the identity is provisioned and its login is known.
-
-**Constraint — reviewer must not commit.** The identity named in `reviewer_identity` must
-never push commits to branches it reviews.  An identity that commits enters the
-independence gate's exclusion set and invalidates its own verdicts — making the gate
-structurally unsatisfiable (the exact failure mode sge#2219 fixes).  Note this constraint
-clearly in any onboarding notes for the repo.
-
-**When to skip:** if the repo already has `.sge/posture.yaml`, skip and note it in the
-Review Package.  If the repo is team-dev (multiple independent committers), skip — the
-standard independence gate applies without a posture declaration.
+For a solo-dev repo (same answer as Step 7e), propose writing `.sge/posture.yaml` from `templates/posture.yaml` (`profile: solo`, `review_independence: declared-exception`, `reviewer_identity: <github-login>`); the named reviewer identity must never commit to branches it reviews. Skip if the file exists or the repo is team-dev. Detail: [`references/step7f-review-independence.md`](references/step7f-review-independence.md).
 
 ## Step 8 — Record the artefact map in CLAUDE.md
 
@@ -453,13 +323,7 @@ protocol in full before any change" mandate — paying the whole governance toke
 front, every session, regardless of task size is exactly what #785 removes. Propose this
 wording (adapt paths to the repo):
 
-> **Default governance read:** load [`docs/sge-digest.md`](docs/sge-digest.md) — the
-> generated ≤2K-token digest (Vision one-liner + non-goals, capability position, active
-> ADR constraints, change-protocol steps, open spec pointers). It carries a link to every
-> full artefact; **read the full document on demand** only when the task's complexity tier
-> needs it (CRITICAL paths — security/auth, migrations, multi-tenant — still take the full
-> read deliberately). Regenerate with `node scripts/build-sge-digest.mjs`; CI verifies
-> freshness with `node scripts/build-sge-digest.mjs --check`.
+> Proposed wording (load `docs/sge-digest.md` by default, read full documents on demand, CRITICAL paths still take the full read): [`references/step8-digest-wording.md`](references/step8-digest-wording.md).
 
 The digest is produced by `scripts/build-sge-digest.mjs` (seeded by the enabler in #805);
 if the repo does not have it yet, note that as a follow-up rather than reverting to the
@@ -494,6 +358,8 @@ Output a single summary the human can read in under five minutes:
   | `.githooks/commit-msg` + `require-commit-trailer.yml` (Step 7) | advisory (warn-only hook; CI backstop enforces the trailer regex but not blocking merge on it) | 2 weeks of green advisory runs with no missing-trailer PR merged |
   | `.sge/test-map.yml` + `require-test-evidence.yml` (Step 7c, if adopted) | advisory | 2 weeks of green advisory runs, or a stated coverage/compliance threshold the team picks |
   | `.sge/regulated-paths.yml` + `require-regulated-signoff.yml` (Step 7d, if adopted) | advisory | first regulated release candidate, or 2 weeks of green advisory runs, whichever comes first |
+
+  Profile key + promotion path: [`references/enforcement-profile.md`](references/enforcement-profile.md).
 
   For each seeded gate, propose recording the graduation decision as a **QD
   record** in `docs/sge/questions.md` (see Step 6) — e.g. "QD-01: when does

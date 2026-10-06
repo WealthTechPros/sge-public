@@ -1,0 +1,131 @@
+# SYNTHETIC-FIXTURE (client-data guard marker: fictitious test paths, no client data).
+# Shared fixture table for review-tier.sh `classify` and its Python twin
+# (services/review-daemon-poc/review_tier.py) -- sge#2776.
+# Columns (TAB-separated): name  config  files  expected
+#   config: "-" = no repo config, else .sge/review-tier.yml text (printf %b escapes: \n, \r, \xHH)
+#   files:  GitHub pulls/files-shaped JSON array (filename, previous_filename,
+#           status, patch, and `mode` from the head tree), or `null` = unavailable
+# Paths and config only: the classifier never sees who authored the PR.
+docs-only	-	[{"filename":"README.md","status":"modified"},{"filename":"docs/guide.md","status":"added"}]	light
+docs-mixed-case-ext	-	[{"filename":"docs/Guide.MD","status":"modified"}]	light
+neg-docs-plus-workflow	-	[{"filename":"README.md","status":"modified"},{"filename":".github/workflows/ci.yml","status":"modified"}]	full
+neg-docs-plus-auth	-	[{"filename":"docs/guide.md","status":"modified"},{"filename":"src/auth/login.ts","status":"modified"}]	full
+neg-docs-plus-deleted-workflow	-	[{"filename":"README.md","status":"modified"},{"filename":".github/workflows/gate.yml","status":"removed"}]	full
+neg-rename-out-of-workflows	-	[{"filename":"notes.md","previous_filename":".github/workflows/gate.yml","status":"renamed"}]	full
+neg-docs-plus-secret	-	[{"filename":"docs/a.md","status":"modified"},{"filename":"config/secrets.json","status":"modified"}]	full
+neg-docs-plus-env	-	[{"filename":"docs/a.md","status":"modified"},{"filename":"apps/web/.env.production","status":"added"}]	full
+neg-docs-plus-sge-config	-	[{"filename":"docs/a.md","status":"modified"},{"filename":".sge/review-tier.yml","status":"modified"}]	full
+infra-path	-	[{"filename":"infra/foundation/__main__.py","status":"modified"}]	full
+dockerfile	-	[{"filename":"services/api/Dockerfile","status":"modified"}]	full
+migration	-	[{"filename":"db/migrations/0042_add.sql","status":"added"}]	full
+githooks	-	[{"filename":".githooks/prepare-commit-msg","status":"modified"}]	full
+version-only-plugin	-	[{"filename":".claude-plugin/plugin.json","status":"modified","patch":"@@ -1,5 +1,5 @@\n {\n   \"name\": \"sge\",\n-  \"version\": \"4.36.9\",\n+  \"version\": \"4.36.10\",\n   \"description\": \"x\""}]	light
+version-only-plugin-and-marketplace	-	[{"filename":".claude-plugin/plugin.json","status":"modified","patch":"@@ -2 +2 @@\n-  \"version\": \"1.0.0\",\n+  \"version\": \"1.0.1\","},{"filename":".claude-plugin/marketplace.json","status":"modified","patch":"@@ -10 +10 @@\n-      \"version\": \"1.0.0\"\n+      \"version\": \"1.0.1\"\n\\ No newline at end of file"},{"filename":"CHANGELOG.md","status":"modified"}]	light
+neg-plugin-json-hooks-change	-	[{"filename":".claude-plugin/plugin.json","status":"modified","patch":"@@ -2,3 +2,4 @@\n-  \"version\": \"1.0.0\",\n+  \"version\": \"1.0.1\",\n+  \"hooks\": \"./hooks/evil.json\","}]	standard
+neg-plugin-json-no-patch	-	[{"filename":".claude-plugin/plugin.json","status":"modified"}]	standard
+neg-plugin-json-added	-	[{"filename":".claude-plugin/plugin.json","status":"added","patch":"@@ -0,0 +1 @@\n+  \"version\": \"1.0.1\","}]	standard
+code	-	[{"filename":"src/app.ts","status":"modified"},{"filename":"src/app.test.ts","status":"modified"}]	standard
+neg-skill-markdown	-	[{"filename":"skills/foo/SKILL.md","status":"modified"}]	standard
+neg-claude-md	-	[{"filename":"CLAUDE.md","status":"modified"}]	standard
+neg-agent-md	-	[{"filename":"agents/code-reviewer.md","status":"modified"}]	standard
+neg-spec-md	-	[{"filename":"docs/specs/SPEC-001.md","status":"modified"}]	standard
+neg-txt-not-docs	-	[{"filename":"requirements.txt","status":"modified"}]	standard
+unknown-path	-	[{"filename":"weird/file.xyz","status":"added"}]	standard
+empty-list	-	[]	standard
+unavailable-list	-	null	full
+config-full-extension	full_paths:\n  - 'src/api/**'	[{"filename":"src/api/handler.ts","status":"modified"}]	full
+config-light-extension	light_paths:\n  - 'data/*.csv'	[{"filename":"data/rates.csv","status":"modified"},{"filename":"README.md","status":"modified"}]	light
+neg-config-light-cannot-override-full	light_paths:\n  - '.github/**'	[{"filename":".github/workflows/ci.yml","status":"modified"}]	full
+neg-config-standard-beats-docs	standard_paths:\n  - "docs/runbooks/**"  # runbooks drive ops	[{"filename":"docs/runbooks/deploy.md","status":"modified"}]	standard
+neg-config-standard-beats-light	light_paths:\n  - 'data/**'\nstandard_paths:\n  - 'data/prices/**'	[{"filename":"data/prices/x.csv","status":"modified"}]	standard
+neg-rename-skill-to-readme	-	[{"filename":"README.md","previous_filename":"skills/foo/SKILL.md","status":"renamed"}]	standard
+version-only-shared-line	-	[{"filename":".claude-plugin/plugin.json","status":"modified","patch":"@@ -1,4 +1,4 @@\n {\n   \"name\": \"sge\",\n-  \"version\": \"4.36.9\",  \"description\": \"x\",\n+  \"version\": \"4.36.10\",  \"description\": \"x\","}]	light
+neg-version-line-also-changes-other-key	-	[{"filename":".claude-plugin/plugin.json","status":"modified","patch":"@@ -2 +2 @@\n-  \"version\": \"4.36.9\",  \"hooks\": \"a\",\n+  \"version\": \"4.36.10\",  \"hooks\": \"./evil\","}]	standard
+author-is-not-auth	-	[{"filename":"docs/author-guide.md","status":"modified"},{"filename":"docs/authoring.md","status":"modified"},{"filename":"docs/co-authors.md","status":"modified"}]	light
+neg-authservice-camelcase	-	[{"filename":"docs/a.md","status":"modified"},{"filename":"src/interfaces/IAuthService.ts","status":"modified"}]	full
+neg-authorization-is-auth	-	[{"filename":"docs/a.md","status":"modified"},{"filename":"src/authorization.ts","status":"modified"}]	full
+neg-config-full-author-path	full_paths:\n  - 'src/author/**'	[{"filename":"src/author/x.ts","status":"modified"}]	full
+neg-version-swap-between-lines	-	[{"filename":".claude-plugin/plugin.json","status":"modified","patch":"@@ -2,2 +2,2 @@\n-  \"version\": \"1.0.0\", \"x\": \"A\",\n-  \"version\": \"1.0.0\", \"x\": \"B\",\n+  \"version\": \"1.0.1\", \"x\": \"B\",\n+  \"version\": \"1.0.1\", \"x\": \"A\","}]	standard
+neg-mdx-is-not-docs	-	[{"filename":"docs/pages/index.mdx","status":"modified"}]	standard
+neg-nested-skill-prompt	-	[{"filename":"plugins/foo/skills/bar/SKILL.md","status":"modified"}]	standard
+neg-prompts-dir	-	[{"filename":"prompts/system.md","status":"modified"}]	standard
+config-glob-with-hash	light_paths:\n  - 'data/#raw/*.csv'  # raw extracts	[{"filename":"data/#raw/x.csv","status":"added"}]	light
+neg-newline-in-github-path	-	[{"filename":".github/instr\nx.md","status":"added"}]	full
+neg-newline-in-agents-path	-	[{"filename":"agents/evil\nagent.md","status":"added"}]	full
+neg-newline-in-workflow-path	-	[{"filename":".github/workflows/ci\nx.yml","status":"added"}]	full
+neg-control-char-in-docs-path	-	[{"filename":"docs/a\u0007b.md","status":"added"}]	full
+neg-del-char-in-docs-path	-	[{"filename":"docs/a\u007fb.md","status":"added"}]	full
+neg-newline-in-rename-source	-	[{"filename":"README.md","previous_filename":"docs/x\ny.md","status":"renamed"}]	full
+neg-gemini-md	-	[{"filename":"GEMINI.md","status":"modified"}]	standard
+neg-claude-local-md	-	[{"filename":"CLAUDE.local.md","status":"modified"}]	standard
+neg-agent-singular-md	-	[{"filename":"pkg/AGENT.md","status":"modified"}]	standard
+neg-dot-agents-dir	-	[{"filename":".agents/rules/x.md","status":"modified"}]	standard
+neg-windsurf-dir	-	[{"filename":".windsurf/rules/x.md","status":"modified"}]	standard
+neg-clinerules-dir	-	[{"filename":".clinerules/x.md","status":"modified"}]	standard
+neg-kiro-dir	-	[{"filename":".kiro/steering/x.md","status":"modified"}]	standard
+neg-certificate-authority-is-auth	-	[{"filename":"docs/a.md","status":"modified"},{"filename":"src/certificate_authority/ca.ts","status":"modified"}]	full
+neg-authorities-is-auth	-	[{"filename":"docs/authorities.md","status":"modified"}]	full
+neg-version-line-moved	-	[{"filename":".claude-plugin/plugin.json","status":"modified","patch":"@@ -1,4 +1,4 @@\n {\n-  \"version\": \"1.0.0\",\n   \"name\": \"x\",\n+  \"version\": \"1.0.0\",\n }"}]	standard
+neg-version-nested-plugin-json	-	[{"filename":".claude-plugin/plugin.json","status":"modified","patch":"@@ -4 +4 @@\n-    \"version\": \"1.0.0\",\n+    \"version\": \"1.0.1\","}]	standard
+neg-version-nested-marketplace-source	-	[{"filename":".claude-plugin/marketplace.json","status":"modified","patch":"@@ -14 +14 @@\n-        \"version\": \"1.0.0\"\n+        \"version\": \"1.0.1\""}]	standard
+neg-version-two-on-one-line	-	[{"filename":".claude-plugin/plugin.json","status":"modified","patch":"@@ -2 +2 @@\n-  \"version\": \"1.0.0\", \"source\": {\"version\": \"2.0.0\"},\n+  \"version\": \"1.0.0\", \"source\": {\"version\": \"3.0.0\"},"}]	standard
+version-only-no-newline-marker	-	[{"filename":".claude-plugin/plugin.json","status":"modified","patch":"@@ -2 +2 @@\n-  \"version\": \"1.0.0\"\n\\ No newline at end of file\n+  \"version\": \"1.0.1\"\n\\ No newline at end of file"}]	light
+neg-config-unclosed-quote-full	full_paths:\n  - 'src/api/**	[{"filename":"src/api/h.ts","status":"modified"}]	full
+neg-config-unclosed-quote-light	light_paths:\n  - 'data/*.csv	[{"filename":"data/x.csv","status":"modified"}]	full
+manifests-are-standard	-	[{"filename":"package.json","status":"modified"},{"filename":"package-lock.json","status":"modified"}]	standard
+config-crlf-full-extension	full_paths:\r\n  - 'src/api/**'\r\n	[{"filename":"src/api/h.ts","status":"modified"}]	full
+neg-config-bom	\xef\xbb\xbffull_paths:\n  - 'src/**'	[{"filename":"README.md","status":"modified"}]	full
+neg-config-indented-key	  full_paths:\n  - 'src/**'	[{"filename":"README.md","status":"modified"}]	full
+neg-config-inline-list	full_paths: ['src/api/**']	[{"filename":"src/api/h.ts","status":"modified"}]	full
+config-key-comment-ok	full_paths:   # escalate\n  - 'src/api/**'	[{"filename":"src/api/h.ts","status":"modified"}]	full
+neg-null-record	-	[null,{"filename":"README.md","status":"modified"}]	full
+neg-string-record	-	["README.md"]	full
+neg-agent-file-conventions	-	[{"filename":"CONVENTIONS.md","status":"modified"}]	standard
+neg-agent-file-warp	-	[{"filename":"WARP.md","status":"modified"}]	standard
+neg-agent-file-roo	-	[{"filename":".roo/rules/x.md","status":"modified"}]	standard
+neg-agent-file-junie	-	[{"filename":".junie/guidelines.md","status":"modified"}]	standard
+neg-agent-file-openhands	-	[{"filename":".openhands/microagents/x.md","status":"modified"}]	standard
+neg-agent-file-amazonq	-	[{"filename":".amazonq/rules/x.md","status":"modified"}]	standard
+neg-agent-file-continue	-	[{"filename":".continue/rules/x.md","status":"modified"}]	standard
+neg-template-md-outside-docs	-	[{"filename":"autopilot/fabric/worker-brief.template.md","status":"modified"}]	standard
+neg-gemini-styleguide	-	[{"filename":".gemini/styleguide.md","status":"modified"}]	standard
+neg-output-styles	-	[{"filename":"output-styles/terse.md","status":"modified"}]	standard
+neg-agents-override-md	-	[{"filename":"AGENTS.override.md","status":"modified"}]	standard
+neg-codex-dir	-	[{"filename":".codex/prompts/x.md","status":"modified"}]	standard
+neg-augment-dir	-	[{"filename":".augment/rules/x.md","status":"modified"}]	standard
+neg-trae-dir	-	[{"filename":".trae/rules/x.md","status":"modified"}]	standard
+neg-md-in-source-tree	-	[{"filename":"src/lib/notes.md","status":"modified"}]	standard
+nested-docs-and-readme-light	-	[{"filename":"docs/a/b/guide.rst","status":"modified"},{"filename":"pkg/sub/README.md","status":"modified"}]	light
+neg-symlinked-doc	-	[{"filename":"docs/x.md","status":"modified","mode":"120000"}]	standard
+neg-unknown-mode-doc	-	[{"filename":"docs/x.md","status":"modified","mode":"unknown"}]	standard
+regular-mode-doc-light	-	[{"filename":"docs/x.md","status":"modified","mode":"100644"}]	light
+neg-non-ascii-dotted-i	-	[{"filename":"\u0130nfra/main.tf","status":"modified"}]	full
+neg-non-ascii-sharp-s	-	[{"filename":"pa\u00dfword.txt","status":"modified"}]	full
+neg-non-ascii-doc	-	[{"filename":"docs/caf\u00e9.md","status":"modified"}]	full
+config-quoted-glob-trailing-space	full_paths:\n  - "README.md"   	[{"filename":"README.md","status":"modified"}]	full
+neg-config-key-space-before-colon	full_paths :\n  - 'src/**'	[{"filename":"README.md","status":"modified"}]	full
+neg-config-quoted-key	"full_paths":\n  - 'src/**'	[{"filename":"README.md","status":"modified"}]	full
+neg-config-mid-file-bom	light_paths:\n\xef\xbb\xbf  - 'x/**'	[{"filename":"README.md","status":"modified"}]	full
+neg-mode-json-false	-	[{"filename":"docs/x.md","status":"modified","mode":false}]	standard
+neg-mode-numeric	-	[{"filename":"docs/x.md","status":"modified","mode":100644}]	standard
+neg-root-copilot-instructions	-	[{"filename":"copilot-instructions.md","status":"modified"}]	standard
+neg-nested-copilot-instructions	-	[{"filename":"docs/copilot-instructions.md","status":"modified"}]	standard
+neg-root-skill-md	-	[{"filename":"SKILL.md","status":"modified"}]	standard
+neg-nested-skill-md-in-docs	-	[{"filename":"docs/guides/SKILL.md","status":"modified"}]	standard
+neg-config-key-upper-case	FULL_PATHS:\n  - 'src/**'	[{"filename":"README.md","status":"modified"}]	full
+neg-config-key-hyphen	full-paths:\n  - 'src/**'	[{"filename":"README.md","status":"modified"}]	full
+neg-config-key-mixed-case-hyphen	Light-Paths:\n  - 'data/**'	[{"filename":"data/x.csv","status":"modified"}]	full
+neg-config-key-standard-upper-case	STANDARD_PATHS:\n  - 'src/**'	[{"filename":"README.md","status":"modified"}]	full
+neg-config-bare-dash-item	light_paths:\n  -\n  - 'data/**'	[{"filename":"data/x.csv","status":"modified"}]	full
+neg-config-empty-single-quoted-item	light_paths:\n  - ''\n  - 'data/**'	[{"filename":"data/x.csv","status":"modified"}]	full
+neg-config-empty-double-quoted-item	light_paths:\n  - ""\n  - 'data/**'	[{"filename":"data/x.csv","status":"modified"}]	full
+neg-config-form-feed-line-break	full_paths:\n  - 'a/**'\x0c  - 'src/api/**'	[{"filename":"src/api/h.ts","status":"modified"}]	full
+neg-config-lone-cr-line-break	light_paths:\r  - 'data/**'	[{"filename":"data/x.csv","status":"modified"}]	full
+neg-config-nul-byte	light_paths:\n  - data/**\x00	[{"filename":"data/x.csv","status":"modified"}]	full
+neg-config-non-ascii-nbsp	light_paths:\n  - data/**\xc2\xa0	[{"filename":"data/x.csv","status":"modified"}]	full
+config-crlf-light-extension	light_paths:\r\n  - 'data/**'\r\n	[{"filename":"data/x.csv","status":"modified"}]	light
+config-tab-indent-ok	light_paths:\n\t- 'data/**'	[{"filename":"data/x.csv","status":"modified"}]	light
+neg-sge-digest-doc	-	[{"filename":"docs/sge-digest.md","status":"modified"}]	standard
+neg-sge-digest-variant-doc	-	[{"filename":"docs/sge-digest-full.md","status":"modified"}]	standard
+neg-sge-docs-dir	-	[{"filename":"docs/sge/change-protocol.md","status":"modified"}]	standard
+neg-docs-schemas-dir	-	[{"filename":"docs/schemas/verdict.md","status":"modified"}]	standard

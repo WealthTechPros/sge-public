@@ -48,7 +48,7 @@ issue number tracking it.
 > artefact reads (`Read`/`Grep`/`Glob` over `docs/features/`, the capability
 > model, the DAG manifest) resolve against the *same* repo — the repo the
 > spec lives in. When `/sge:sge-implement` Phase 1 dispatches this from a
-> hub/control checkout (e.g. `wtp-org`), apply the shared repo-targeting
+> hub/control checkout (e.g. an org hub repo), apply the shared repo-targeting
 > convention — [`gh-repo`](../gh-repo/SKILL.md) — first: resolve + `cd` via
 > the shared helper — `cd "$(${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/with-repo-cwd.sh
 > resolve owner/repo)" || exit 1` (fail-loud, never falls through to the
@@ -121,7 +121,7 @@ in the sge repo). How deep to read past the digest is set by the change's
      *other* specs/ADRs that govern the touched paths (resolved against the DAG
      manifest); everything else is governance noise for these paths.
    - **`critical` → `full`** (a **CRITICAL path**: security/auth, DB migrations,
-     or multi-tenant / data-isolation — the same list `agents/agent-registry.md`
+     or multi-tenant / data-isolation — the same list `docs/agent-registry.md`
      escalates to `opus`): read the digest **and the full L0–L8 artefact stack**.
      Scoping is **deliberately bypassed**. CRITICAL-path context is **never
      thinned** — a one-line auth-config or migration tweak still reads the full
@@ -359,7 +359,7 @@ parses it):
 - `readyToBuild` — `true` only when all gates pass (or gaps were explicitly
   accepted via Option B and documented in `openQuestions[]`).
 
-Before returning the JSON above, append one `SkillRunRecord` (schema, `platform/packages/token-governance` — #727) to `memory/skill-runs.jsonl` so this preflight run is attributable to its session's spend alongside the implementation run it gates:
+Before returning the JSON above, append one `SkillRunRecord` (schema: the field contract in `skills/sge-implement/references/skill-run-record.md` (#727)) to `memory/skill-runs.jsonl` so this preflight run is attributable to its session's spend alongside the implementation run it gates:
 
 ```bash
 jq -nc \

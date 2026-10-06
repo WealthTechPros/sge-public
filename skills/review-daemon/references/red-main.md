@@ -1,4 +1,4 @@
-# Red default branch -> fix lane (wtp-org#992 pattern 9)
+# Red default branch -> fix lane
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -7,7 +7,7 @@
 | `REVIEW_DAEMON_RED_MAIN_WINDOW_SECONDS` | `86400` | Rolling window for the red-main cap. |
 | `REVIEW_DAEMON_RED_MAIN_CHECK_SECONDS` | `600` | Per-repo interval between default-branch reads (`0` = every cycle). A green tip costs one depth-1 GraphQL read; the history and protection reads run only for a red tip. |
 
-**Red default branch** (wtp-org#992 pattern 9). Each cycle, for every fleet repo
+**Red default branch**. Each cycle, for every fleet repo
 whose default-branch tip fails a REQUIRED check (branch protection + rulesets;
 pending, non-required and ignore-listed checks never count; an unreadable
 required set never counts), the fix lane dispatches one run that opens a fix PR

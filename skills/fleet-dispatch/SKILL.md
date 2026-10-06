@@ -1,5 +1,5 @@
 ---
-description: Use when you want ONE command to dispatch build-ready issues across MANY repos at once — an org-wide or explicit-list fleet — with at most one active lane per repo so lanes never race each other's worktrees. Invoke when the user asks to "dispatch across the fleet", "work issues org-wide", "run the pipeline across all our repos", or wants cross-repo backlog progress from a single hub/control session. Composition-only: it consumes /sge:available-issues --fleet for discovery and runs one /sge:team-pipeline lane per repo — it owns no build or review engine of its own. Fleet membership comes only from the --fleet argument, never from names baked into the skill.
+description: Use when dispatching build-ready issues across many repos at once — "dispatch across the fleet", "work issues org-wide", "run the pipeline across all our repos" — with at most one lane per repo. Composes /sge:available-issues --fleet and /sge:team-pipeline.
 argument-hint: "[--fleet <org|owner/a,owner/b,…>] [--count N] [--repo-agents N] [--wave-size N] [--module <name>] [--milestone <name>] [--dry-run]"
 ---
 
@@ -97,7 +97,7 @@ This is enforced **twice, both fail-loud** (working as designed, but a surprise 
 
 An attach-set that does not match `--fleet` therefore aborts the entire run rather than silently narrowing it. The shipped defaults are already conservative (`--wave-size 3`, `--repo-agents 2`, one lock per repo), so the only operator action needed for Routines is to make the attach-set and the explicit `--fleet` list identical.
 
-> Background: Routines-compatibility audit [#1140 Q4](../../docs/audits/2026-07-15-routines-compatibility-team-pipeline-available-issues.md).
+> Background: Routines-compatibility audit #1140 Q4 (SGE source repo: `docs/audits/2026-07-15-routines-compatibility-team-pipeline-available-issues.md`).
 
 ---
 
@@ -281,6 +281,6 @@ Never weaken a gate — the per-repo lock, the conflict-safe contract, or the wa
 
 - `/sge:available-issues --fleet` — the discovery half; produces the repo-qualified worklist this skill consumes (contract in SPEC-069 §5).
 - `/sge:team-pipeline` — the per-repo parallel build+review engine, dispatched once per repo lane, unchanged; its Phase 3c **lean build-agent contract** (not a full `/sge:sge-implement` dispatch) is the actual per-issue build path.
-- `/sge:sge-implement` / `/sge:implement-issue` — the standalone SGE build skills; team-pipeline's lean build agent runs the same `/sge:governance-trace` gate headlessly rather than dispatching these in full.
+- `/sge:sge-implement` — the standalone SGE build skill; team-pipeline's lean build agent runs the same `/sge:governance-trace` gate headlessly rather than dispatching it in full.
 - `/sge:pr-monitor` / `/sge:pr-review` — review shepherding inside each lane.
 - `scripts/with-repo-cwd.sh` (SPEC-057) — fail-loud repo-context resolution every lane uses.

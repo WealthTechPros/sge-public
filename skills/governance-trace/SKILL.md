@@ -1,5 +1,5 @@
 ---
-description: Use to classify a GitHub issue against a repo's SGE governance artefacts — Vision, Capability Model, Feature Specs — before any code is written. Determines whether the work matches an existing spec unchanged, would modify an existing spec's stated requirement, needs a new spec (capability gap), needs no spec (chore/infra), or falls outside SGE scope entirely (Vision non-goal conflict / ungoverned work). Use whenever `/sge:sge-implement` Phase 0.5 dispatches its mandatory pre-implementation gate, whenever `/sge:deep-dive` Phase 4 needs the shared classifier instead of ad-hoc judgment, or when a human wants to check "does this need a spec, and would it change one?" before starting work by hand.
+description: Use when classifying an issue against a repo's SGE governance (Vision, Capability Model, Feature Specs) before code is written — matches a spec, modifies one, needs a new spec, needs none, or is out of scope. Dispatched by /sge:sge-implement Phase 0.5 and /sge:deep-dive.
 argument-hint: "<issue-number> [--repo <owner/repo>] [--spec SPEC-NNN] [--no-comment]"
 context: fork
 allowed-tools: Read, Grep, Glob, Bash(gh issue view:*), Bash(gh issue list:*), Bash(gh issue comment:*), Bash(git log:*), Bash(git show:*), Bash(ls:*), Bash(bash:*), Bash(stat:*), Bash(find:*), mcp__plugin_sge_sge-memory__search_nodes, mcp__plugin_sge_sge-memory__create_entities
@@ -59,27 +59,7 @@ A fork inherits the parent's full context, including its original directive (e.g
 
 **Issue context — fetch as your next action, after the target-repo resolution above:**
 
-> Routed via `scripts/issue-read.sh` (not a bare `gh issue view`) so this
-> headless, forked skill works against a Forgejo/Gitea-hosted target repo,
-> exactly like `/sge:available-issues` and `/sge:sge-align` already do
-> (ADR-0010, #1236) — a bare `gh` call here previously meant EVERY dispatch of
-> `/sge:sge-implement` Phase 0.5 (which forks this skill unconditionally) would
-> silently `NO_ISSUE_LOADED` on a non-GitHub target repo. `GH_REPO` was
-> exported above so this resolves and reads against the target checkout
-> (issue #2207) — `issue-read.sh`'s own host/ALM classification reads the
-> CURRENT cwd, so `GH_REPO` alone (the prior, Forgejo/Jira-broken convention)
-> is not enough on its own.
->
-> A `!`-preload injection line cannot safely carry `$ARGUMENTS` into this call
-> — the harness substitutes `$ARGUMENTS` as raw, unescaped text before any
-> shell parses it, so no quoting scheme is safe against an adversarial
-> argument (confirmed live: a bare `"` broke out of a
-> `bash -c '...' _ "$ARGUMENTS"` positional-passing attempt and executed
-> arbitrary commands; see
-> [`no-positional-args-in-injection.test.sh`](../tests/no-positional-args-in-injection.test.sh)
-> and upstream anthropics/claude-code#16163). Issue this as a **real Bash
-> tool call**, with the issue number parsed from your own invocation's
-> argument text and passed as a normal, safely-quoted argument:
+> Routed via `scripts/issue-read.sh` (Forgejo/Gitea-safe, ADR-0010) as a **real Bash tool call**, the issue number parsed from your own invocation text and passed as a safely-quoted argument — never a preload injection line. Why: [`references/issue-fetch-rationale.md`](references/issue-fetch-rationale.md).
 > ```bash
 > bash "$SGE_ROOT/scripts/issue-read.sh" view "<ISSUE-NUMBER>" \
 >   || echo "NO_ISSUE_LOADED — pass an issue number"
@@ -128,10 +108,7 @@ Refuse **only** when this scan actually finds no issue number anywhere in the in
 
 ## Consumption modes
 
-1. **Dispatched (headless)** — `/sge:sge-implement` Phase 0.5 invokes this as a forked subagent for every issue, in verify or classify mode as appropriate. No interactive questions; return the Step 7 JSON and let the dispatcher decide what to do with each verdict. `/sge:deep-dive` Phase 4 also dispatches this headlessly. `/sge:build-ready-audit` folds this classification into its own Step 2G (issue #872) — it dispatches this skill headlessly with `--no-comment` (plus `--spec` when the issue cites one), once per audited issue, so a build-ready gate and a governance classification come back in **one skill hop** instead of two chained commands. The fold delegates to this skill unchanged; it does not re-implement the classification.
-2. **Standalone (interactive)** — a human runs it directly to check "what would happen if I ran sge-implement on this?" without committing to implementation. Same classification, same JSON, plus the audit-trail comment (Step 6) and a plain-language summary printed in chat.
-
-Both modes run the same Steps 0–5; only Step 6 (commenting) and whether a human sees a chat summary differ.
+**Dispatched (headless)** by `/sge:sge-implement` Phase 0.5, `/sge:deep-dive` Phase 4 and `/sge:build-ready-audit` Step 2G (`--no-comment`), or **standalone (interactive)**; both run Steps 0–5 and differ only in Step 6 and a chat summary. Detail: [`references/consumption-modes.md`](references/consumption-modes.md).
 
 ---
 
@@ -148,21 +125,9 @@ The cortex **write** is not conditional on this lookup's outcome — see [Step W
 
 ## Step W: Cortex write on every terminal path (MANDATORY)
 
-**This step is not optional and not a tail of Step 5.** Before returning the Step 7 JSON, on **every** terminal path this skill can exit through, call `create_entities` with the verdict. That includes:
+**This step is not optional and not a tail of Step 5.** Before returning the Step 7 JSON, on **every** terminal path this skill can exit through, call `create_entities` with the verdict.
 
-| Exit path | Write |
-|---|---|
-| Full classification (Steps 1–5 ran) | create — the freshly derived verdict |
-| **Step 0.5 comment-cache hit** | **reinforce** — same entity, `cacheReused: true` in the observation |
-| **Step 0.6 trivial-tier gate** (`NO_SPEC_WARRANTED` inline) | **reinforce/create** — with the `tierGate` marker |
-| **`NOT_ONBOARDED` early return** (Step 1, skips Steps 2–5) | create/reinforce — `path: not-onboarded` |
-| Front-loaded verdict adopted by the caller | create/reinforce — the adopted verdict |
-
-On the **front-loaded** path this skill never executes, so the **adopting caller** owns the write (wired in `/sge:sge-implement` Phase 0.5 and `/sge:team-pipeline`'s lane; #1938). Two exemption classes write nothing and must not be conflated: **no verdict produced** (`NO_TARGET_ISSUE`), and **verdict produced but the write is impossible** (sge-memory unavailable — skip silently; a memory failure must never block the gate).
-
-**Reinforcement, not duplication.** `create_entities` on an existing entity name is *already* an upsert that bumps `reinforcement_count` and `current_confidence` — keep the name stable (`govtrace-<owner>-<repo>-<issue>`) and let the store reinforce. Never guard the write with an existence check.
-
-**Any future short-circuit added ahead of Step 5 must still pass through Step W** — the graph can only accumulate if the *frequent* path writes. The write used to sit on Step 0's cache-miss branch; Steps 0.5/0.6 were later added in front of it and the fleet write-rate silently went to zero on 2026-07-17.
+Exit paths that write (incl. cache hit, tier gate, `NOT_ONBOARDED`, caller-adopted verdict) and reinforcement: [`references/cortex-write.md`](references/cortex-write.md#step-w-exit-paths).
 
 **Closed vocabulary.** Observations are enums, spec ids, and timestamps only — never issue titles, bodies, or comment text.
 
@@ -188,15 +153,9 @@ Before entering the expensive Steps 1–5, classify the issue's footprint with t
 
 Read the repo's `CLAUDE.md` (and `docs/sge/` if present) to find, for **this repo specifically**:
 
-| Artefact | Typical home (confirm in `CLAUDE.md` — never hardcode) |
-|---|---|
-| Vision (incl. Non-goals) | `docs/vision.md` |
-| Capability model | `.claude/product-context/capability-model.yaml`, or a repo-specific variant (e.g. `platform/docs/sgd-build/capability-model.yaml`) |
-| Feature specs | `docs/features/SPEC-NNN-<slug>.md`, or a repo-specific variant (e.g. `docs/specs/SPEC-NNN-<slug>.md`) — some repos use a feature-slug filename with no `SPEC-NNN` at all (e.g. `docs/features/<slug>.md` with a `feature:` front-matter key instead of `ref:`); treat that as an equally valid spec convention, not an absence of one |
+Locate the Vision (incl. Non-goals), capability model and feature specs — typical homes and the schema shapes that coexist across the fleet: [`references/artefact-locations.md`](references/artefact-locations.md). Confirm in `CLAUDE.md`; never hardcode.
 
-**Schema tolerance.** At least three capability-model shapes and two spec-identification conventions coexist across the fleet (nested YAML domains→capabilities→features with inline `spec:` refs; YAML front-matter with `capability:`/`success_measure_moved:`; feature-slug filenames with a `feature:` label instead of a `ref: SPEC-NNN`). Read whichever this repo actually uses — do not assume the `sge-init` default schema when the repo has its own.
-
-**Graceful degradation — `NOT_ONBOARDED`.** If **no** Vision, capability model, or spec directory exists at all (zero governance artefacts anywhere), this repo has not adopted SGE governance yet. That is not the same as "this issue needs no spec" — it means there is nothing to trace against. Return verdict `NOT_ONBOARDED` immediately (skip Steps 2–5, but **still run [Step W](#step-w-cortex-write-on-every-terminal-path-mandatory)** — it is a verdict, so it writes) with a one-line note recommending `/sge:sge-init`. **Do not** confuse this with a repo that uses a non-standard-but-real convention (feature-slug files, a differently-named capability model, etc.) — those are still governed; keep looking before concluding `NOT_ONBOARDED`.
+**`NOT_ONBOARDED`:** zero governance artefacts anywhere → return it at once (skip Steps 2–5, still run [Step W](#step-w-cortex-write-on-every-terminal-path-mandatory)), recommending `/sge:sge-init`. Detail: [`references/artefact-locations.md`](references/artefact-locations.md#not_onboarded).
 
 ---
 
@@ -204,11 +163,7 @@ Read the repo's `CLAUDE.md` (and `docs/sge/` if present) to find, for **this rep
 
 Read the capability model and the spec/feature directory. Semantically match the issue's title, body, and any labels **down through this repo's actual model nesting** — domains → capabilities → features → specs, or the local equivalent (Step 1) — rather than jumping straight from capability to spec and skipping the middle layer:
 
-1. **Capability mapping** — which capability (however this repo's model names its L1/L2 units) owns this issue's area? Match on meaning, not just keyword overlap (an issue about "logbook entries won't save offline" maps to a capability about offline-first data entry even if it never says "capability" or "offline").
-2. **Feature mapping** — *within* that capability, which feature does the issue's behaviour belong to? A capability typically has several features; get the right one, not just the right capability. Skip this sub-step entirely (and treat `feature` as `n/a` throughout) if this repo's actual model is two-layer — capability → spec directly, no separate feature entity (check Step 1's schema-tolerance note; don't force a three-layer answer onto a two-layer model).
-3. **Spec/feature-file coverage** — does an existing spec (or, in a two-layer model, the feature file itself) already describe the behaviour this issue touches?
-
-**Path-mapped surfaces override lexical matching.** Some repos pair their capability model with a deterministic path→feature map for a whole surface (e.g. the SGE repo's `platform/docs/sgd-build/skills-map.yaml`, which maps every `skills/<name>/` to a `CAP-METHOD` feature — the model's own scope note names any such map). When the issue's affected files fall under a mapped surface, resolve capability + feature by **looking the path up in that map** — do not semantically match those files against the rest of the model. Lexical/topical overlap across such a boundary is exactly the false-positive class the map exists to prevent (an issue about a repo's own PR-review *tooling* is not governed by a product capability named "PR governance checks" — see SGE issue #694). Files *outside* any mapped surface follow the normal semantic matching above.
+Match three layers in order: **capability**, then **feature** within it (skip for a two-layer model), then **spec/feature-file coverage**; a path-mapped surface (e.g. `docs/sgd-build/skills-map.yaml`) overrides lexical matching. Sub-step detail: [`references/matching.md`](references/matching.md).
 
 Record each layer's status as you resolve it — `existing` (matched; note its id), `new` (nothing matches; will need creating), or, for `spec` only, `edit` (matches, but Step 3 finds the issue changes its stated content). This is the `layers` object Step 7 returns — a capability can stay `existing` while its feature is `new`, or a feature can be `existing` while only its spec is `new`; don't collapse these into one flag.
 
@@ -230,11 +185,7 @@ Read the matched spec's full body — every Gherkin scenario, every stated behav
 - If the issue is purely **additive** (new field, new scenario, new edge case handled) and does not require any *existing* stated scenario/AC to change its current behaviour → verdict `MATCHES_EXISTING`, and set `layers.spec.status = "existing"`.
 - If fulfilling the issue requires an *existing* scenario/AC to behave **differently than currently written** (not just extended) → verdict `MATCHES_EXISTING_MODIFIED`, and set `layers.spec.status = "edit"`. For **every** clause that would change, record:
 
-  ```json
-  { "spec": "SPEC-NNN", "clause": "<short id/quote of the AC being changed>", "current": "<verbatim current text>", "proposed": "<what it would become>" }
-  ```
-
-  Quote `current` verbatim from the spec file — never paraphrase what's being replaced; the person reviewing this needs to see the actual before, not a summary of it.
+  Record each changed clause as `{spec, clause, current, proposed}`, quoting `current` **verbatim** from the spec — shape: [`references/verdict-schema.md`](references/verdict-schema.md#requirementchanges-record).
 
 `--spec` (verify mode) stops here — the caller already resolved capability + spec (both `existing`), so Step 3's `MATCHES_EXISTING` / `MATCHES_EXISTING_MODIFIED` split is the entire verdict, and only `layers.spec.status` is in question.
 
@@ -244,38 +195,13 @@ Read the matched spec's full body — every Gherkin scenario, every stated behav
 
 Read the Vision's Non-goals section (or equivalent — some Visions call it "Out of scope"). If the issue asks for something explicitly excluded there, that **overrides every other signal** — verdict `NOT_SGE_SCOPE`, `nonGoalConflict` populated with the quoted non-goal.
 
-**No-capability-mapping judgment call (only reached from Step 2's first bullet).** When nothing in the capability model maps and there's no non-goal conflict either, decide between `NEEDS_NEW_SPEC` (a real capability gap — the model just hasn't caught up yet) and `NOT_SGE_SCOPE` (this genuinely doesn't belong to the product's mission). **Bias toward `NEEDS_NEW_SPEC`** — blocking legitimate work that just hasn't been modelled yet is more costly than asking someone to review a two-paragraph spec stub. Reserve `NOT_SGE_SCOPE` for cases with an actual non-goal conflict, or work so far outside the product's stated mission (per the Vision's problem statement) that inventing a capability for it would be absurd on its face — not merely "small" or "not yet planned."
+**No capability maps and no non-goal conflict?** Decide `NEEDS_NEW_SPEC` vs `NOT_SGE_SCOPE` — **bias toward `NEEDS_NEW_SPEC`**: [`references/matching.md`](references/matching.md#no-capability-mapping-judgment-call).
 
 ---
 
 ## Step 5: Spec-stub (and capability-model) drafting (`NEEDS_NEW_SPEC` only)
 
-Draft **whichever layers Step 2 marked `new`** — never the spec in isolation. A `NEEDS_NEW_SPEC` verdict that only proposes a spec file, when the feature (or capability) it belongs to doesn't exist in the model either, creates exactly the orphan `/sge:sge-align` check C6 already flags — the model must move in the same step as the spec.
-
-Draft each `new` layer **independently — never gate one layer's drafting on another layer's status**, since a two-layer model's `feature` stays `n/a` even when its `capability` is genuinely new (Step 2), and gating capability-drafting on `feature.status == "new"` would silently skip it for exactly that case:
-
-- **If `layers.feature.status == "new"`**: draft the capability-model row for it, following this repo's actual row shape (Step 1) — e.g. the flat-record convention already used in `platform/docs/sgd-build/capability-model.yaml`: `{ id: F-XXX, name: <feature title>, mvp: false, status: planned, spec: SPEC-NNN }`.
-- **If `layers.capability.status == "new"`** (check this independently of `feature` — it applies whether `feature` is `new` or `n/a`): draft the enclosing capability (and domain, if the model requires one at that level) the same way, using this repo's actual nesting — do not invent a flatter or deeper structure than the model already uses.
-
-Populate `suggestedCapabilityModelEdit` in the Step 7 JSON with the target file path, a one-line description of what's being added, and the exact YAML block(s) to insert for **every** layer drafted above (not just the first one found). `null` only when `capability` and `feature` are both already `existing`/`n/a` (a spec-only gap needs no model edit).
-
-**Spec stub.** Draft a minimal real spec, not a placeholder. Follow this repo's actual front-matter convention (Step 1) — if it's the `sge-init` default:
-
-```yaml
----
-ref: SPEC-NNN                   # next sequential id — scan the spec dir for the current max
-title: <feature title, derived from the issue>
-capability: CAP-xx              # existing capability if one was found in Step 2/4, else the newly-drafted one above
-capability_model_version: <the model's current version:>
-status: draft
-success_measure_moved: SM-?     # best-guess from the Vision's success measures; mark "TBD — confirm" if genuinely unclear
-questions: []
----
-```
-
-Body: one paragraph of business intent (what does the user get, citing the success measure), and **at least one Gherkin scenario** derived directly from the issue's acceptance criteria (or What/Why/Scope if it has no explicit AC) — not a TODO placeholder; write the actual scenario the issue implies.
-
-Populate `suggestedSpecStub` in the Step 7 JSON with the full markdown content and the intended file path (`docs/features/SPEC-NNN-<slug>.md`, adjusted to this repo's real convention). **Do not write either the spec file or the capability-model edit yet** — both are proposals for the caller (a human, or `sge-implement` surfacing them to one) to approve or edit together before either becomes real, so the model and the spec that cites it land in the same approval, never one without the other.
+Draft **whichever layers Step 2 marked `new`** — never the spec in isolation (an orphan spec is what `/sge:sge-align` C6 flags). Draft each `new` layer **independently**: never gate capability-drafting on `feature.status`. Put the YAML for **every** drafted layer in `suggestedCapabilityModelEdit` (`null` only for a spec-only gap) and a minimal real spec stub — repo front-matter, one intent paragraph, at least one Gherkin scenario from the issue's AC — in `suggestedSpecStub`. **Write neither file**: both are proposals approved together. Row shapes, front-matter template and paths: [`references/spec-stub-drafting.md`](references/spec-stub-drafting.md).
 
 ---
 
@@ -357,32 +283,7 @@ End with exactly this JSON shape:
 }
 ```
 
-On a **Step 0.5 cache hit**, the same shape is returned from the reused comment, plus a `"cacheReused": true` marker, with `commentPosted: false` and `matchConfidence: "medium"`:
-
-```json
-{
-  "issue": 4600,
-  "repo": "org/repo",
-  "verdict": "MATCHES_EXISTING",
-  "matchedSpec": "SPEC-027",
-  "matchConfidence": "medium",
-  "cacheReused": true,
-  "commentPosted": false,
-  "rationale": "Reused the prior `## Governance trace` verdict — no governance artefact changed since it was posted (Step 0.5)."
-}
-```
-
-- `issue` / `repo` — the echoed target: `issue` is the positional number this run received, `repo` is the resolved `$TARGET` (`owner/repo`) the classification ran against. Always emitted — dispatchers reject a result that omits the `issue` echo or whose `issue`/`repo` disagrees with what they dispatched (#2452 fork result contract).
-- `verdict` — one of `MATCHES_EXISTING`, `MATCHES_EXISTING_MODIFIED`, `NEEDS_NEW_SPEC`, `NO_SPEC_WARRANTED`, `NOT_SGE_SCOPE`, `NOT_ONBOARDED`. This is the routing signal callers branch on — it doesn't change based on this skill's layer-awareness. (`NO_TARGET_ISSUE` is not a classification — it is the hard-stop refusal shape defined under Usage, returned without running any step.)
-- `capability` / `matchedSpec` — `null` when none applies to the verdict. Kept as top-level fields (redundant with `layers.capability.id` / `layers.spec.id` when they're `existing`) for callers that only need the routing-relevant id and don't care about the full layer breakdown.
-- `matchConfidence` — `high` / `medium` / `low`; dispatchers should treat `low` as worth a human glance even on an otherwise-clean `MATCHES_EXISTING`.
-- `layers` — the new, always-present breakdown from Steps 2–5. Each of `capability`/`feature`/`spec` is `{ "status": "new" | "existing" | "edit" | "n/a", "id": "<existing id>" | null, "proposedId"?: "<id this would become>", "name"?: "<for a new feature/capability>" }`. `feature` is `"n/a"` throughout for a two-layer model (Step 2). This is what makes "new capability vs. new feature vs. new spec vs. edit" explicit, always — never collapsed into the flat verdict alone.
-- `requirementChanges[]` — populated only for `MATCHES_EXISTING_MODIFIED`; `[]` otherwise.
-- `suggestedSpecStub` — populated only for `NEEDS_NEW_SPEC`; `null` otherwise.
-- `suggestedCapabilityModelEdit` — populated only when `layers.feature.status == "new"` or `layers.capability.status == "new"` (Step 5); `{ "path": "...", "description": "...", "yaml": "<block(s) to insert>" }`; `null` when the gap is spec-only.
-- `nonGoalConflict` — the quoted non-goal, only for `NOT_SGE_SCOPE`; `null` otherwise.
-- `commentPosted` / `commentUrl` — whether Step 6 actually posted (and where), so the caller doesn't re-post.
-- `cacheReused` — present and `true` only when Step 0.5 short-circuited on a fresh prior comment; absent/`false` on a full-depth run. A caller can treat a `cacheReused` verdict exactly as a fresh one (same routing signal), and `commentPosted` is always `false` for it (the audit comment already existed — no duplicate is posted).
+The Step 0.5 cache-hit variant (`"cacheReused": true`, `commentPosted: false`, `matchConfidence: "medium"`) and the meaning of every field (`issue`/`repo` echo, `verdict`, `layers`, `requirementChanges[]`, `suggestedSpecStub`, `suggestedCapabilityModelEdit`, `nonGoalConflict`, `commentPosted`): [`references/verdict-schema.md`](references/verdict-schema.md).
 
 > **TASK COMPLETE — STOP HERE** as a fork (see Fork mandate above).
 
@@ -391,9 +292,6 @@ On a **Step 0.5 cache hit**, the same shape is returned from the reused comment,
 ## Related Skills
 
 - `/sge:sge-implement <n>` — the mandatory caller; Phase 0.5 dispatches this skill for every issue and branches on the verdict
-- `/sge:deep-dive <n>` — dispatches this skill headlessly for its Phase 4 Governance Trace, instead of re-deriving the classification inline
 - `/sge:build-ready-audit <n>` — folds this classification into its Step 2G (issue #872); the batch build-ready gate now returns build-readiness **and** this governance verdict in one hop (opt out with `--skip-governance`)
-- `/sge:sge-align` — the periodic, advisory-only, whole-repo drift sweep; this skill is its blocking, single-issue counterpart
-- `/sge:sge-init` — seeds the Vision/capability-model/spec artefacts this skill traces against, and owns full anchor-spec drafting beyond the minimal stub this skill proposes
-- `/sge:sge-preflight <SPEC-NNN>` — the next gate after this one resolves a spec (checks the spec's own completeness/dependencies, not whether the issue matches it)
 - [`gh-repo`](../gh-repo/SKILL.md) — the shared cross-repo / hub-dispatch repo-targeting convention this skill's `gh` calls and artefact reads must both follow
+- Also: `/sge:deep-dive`, `/sge:sge-align`, `/sge:sge-init`, `/sge:sge-preflight` — see [`references/related-skills.md`](references/related-skills.md).

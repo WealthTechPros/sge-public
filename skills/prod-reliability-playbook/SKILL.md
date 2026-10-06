@@ -1,5 +1,5 @@
 ---
-description: Use when a "simple" fix is dragging into an all-day slog, when debugging keeps bouncing through production to validate each hypothesis, when a deploy ships plausible-but-wrong output instead of failing, or proactively before/after an incident to shorten the diagnosis loop. Stack-agnostic reliability playbook — diagnosis-loop economics, fail-loud over silent fallbacks, shift-left validation, a fast green merge path, and a triage checklist. Advisory: it tells you what to change, it does not make the change.
+description: Use when a simple fix drags into an all-day slog, debugging keeps bouncing through production, or a deploy ships plausible-but-wrong output; or before/after an incident. Stack-agnostic playbook — fail loud, shift-left validation, a fast green path, a triage checklist. Advisory.
 argument-hint: "[incident note or PR/issue ref]"
 ---
 

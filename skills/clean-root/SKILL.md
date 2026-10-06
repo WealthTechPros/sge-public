@@ -1,5 +1,5 @@
 ---
-description: Use when a repo's working tree has accumulated untracked clutter at the root or elsewhere — stray build logs, snapshot/report files left by a prior session, or files that turn out to be byte-identical duplicates of content already committed. Removes only what's provably safe (identical-to-main content) or matches a configured throwaway-pattern allowlist; everything else is reported, never deleted. Not for git worktrees/branches (use /sge:tidy-worktrees) or stray processes (use /sge:cleanup).
+description: Use when a working tree has untracked clutter — stray build logs, leftover report files, byte-identical duplicates of committed content. Removes only provably safe or allowlisted files and reports the rest. Not for worktrees (/sge:tidy-worktrees) or processes (/sge:reap-orphans).
 argument-hint: "[--dry-run] [path]"
 allowed-tools: Read, Grep, Glob, Bash
 ---
@@ -11,7 +11,7 @@ Find untracked files sitting in a repo's working tree and remove **only** the on
 
 ## Out of scope
 - Git worktrees and branches (that's `/sge:tidy-worktrees`)
-- Stray processes (Playwright, Chromium, node) — that's `/sge:cleanup`
+- Stray processes (Playwright, Chromium, node) — that's `/sge:reap-orphans --heavy`
 - Deleting anything the two safety tiers below don't clear — an unrecognized untracked file is **reported**, never removed
 - `.gitignore`d files — this skill only ever looks at untracked-and-unignored paths (`git status --porcelain`'s `??` rows); an ignored file is presumed intentional (build output, local env) and is out of scope entirely
 
@@ -83,7 +83,7 @@ Never ships a built-in default pattern list — a glob that is safe in one repo'
    clean-root: <repo> (<path or "whole tree">)
 
    Tier 1 — identical to main, safe to delete (2):
-     platform/.claude/design-review/DESIGN.md
+     app/.claude/design-review/DESIGN.md
 
    Tier 2 — matches clean-root-patterns (5):
      gate-backend-tests.log
@@ -113,4 +113,4 @@ Never ships a built-in default pattern list — a glob that is safe in one repo'
 ## Related commands
 
 - `/sge:tidy-worktrees` — git worktree/branch hygiene (different problem: refs and worktrees, not loose files)
-- `/sge:cleanup` — process hygiene (Playwright/Chromium/node), Windows-only
+- `/sge:reap-orphans --heavy` — process hygiene (Playwright/Chromium/node)

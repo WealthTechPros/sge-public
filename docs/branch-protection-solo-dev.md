@@ -13,7 +13,7 @@ versioned artefact like any other infra change.
 
 ## The pattern
 
-`WealthTechPros/wtp-org`'s `infra/github/__main__.py` already implements
+An org hub repo's `infra/github/__main__.py` already implements
 and runs this live, org-wide, via the Pulumi GitHub provider
 (`github.BranchProtection`, GraphQL v4 resource). Treat that file as the
 working example — the snippet below is adapted from it, not a synthetic
@@ -65,7 +65,7 @@ def baseline_protection(
 - PR required to merge `main`.
 - `required_approving_review_count: 0` — **no required-reviewer gate.**
   This is a solo-dev-team decision, not a general SGE recommendation — see
-  the `REVERSED 2026-08-12` comment above `BASELINE_REVIEWS` in wtp-org's
+  the `REVERSED 2026-08-12` comment above `BASELINE_REVIEWS` in the hub repo's
   `infra/github/__main__.py` for the source rationale. A multi-reviewer
   team should raise `required_approving_review_count` instead of taking
   this pattern verbatim.
@@ -85,11 +85,14 @@ following gates this repo has actually adopted (from `sge-init` Steps 7 /
 
 ```python
 DEFAULT_REQUIRED_CHECKS = [
-    "Require pr-reviewed label",   # require-pr-reviewed-label.yml — always, once /sge:pr-review is adopted
     "Require commit trailer",      # require-commit-trailer.yml — always, once Step 7's CI backstop is adopted (issue #2256)
     "Require test evidence",       # require-test-evidence.yml — only if Step 7c's TDD gate was adopted
 ]
 ```
+
+Note: "Require pr-reviewed label" (`require-pr-reviewed-label.yml`) was removed
+org-wide 2026-09-16 — see the workflow's own removal PR in this
+repo. Do not re-add it as a default for new repos.
 
 ```python
 github.BranchProtectionRequiredStatusChecksArgs(
@@ -120,4 +123,3 @@ third-party app check with no SGE-owned workflow file).
 - A reusable drift-check script for other repos to consume.
 
 Both are separate, not-yet-filed issues if still wanted.
-

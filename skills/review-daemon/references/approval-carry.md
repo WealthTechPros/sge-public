@@ -1,4 +1,4 @@
-# Approval carry and update-behind (wtp-org#992 pattern 9)
+# Approval carry and update-behind
 
 No model usage: PR Warden keeps approved PRs current under strict up-to-date protection.
 

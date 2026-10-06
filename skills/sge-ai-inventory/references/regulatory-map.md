@@ -57,7 +57,7 @@ Each inventory field exists because a named regime asks for it. Sources are as r
 
 ## Risk-score control-binding rationale
 
-The following table maps each risk-score input (defined in [`risk-scoring.md`](risk-scoring.md)) to the regulatory obligation that requires it to be mitigated.
+The following table maps each risk-score input (defined in `risk-scoring.md` (SGE source repo: `skills/sge-ai-inventory/references/risk-scoring.md`)) to the regulatory obligation that requires it to be mitigated.
 
 | Risk input | High-risk condition | Governing regime | Mitigating control |
 |------------|---------------------|------------------|--------------------|

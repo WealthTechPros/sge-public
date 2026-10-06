@@ -1,4 +1,4 @@
-# Self-healing quarantine (Rob, 2026-09-29)
+# Self-healing quarantine
 
 On 2026-09-29 healthy PRs (sge#2703, sge#2707) were quarantined by the daemon's
 **own** faults — GitHub App JWT `exp` 401s on token exchange and 0-turn
@@ -26,7 +26,7 @@ every open `pr-review-stalled` PR; `release_moved_quarantines` releases one
 in-memory counters) when its head differs from the SHA in the **latest
 daemon-authored** quarantine comment. A label without that marker — human-applied,
 or a pre-marker legacy quarantine — is never touched. `pr-warden-quarantined`
-is the wtp-org supervisor's label and is released by the supervisor.
+is the PR Warden supervisor's label and is released by the supervisor.
 
 > ⚠️ Because the predicate does live network I/O with a fail-safe-to-degraded
 > contract, daemon behaviour tests that assert the **healthy** path pin
@@ -54,7 +54,7 @@ When it sees one, it pauses all polling and dispatching until the limit resets, 
 - **Quarantine:** the failure is `transient`. It never counts toward quarantine and never backs off the individual PR.
 - **Logging:** the dispatch that started the pause writes one `runs.jsonl` record with `decision: {action: "global-pause", until}`. The supervisor's digest shows it once under "Decided on your behalf".
 
-## Dispatch permission denied (wtp-org#992 pattern 6)
+## Dispatch permission denied
 
 On 2026-09-29, 2 of 19 dispatches (sge#2710, sge#2725) called the `Skill` tool for `sge:pr-review` instead of following the already-expanded slash command. Under `dontAsk` with no `Skill` rule this is denied ("Permission to use Skill has been denied because Claude Code is running in don't ask mode"), the run ends with no verdict, and it had been counted against the PR.
 
