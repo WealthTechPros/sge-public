@@ -21,8 +21,7 @@ gap by intentionally corrupting the code (mutants) and confirming a test actuall
 
 ## What the gate does
 
-**Invocation (issue #2343 — the live wiring, extended to `platform/app/frontend/` by issue #2375;
-§5's "deferred" note in SPEC-120 is now closed for the TS/JS leg):**
+**Invocation (issue #2343 — the live wiring; issue #2599 made the dirs per-repo config):**
 
 ```bash
 node scripts/mutation-diff-gate.mjs --base origin/main --head HEAD \
@@ -37,27 +36,29 @@ Mechanically, the script (`scripts/mutation-diff-gate.mjs`):
 
 1. Computes the diff's changed/added line numbers — `git diff <base>...<head> --unified=0` (same
    mechanism the diff-coverage gate uses).
-2. Groups the diff's changed files by mutatable package dir (`platform/app/backend/` and
-   `platform/app/frontend/` — both TS/JS via Stryker; this repo's Python surface is tooling/services,
-   not mutation-testable app logic, so no mutmut leg is wired yet — see "Engine coverage" below) and
-   runs Stryker **scoped to exactly those changed files** (`mutate:` set to the diff's file list, never
+2. Groups the diff's changed files by the mutatable package dirs the repo declares in
+   `.sge/test-map.yml` `mutatable_dirs` (TS/JS via Stryker; no mutmut leg is wired yet — see
+   "Engine coverage" below) and runs Stryker **scoped to exactly those changed files** (`mutate:` set to the diff's file list, never
    the whole package).
 3. Parses the engine's report with the existing `packages/mutation-collector` `parseMutationReport`
    (Stryker JSON / mutmut text, both already supported) — never a second hand-rolled parser.
 4. Scores via `evaluateDiffMutationGate` (`counted`/`score`/`findings`, SPEC-120, distinct from
-   `evaluateC35`'s scheduled per-spec check). No valid in-diff mutants → `mutation_gate: not-applicable`;
-   no mutatable file in the diff at all, or the engine produced no report → `mutation_gate: not-run` —
-   never a fabricated fail either way.
+   `evaluateC35`'s scheduled per-spec check). Dirs declared but no mutatable file in the diff, or no
+   valid in-diff mutants → `mutation_gate: not-applicable`; no `mutatable_dirs` declared at all, or the
+   engine produced no report → `mutation_gate: not-run` (the script returns that before any engine
+   call) — never a fabricated fail either way. A malformed declaration (a glob, a scalar, a
+   parent-relative path) makes the script exit with an error rather than silently disable the gate.
 
 ## Engine coverage (TS/JS today, mutmut deferred)
 
-`@stryker-mutator/core` + `@stryker-mutator/vitest-runner` are installed as devDependencies in both
-`platform/app/backend/` (issue #2343) and `platform/app/frontend/` (issue #2375) — both dirs are wired
-into `MUTATABLE_DIRS` and each has its own `vitest.config.ts` the script's dynamically-generated Stryker
-config points at. The repo's Python files (`scripts/`, `services/*-pod/`) are tooling, not
-mutation-testable app logic, so a mutmut leg is deferred until a repo maps Python `sourcePaths` with real
-logic to mutate (mirrors `mutation-collector.yml`'s existing no-op-detection posture for the scheduled
-C35 run) — tracked as a remaining deferral from #2375.
+A repo opts in by declaring `mutatable_dirs` in `.sge/test-map.yml`: each dir needs
+`@stryker-mutator/core` + `@stryker-mutator/vitest-runner` as devDependencies and its own
+`vitest.config.ts`, which the script's generated Stryker config points at. With no declaration the
+fallback list is empty and the gate reports `mutation_gate: not-run`. That is this repo's state: the
+two hosted-app dirs it used to declare (issues #2343/#2375) were deleted with the platform in #2899,
+and no remaining package is wired for Stryker (#2916). A mutmut leg for Python stays deferred until a
+repo maps Python `sourcePaths` with real logic to mutate (mirrors the scheduled C35 run's no-op
+detection posture) — tracked as a remaining deferral from #2375.
 
 ## Finding shape and severity
 
@@ -121,7 +122,7 @@ the exit code. Restore, and confirm green.
 
 ### Why manual mutation catches what reading does not
 
-`trust-fabric#328` added a `PermissionInsufficientError` naming the missing Graph permission, with
+A product repo's #328 added a `PermissionInsufficientError` naming the missing Graph permission, with
 two tests that looked like coverage. Gutting the production message to `"something went wrong"`
 left **330/330 green**. The assertions watched channels the consumer never sees: one asserted
 `missingPermission`, a field `classifyError` structurally discards before publication; the other
@@ -154,9 +155,9 @@ Only once the mutation is confirmed present is a green run evidence about the te
 Two occurrences this caught in the wild, both in mutation runs that *appeared* all-green on first
 pass:
 
-- **`suitability-engine#55`** — a path-only cache key mutation appeared all-green; the mutation was
+- **A product repo's #55** — a path-only cache key mutation appeared all-green; the mutation was
   actually a silent no-op (the anchor never matched), and once correctly applied, 4 tests failed.
-- **`file-checker#95`** — a merge-without-dedup mutation appeared to survive; once correctly
+- **A product repo's #95** — a merge-without-dedup mutation appeared to survive; once correctly
   applied, 2 tests failed.
 
 Neither suite was weak. Both sabotage runs were not testing what they claimed to be testing.
@@ -173,4 +174,4 @@ Neither suite was weak. Both sabotage runs were not testing what they claimed to
 A surviving mutant found manually carries the same finding shape and `major`/`test-fidelity`
 severity as the automated path above.
 
-Full design: [`SPEC-120`](../../../docs/specs/SPEC-120-pr-review-mutation-gate.md).
+Full design: `SPEC-120` (SGE source repo: `docs/specs/SPEC-120-pr-review-mutation-gate.md`).

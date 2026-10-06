@@ -1,8 +1,9 @@
 # sge-implement — SkillRunRecord emission (reference)
 
 The exact jq command for the mandatory `SkillRunRecord` emitted on every exit
-path (schema in `platform/packages/token-governance`, #727). Field contract and
-the "when" stay in `SKILL.md` (Phase 8.3 success exit; Phase 0.5 headless
+path (#727). This file is the canonical field contract now that the hosted
+platform's token-governance package, which first defined the schema, was deleted
+in #2899. The "when" stays in `SKILL.md` (Phase 8.3 success exit; Phase 0.5 headless
 governance-pause exit); this file carries the command template.
 
 Sink: `memory/skill-runs.jsonl` (a sibling sidecar to `memory/token-usage.jsonl`).

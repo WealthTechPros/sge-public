@@ -56,9 +56,38 @@ BlockedBy: #${ENABLER} ..."
 
 > **Orchestration note:** implement the children sequentially, enabler first — each story in its own worktree, each running `/sge:tdd-workflow` for its acceptance criteria.
 
-**Gate the fan-out on `/sge:build-ready-audit` before dispatching children.** Splitting into children is a fan-out, and a fan-out must not hand under-specified work to an implementation agent. Before starting the sequence, run `/sge:build-ready-audit <enabler#>,<story#>,…` over the child issues you just created (its #872 Step-2G fold also returns each child's governance verdict in the same pass, so this front-loads classification too — pass each child's `results[].governance` down as `SGE_GOVTRACE_VERDICT` when you dispatch it, and its Phase 0.5 will reuse it instead of re-forking governance-trace):
+**Gate the fan-out on `/sge:build-ready-audit` before dispatching children.** Splitting into children is a fan-out, and a fan-out must not hand under-specified work to an implementation agent. Before starting the sequence, run `/sge:build-ready-audit <enabler#>,<story#>,…` over the child issues you just created. **Each child needs its own intake record (SPEC-126, #2793)** — a child is a new issue, and `intake-check.sh` judges only a marker on that issue, so nothing is inherited from the parent. While the human is still here, run `/sge:issue-intake <enabler#>,<story#>,…` (the only path that writes the intake record and the dispatch label); its governance verdict then rides in each child's record and Phase 0.5 adopts it. Never pass a verdict down as `SGE_GOVTRACE_VERDICT` — it is never adopted:
 
-- **`READY` (with a non-blocking governance verdict)** → implement it in sequence as normal.
+- **`READY` with a passing `intake-check.sh`** → implement it in sequence as normal. READY without one → stop and run `/sge:issue-intake` for it.
 - **`NOT_READY` / `TOO_LARGE`** → **skip and report it** — do not dispatch it blindly. A `NOT_READY` child is missing acceptance criteria / has an open question / has an unmet dependency; sharpen it (or resolve the blocker) first. A `TOO_LARGE` child was under-decomposed; route it back through `/sge:decompose-issue`. Record which children were skipped and why in the parent comment below, so the gap is visible rather than silently swallowed.
 
 After creating child issues: comment on the parent with the full sequence **and the build-ready verdict per child** (which are ready to start vs which were skipped and why), then ask "Start with the enabler?"
+
+## Complexity rubric (moved from SKILL.md)
+
+Moved verbatim from `SKILL.md` (issue #2917, 24 KB size budget).
+
+**No-spec lane:** score your 0B implementation plan with the same rubric:
+
+| Signal | Count | Weight |
+|--------|-------|--------|
+| DB tables / data models to create | N | ×3 |
+| Service / module methods | N | ×1 |
+| API routes / endpoints | N | ×2 |
+| Acceptance criteria (Gherkin scenarios) | N | ×1 |
+
+**Complexity score** = (models×3) + (methods×1) + (routes×2) + (scenarios×1)
+
+Non-backend work: map the signals analogously (stores/schemas ≈ models, components ≈ methods, screens/routes ≈ routes).
+
+- **≤ 15**: Small — implement directly in one session.
+- **16–30**: Medium — implement directly, commit incrementally per vertical slice.
+- **> 30**: Large — **split into child issues before implementing.**
+
+## SKILL.md summary (moved from SKILL.md)
+
+Moved verbatim from `SKILL.md` (issue #2917, 24 KB size budget).
+
+A Large issue splits into an enabler plus independently-mergeable story issues (strict TDD), implemented sequentially in worktrees via `/sge:decompose-issue`; the Phase 0.5 size pre-score (#1265) can route here before any fork.
+
+Full taxonomy, child-creation templates, build-ready gating, and per-child intake (never inherited): [`child-splitting.md`](child-splitting.md).

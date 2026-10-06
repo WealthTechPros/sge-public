@@ -20,7 +20,7 @@
 #     human act, never applied by /sge:pr-review or any automation), OR
 #   - a PR-body/commit trailer:
 #       Regulated-Sign-Off: @handle; <what was verified, min 10 chars>
-#     e.g. "Regulated-Sign-Off: @rob-duncan; verified cohort footing against
+#     e.g. "Regulated-Sign-Off: @jane-doe; verified cohort footing against
 #     the reconciliation report". The free-text records WHAT was checked, so the
 #     sign-off is auditable evidence, not a rubber stamp.
 #

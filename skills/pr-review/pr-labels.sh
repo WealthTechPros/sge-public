@@ -117,7 +117,7 @@
 #                                             (younger than SGE_FIX_CLAIM_TTL_MIN,
 #                                             default 30 minutes). Stale claims are
 #                                             taken over; --force-claim overrides.
-#   pr-labels.sh claim-status <pr>            shared claim protocol (wtp-org#992 item 5):
+#   pr-labels.sh claim-status <pr>            shared claim protocol:
 #                                             print "free", "mine lane=.. owner=.." or
 #                                             "held lane=.. owner=.. age=..s"; exit 0 when
 #                                             free or held by $SGE_AGENT_ID, 3 when another
@@ -142,7 +142,7 @@
 #                                             agent-reviewed) whose latest
 #                                             sge-verdict's commit does not cover
 #                                             <new-head> (issue #1941; head-scoped
-#                                             per wtp-org#992 -- the rule lives in
+#                                             per the shared claim protocol -- the rule lives in
 #                                             gate-labels.sh). Called on
 #                                             pull_request:synchronize. Posts one
 #                                             comment naming the superseded SHA.
@@ -188,7 +188,7 @@
 #                                             Also lists the intervening commits by
 #                                             SHA + message.
 #   pr-labels.sh shadow-pass <pr>              PR Warden shadow-mode terminal path (issue
-#                                             #2651, wtp-org ADR-0021): the review+fix work
+#                                             #2651): the review+fix work
 #                                             completed normally (start-review claimed as
 #                                             usual), but the dispatch must never be the
 #                                             reason a PR merges — sge-auto-merge.yml
@@ -302,14 +302,14 @@ set -euo pipefail
 REVIEWING="pr-reviewing"
 REVIEWED="pr-reviewed"
 FIXING="pr-fixing"
-# Shared claim protocol's generic lane (wtp-org#992 item 5): an orchestrator
+# Shared claim protocol's generic lane: an orchestrator
 # reserving a PR for a subagent doing arbitrary work (claim-work / release-work,
 # front end scripts/pr-claim.sh). The review daemon honours a live one.
 WORKING="agent-working"
 HOLD="hold"
 CHANGES_REQUESTED="changes-requested"
 EXCLUDED_REVIEWER="excluded-reviewer"
-# PR Warden shadow mode's terminal label (issue #2651, wtp-org ADR-0021): "an
+# PR Warden shadow mode's terminal label (issue #2651): "an
 # autonomous agent reviewed this, unreviewed by a human yet". Carries no
 # automation of its own — nothing in this repo triggers on it — so it never
 # needs special-casing anywhere `pr-reviewed`'s own automation lives.
@@ -388,13 +388,49 @@ _claim_repo_full() {
   printf '%s' "${GH_REPO:-$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || true)}"
 }
 
+# Agent author App login (SPEC-130 §2.2, #2919): env SGE_AGENT_BOT_LOGIN wins,
+# else "agentBotLogin" in .claude/sge.json as committed on the base
+# repository's default branch, fetched at read time (#2957), else none. The
+# base repository is the one whose PR comments the claim readers read
+# (_claim_repo_full: GH_REPO, else gh's resolved repo), so trust and claims
+# come from the same repo. Read through the API, never from a local ref: the
+# clone's origin may be a fork, and origin/main is only as fresh as the last
+# fetch, so a revoked login would stay trusted. Never the working tree (#2947
+# M3): a PR under review could otherwise set it to its author's login. Any
+# error (no repo, API failure, 404, not a JSON object, not a string) leaves it empty,
+# so no extra App is trusted. Resolved lazily by the claim readers, once per
+# shell, and exported so CLAIM_TRUST_JQ's env read works inside gh --jq too.
+_sge_gh_timed() { # gh with a bound, where timeout(1) exists
+  if command -v timeout >/dev/null 2>&1; then timeout 30 gh "$@"; else gh "$@"; fi
+}
+_sge_default_branch_cfg() { # -> the base repo's default-branch .claude/sge.json, or nothing
+  local repo def ref cfg
+  repo="$(_claim_repo_full)"
+  [[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || return 0
+  def="$(_sge_gh_timed api "repos/$repo" --jq '.default_branch // empty' 2>/dev/null)" || return 0
+  [ -n "$def" ] || return 0
+  ref="$(jq -rn --arg b "$def" '$b | @uri' 2>/dev/null)" || return 0
+  [ -n "$ref" ] || return 0
+  cfg="$(_sge_gh_timed api -H 'Accept: application/vnd.github.raw+json' \
+           "repos/$repo/contents/.claude/sge.json?ref=$ref" 2>/dev/null)" || return 0
+  printf '%s' "$cfg"
+}
+_sge_ensure_agent_bot_login() {
+  [ -n "${SGE_AGENT_BOT_LOGIN+x}" ] && return 0
+  SGE_AGENT_BOT_LOGIN="$(_sge_default_branch_cfg \
+    | jq -r 'if type == "object" then (.agentBotLogin // empty | strings) else empty end' 2>/dev/null || true)"
+  export SGE_AGENT_BOT_LOGIN
+}
+
 # CLAIM_TRUST_JQ: the ONE trusted-claimant predicate (jq, over an issue-comment
 # object; reads env.SGE_CLAIM_TRUSTED_LOGINS so it works in gh --jq too). The SGE bots, any
 # login in SGE_CLAIM_TRUSTED_LOGINS (e.g. another App's `<slug>[bot]`, which
 # carries no repo association), or a repo OWNER/MEMBER/COLLABORATOR -- the
-# daemon's _claim_honoured rule (#2246). `wtp-agent[bot]` is the default agent
-# author App (repo association NONE, like every App), so its claims are trusted
-# by default (sge#2770 review), as is a non-default review App named by
+# daemon's _claim_honoured rule (#2246). The agent author App named by
+# SGE_AGENT_BOT_LOGIN (else the base repo default branch's `.claude/sge.json` "agentBotLogin", #2957;
+# it must also be a Bot account, #2947 M3; no default, so a
+# neutral install trusts no extra App) has repo association NONE, like every
+# App, so its claims are trusted explicitly (sge#2770 review), as is a non-default review App named by
 # SGE_REVIEW_BOT_LOGIN, whose claims would otherwise read as absent and let a
 # second review take over a heartbeat-live one. Every claim READER applies it
 # (sge-public#71 review M1): on a public repo any signed-in user can post a
@@ -406,7 +442,8 @@ _claim_repo_full() {
 # it cannot come from an untrusted poster, and dropping it would hide claims.
 CLAIM_TRUST_JQ='((has("user") | not) and (has("author_association") | not))
   or ((.user.login // "") == "wtp-sge[bot]") or ((.user.login // "") == "github-actions[bot]")
-  or ((.user.login // "") == "wtp-agent[bot]")
+  or ((.user.login // "") as $l | $l != "" and $l == (env.SGE_AGENT_BOT_LOGIN // "")
+      and (.user.type // "") == "Bot")
   or ((.user.login // "") as $l | $l != ""
       and $l == ((env.SGE_REVIEW_BOT_LOGIN // "") | if . == "" then "wtp-sge[bot]" else . end))
   or ((.user.login // "") as $l | $l != ""
@@ -423,6 +460,7 @@ CLAIM_LANE_JQ='(((.body // "") | capture("\"lane\"\\s*:\\s*\"(?<l>[a-z]+)\"").l)
 # review claim coexist, and "most recent claim on the PR" is neither of them.
 find_claim_comment() {
   local lane="${1:-}" _rf
+  _sge_ensure_agent_bot_login
   _rf="$(_claim_repo_full)"
   [[ -n "$_rf" ]] || { printf ''; return 0; }
   # Filter inside gh's --jq (per page; env.* because --jq takes no --arg):
@@ -478,6 +516,7 @@ _iso_to_epoch() {
 heartbeat_in_window() {
   local claim_owner="${1:-}" claimed_epoch="${2:-0}"
   local _rf now_epoch
+  _sge_ensure_agent_bot_login
   _rf="$(_claim_repo_full)"
   [[ -n "$_rf" ]] || return 1
   now_epoch=$(date -u +%s)
@@ -590,8 +629,8 @@ $(gh api "repos/$_rf/issues/$PR/comments" --paginate \
 # label. Owner is SGE_AGENT_ID if set, else the system hostname. Best-effort —
 # a failure is logged but does not abort the claim (the label is the real mutex).
 post_claim_comment() {
-  # Optional $1 = lane (review | fix | work) for the shared claim protocol
-  # (wtp-org#992 item 5); absent keeps the historical review-claim shape.
+  # Optional $1 = lane (review | fix | work) for the shared claim protocol;
+  # absent keeps the historical review-claim shape.
   local lane="${1:-}" owner claimed_at body _rf meta
   owner="${SGE_AGENT_ID:-$(hostname 2>/dev/null || echo "unknown")}"
   claimed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -683,8 +722,8 @@ _label_age_seconds() {
   [[ -n "$epoch" ]] && printf '%s' $(( $(date -u +%s) - epoch ))
 }
 
-# claim_status_line [lane]: the shared claim protocol's one reader (wtp-org#992
-# item 5). Prints "free", "mine lane=<l> owner=<o> age=<s>s" or "held lane=<l>
+# claim_status_line [lane]: the shared claim protocol's one reader.
+# Prints "free", "mine lane=<l> owner=<o> age=<s>s" or "held lane=<l>
 # owner=<o> age=<s>s"; returns 3 only for a live claim held by someone other
 # than $SGE_AGENT_ID. Each lane is read from ITS OWN latest trusted claim
 # comment (sge-public#71 review M4), so a subagent's review claim never masks
@@ -851,7 +890,7 @@ fix_claim_status() {
 # _post_label_attribution: best-effort one-line comment naming which agent
 # session made a label change, since every gh call in this script runs under
 # the operator's own token — the PR timeline alone cannot answer "which agent
-# did this?" (wtp-org#774). Owner is SGE_AGENT_ID if set, else the system
+# did this?". Owner is SGE_AGENT_ID if set, else the system
 # hostname — same fallback post_claim_comment already uses. Failure is logged
 # but never blocks the label action itself.
 _post_label_attribution() {
@@ -1297,16 +1336,34 @@ assert_followups_preserved() {
   # from the prefix BEFORE it is split into words, so contracted negations
   # ("isn't"/"doesn't"/"can't") collapse to their bare forms and match.
   negations="${SGE_FOLLOWUP_NEGATIONS:-no|not|never|isnt|arent|wasnt|werent|doesnt|dont|didnt|hasnt|havent|wont|wouldnt|cannot|cant|without}"
+  # Follow-up cap (issue #2829): a MINOR finding the reviewer recorded in the
+  # review comment, or declined with a reason, already has a durable home (the
+  # review itself) and needs no tracking issue. A marker line that names a
+  # minor AND carries one of these dispositions passes without an issue ref. A
+  # line that also names a major/blocker never qualifies — majors are fixed in
+  # the PR or get an issue, so the cap cannot launder one through "declined".
+  local minor_disp
+  minor_disp="${SGE_FOLLOWUP_MINOR_DISPOSITIONS:-recorded[ -]in[ -]review|declined}"
 
   local report
   report=$(printf '%s\n%s\n' "$body" "$extra" | awk \
-      -v markers="$markers" -v issueref="$issueref" -v look="$look" -v negations="$negations" '
+      -v markers="$markers" -v issueref="$issueref" -v look="$look" -v negations="$negations"       -v minordisp="$minor_disp" '
     { sub(/\r$/, ""); line[NR] = $0 }
     END {
-      n = NR; bad = 0
+      n = NR; bad = 0; infence = 0
       negre = "^(" negations ")$"
+      # Issue #2935: only an explicitly DECLARED follow-up counts. A marker
+      # inside a code span / fenced block, or fused into a file name or
+      # identifier (follow-up-cap.md, follow-up-cap-and-merge-lanes.test.sh),
+      # is a name, not a declaration; a marker introduced by a rationale cue
+      # ("Why a separate PR:") explains this PR, it defers nothing.
+      whyre = "^(why|whether)$"
+      idc = "abcdefghijklmnopqrstuvwxyz0123456789_/.-"
       for (i = 1; i <= n; i++) {
+        if (line[i] ~ /^[ \t]*(```|~~~)/) { infence = !infence; continue }
+        if (infence) continue
         lo = tolower(line[i])
+        gsub(/`[^`]*`/, " ", lo)
         # Walk EVERY marker occurrence on the line (not just the first): a
         # line may both rule out one follow-up AND declare another, so the
         # negation decision is scoped to each occurrence, never the whole
@@ -1326,12 +1383,25 @@ assert_followups_preserved() {
           lo3 = nw - 2; if (lo3 < 1) lo3 = 1
           negated = 0
           for (k = lo3; k <= nw; k++) {
-            if (w[k] ~ negre) { negated = 1; break }
+            if (w[k] ~ negre || w[k] ~ whyre) { negated = 1; break }
           }
+          # #2935: a marker fused into a file name / identifier is not a
+          # declaration. The pr markers consume their trailing boundary char,
+          # so measure the word itself; a plural "s" stays part of the word.
+          wl = mlen; if (substr(lo, occ_start + wl - 1, 1) !~ /[a-z]/) wl--
+          bc = (occ_start > 1) ? substr(lo, occ_start - 1, 1) : ""
+          ap = occ_start + wl; ac = substr(lo, ap, 1)
+          if (ac == "s") { ap++; ac = substr(lo, ap, 1) }
+          if (ac == ".") ac = substr(lo, ap + 1, 1)
+          if ((bc != "" && index(idc, bc)) || (ac != "" && index(idc, ac))) negated = 1
           if (!negated) { active = 1; break }   # a real, non-negated marker
           adv = RSTART + mlen; if (adv < 1) adv = 1
           base = base + adv - 1
           s = substr(s, adv)
+        }
+        # #2829: a minor marked recorded-in-review / declined is dispositioned.
+        if (active && lo ~ /(^|[^a-z])minor([^a-z]|$)/ && lo ~ minordisp             && lo !~ /(^|[^a-z])(major|blocker)s?([^a-z]|$)/) {
+          active = 0
         }
         if (active) {
           found = 0
@@ -1356,14 +1426,14 @@ assert_followups_preserved() {
     echo "refusing: PR #$PR declares $bad follow-up item(s) with no issue reference — will NOT open the $REVIEWED gate or arm auto-merge (issue #859):" >&2
     printf '%s\n' "$report" | awk -F'\t' '$1=="UNPRESERVED"{print "  - " $2}' >&2
     echo "A declared follow-up with no issue number evaporates when the linked issue auto-closes on merge (this happened on PR #844 → salvaged as #847)." >&2
-    echo "File a tracking issue for each follow-up first, put its #number beside the follow-up in the PR body (or review text), then re-run pass. Bypass: --skip-followup-check." >&2
+    echo "File a tracking issue for each follow-up first, put its #number beside the follow-up in the PR body (or review text), then re-run pass. A MINOR may instead be marked recorded-in-review or declined on its line (issue #2829). Bypass: --skip-followup-check." >&2
     return 1
   fi
   return 0
 }
 
 # ── Dedicated auto-merge bot detection (issue #2079) ──────────────────────
-# Several WTP repos run their own dedicated "SGD/SGE Auto-Approve & Merge"
+# Several repos run their own dedicated "SGD/SGE Auto-Approve & Merge"
 # GitHub Actions workflow (pull_request_target, triggered on the pr-reviewed
 # label) that mints a proper GitHub App token and does its own full
 # approve+merge sequence, attributing the merge to a bot identity. When such
@@ -1371,9 +1441,9 @@ assert_followups_preserved() {
 # races it: whichever mechanism actually executes the merge determines the
 # audit-trail attribution, and this script's own --auto arm runs under
 # whatever `gh` session is invoking it — the operator's own account in an
-# interactive session, not a bot. Observed live: adviser-mcp#160 merged as
+# interactive session, not a bot. Observed live: a product repo's #160 merged as
 # the human operator because this script's --auto arm won the race, while
-# adviser-mcp#162 (reviewed moments later, same session) merged cleanly via
+# a product repo's #162 (reviewed moments later, same session) merged cleanly via
 # the bot. Detecting the dedicated workflow and skipping the local arm in
 # that case removes the race at the root; repos without one keep the
 # existing --auto fallback unchanged.
@@ -1387,7 +1457,7 @@ _repo_has_dedicated_automerge_bot() {
   # GH_REPO=owner/repo for gh-only work; every gh call/script honours it")
   # — trusting CWD would answer about the WRONG repo. Both directions are
   # unsafe: a hub session whose own CWD happens to carry the marker
-  # (verified live: both `sge` and `wtp-org` do) would falsely report a bot
+  # (verified live on two repos) would falsely report a bot
   # for a bot-less target repo, permanently skipping the local --auto arm
   # and leaving that PR unmerged by anything; the converse falsely reports
   # no bot and reintroduces the #2079 race for a repo that has one. So when
@@ -1498,6 +1568,15 @@ if [ "$_PRL_HOST" = "forgejo" ]; then
   }
 fi
 
+# Resolve the agent-bot login once in this shell for the claim subcommands, so
+# the readers below (often run in $(...) subshells) inherit it instead of each
+# re-fetching. The readers also resolve it themselves, so a command missing
+# here is only slower, never more trusting (#2957).
+case "$CMD" in
+  start-review|claim-fix|release-fix|heartbeat|status|reconcile-orphaned-claim|claim-status|claim-work|release-work|release-review|pass|fail|stale|shadow-pass|sync-check)
+    _sge_ensure_agent_bot_login ;;
+esac
+
 case "$CMD" in
   start-review)
     # Concurrency guard (issue #699 + #1312): pr-reviewing is the claim label.
@@ -1536,7 +1615,7 @@ case "$CMD" in
         _WORK_OWNER=$(parse_claim_metadata "$_WORK_JSON" | jq -r '.owner // "unknown"' 2>/dev/null) || _WORK_OWNER="unknown"
         if [[ "$_WORK_OWNER" != "${SGE_AGENT_ID:-$(hostname 2>/dev/null || echo unknown)}" \
               && "$_WORK_OWNER" != "${SGE_REVIEW_CLAIM_HANDOFF_OWNER:-}" ]]; then
-          echo "refusing: PR #$PR has a live work claim (owner=${_WORK_OWNER}) — another agent is working it (wtp-org#992)" >&2
+          echo "refusing: PR #$PR has a live work claim (owner=${_WORK_OWNER}) — another agent is working it" >&2
           exit 3
         fi
       fi
@@ -1585,7 +1664,7 @@ case "$CMD" in
             fi
           fi
         fi
-        # Daemon claim handoff (wtp-org#982, completing #1249). The review-daemon
+        # Daemon claim handoff (completing #1249). The review-daemon
         # pre-claims the gate for the exact PR it dispatches, then hands that
         # claim to the reviewer it spawns. #1249 did the handoff in PROMPT TEXT
         # ("--force-claim authorized"), which a careful reviewer rightly treats
@@ -1600,7 +1679,7 @@ case "$CMD" in
           _HANDOFF_OWNER=$(parse_claim_metadata "$_CLAIM_JSON" \
             | jq -r '.owner // empty' 2>/dev/null) || _HANDOFF_OWNER=""
           if [[ -n "$_HANDOFF_OWNER" && "$_HANDOFF_OWNER" == "$SGE_REVIEW_CLAIM_HANDOFF_OWNER" ]]; then
-            echo "PR #$PR: live claim is the dispatching review-daemon's own pre-claim (owner=${_HANDOFF_OWNER} == SGE_REVIEW_CLAIM_HANDOFF_OWNER) - taking it over as the handoff (wtp-org#982, issue #1249)" >&2
+            echo "PR #$PR: live claim is the dispatching review-daemon's own pre-claim (owner=${_HANDOFF_OWNER} == SGE_REVIEW_CLAIM_HANDOFF_OWNER) - taking it over as the handoff (issue #1249)" >&2
             _CLAIM_LIVE=false
           fi
         fi
@@ -2325,7 +2404,7 @@ case "$CMD" in
     ;;
 
   shadow-pass)
-    # PR Warden shadow-mode terminal path (issue #2651, wtp-org ADR-0021): the
+    # PR Warden shadow-mode terminal path (issue #2651): the
     # review+fix work completed exactly as a normal dispatch, but this dispatch
     # must never be the reason a PR merges. sge-auto-merge.yml triggers on
     # `labeled: pr-reviewed`, and `pass` (above) is the ONLY place that label
@@ -2507,7 +2586,7 @@ case "$CMD" in
     ;;
 
   sync-check)
-    # Issue #1941, widened by wtp-org#992 item 4 (head-scoped gate labels): on
+    # Issue #1941, widened to head-scoped gate labels: on
     # pull_request:synchronize, strip EVERY verdict gate label (pr-reviewed,
     # changes-requested, agent-reviewed -- `gate-labels.sh list`) whose latest
     # trusted sge-verdict judged a different commit than the new head. The
@@ -2539,7 +2618,7 @@ case "$CMD" in
       exit 0
     fi
 
-    # 2) The latest trusted sge-verdict's commit (reviews, then issue comments).
+    # 2) The newest trusted sge-verdict's commit, across reviews AND issue comments (sge#2729).
     REPO_FULL="$(gl_repo)" || REPO_FULL=""
     if ! VERDICT_SHA="$(gl_latest_verdict_sha "$PR")"; then
       echo "PR #$PR: sync-check — verdicts unreadable; labels retained (readers treat unproven labels as absent)" >&2
@@ -2573,7 +2652,7 @@ case "$CMD" in
     # through pass/fail, so their claim-comment cleanup never runs (issue #2193
     # follow-up): clean up any orphaned claim comment. Best-effort.
     delete_claim_comment review
-    echo "PR #$PR: ${STRIPPED[*]} stripped — verdict was pinned to ${VERDICT_SHA:0:12}, new head is ${NEW_HEAD:0:12} (issue #1941, wtp-org#992)"
+    echo "PR #$PR: ${STRIPPED[*]} stripped — verdict was pinned to ${VERDICT_SHA:0:12}, new head is ${NEW_HEAD:0:12}"
 
     # One best-effort comment so the author sees WHY the gate reopened.
     COMMENT_BODY="$(printf '**%s stripped** (head-scoped gate labels; issue #1941)\n\nThe latest `sge-verdict` was pinned to `%s`; the new head after push is `%s`. A verdict label cannot describe a superseded commit.\n\nA re-review at the new head re-applies the right label.' \
@@ -2751,14 +2830,14 @@ case "$CMD" in
       esac
     done
     if [[ "$FORCE_CLAIM" != "true" ]]; then
-      # Shared claim protocol (wtp-org#992 item 5): a live review/work claim by
+      # Shared claim protocol: a live review/work claim by
       # another owner blocks a fix too; the pr-fixing lane itself is aged below.
       set +e
       _XL=$(claim_status_line 2>/dev/null)
       _XRC=$?
       set -e
       if [[ "$_XRC" -eq 3 && "$_XL" != "held lane=fix "* ]]; then
-        echo "refusing: PR #$PR has a live claim ($_XL) — another agent is working it (wtp-org#992)" >&2
+        echo "refusing: PR #$PR has a live claim ($_XL) — another agent is working it" >&2
         exit 3
       fi
       CUR_STATUS=$(fix_claim_status 2>/dev/null) || CUR_STATUS=""
@@ -2951,7 +3030,7 @@ case "$CMD" in
     ;;
 
   claim-status)
-    # Shared claim protocol reader (wtp-org#992 item 5). Exit 0 = free (or the
+    # Shared claim protocol reader. Exit 0 = free (or the
     # caller's own claim), 3 = another owner holds a live claim, 1 = unreadable.
     set +e
     claim_status_line
@@ -2961,7 +3040,7 @@ case "$CMD" in
     ;;
 
   claim-work)
-    # Reserve a PR for arbitrary agent work (wtp-org#992 item 5). Refuses on ANY
+    # Reserve a PR for arbitrary agent work. Refuses on ANY
     # live claim held by another owner -- review, fix or work -- so an
     # orchestrator's subagent and the review daemon never work the same PR.
     set +e
@@ -2969,7 +3048,7 @@ case "$CMD" in
     _RC=$?
     set -e
     if [[ "$_RC" -eq 3 ]]; then
-      echo "refusing: PR #$PR has a live claim ($_ST) — another agent is working it (wtp-org#992)" >&2
+      echo "refusing: PR #$PR has a live claim ($_ST) — another agent is working it" >&2
       exit 3
     fi
     [[ "$_RC" -eq 0 ]] || { echo "error: could not determine claim state for PR #$PR" >&2; exit 1; }
@@ -3023,6 +3102,7 @@ case "$CMD" in
       echo "PR #$PR: work claimed (owner=$_ME, already held)"
       exit 0
     fi
+    _sge_ensure_agent_bot_login
     _RF="$(_claim_repo_full)"
     _CLAIMS=""
     [[ -n "$_RF" ]] && _CLAIMS=$(gh api "repos/$_RF/issues/$PR/comments" --paginate 2>/dev/null \
@@ -3050,7 +3130,7 @@ case "$CMD" in
           || gh api --method DELETE "repos/$_RF/issues/comments/$LAST_CLAIM_COMMENT_ID" >/dev/null 2>&1 \
           || echo "warning: PR #$PR could not withdraw claim comment $LAST_CLAIM_COMMENT_ID" >&2
       fi
-      echo "refusing: PR #$PR was claimed concurrently by $_WINNER (an older live claim) — backing off (wtp-org#992)" >&2
+      echo "refusing: PR #$PR was claimed concurrently by $_WINNER (an older live claim) — backing off" >&2
       exit 3
     fi
     _claim_work_label

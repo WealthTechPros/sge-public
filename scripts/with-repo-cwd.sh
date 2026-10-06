@@ -4,7 +4,7 @@
 # SPEC-057 (issue #817): several skills/scripts resolve `gh`/`git` against the
 # AMBIENT working directory. That is correct when the session is already
 # checked out in the target repo, but silently acts on the WRONG repo when a
-# hub/control checkout (e.g. wtp-org) dispatches work into other repos — no
+# hub/control checkout (e.g. an org hub repo) dispatches work into other repos — no
 # error, just wrong data.
 #
 # This helper is the single place a skill resolves its repo context, once, at
@@ -23,7 +23,8 @@
 #       checkout's owner/name slug.
 #   scripts/with-repo-cwd.sh host [<target-or-checkout>]
 #       Classify the git host of a repo's `origin` remote and print a stable
-#       host-kind token on stdout: `github` | `forgejo` | `unknown`.
+#       host-kind token on stdout: `github` | `forgejo` | `azdo` | `unknown`.
+#       (`azdo` = Azure DevOps / Azure Repos, matched by exact host, #2946.)
 #       (`forgejo` covers the Gitea-compatible family — Forgejo and Gitea share
 #       one REST surface, so callers route them through the same adapter; the
 #       token is `forgejo` because Forgejo is the repo we actually target.)
@@ -37,8 +38,9 @@
 #       checkout still fails loud if no checkout matches, exactly as before.
 #   scripts/with-repo-cwd.sh alm
 #       Resolve the declared issue-tracking (ALM) backend for this environment
-#       and print a stable token on stdout: `github` | `jira` (SPEC-105).
-#       Resolution: SGD_ALM_BACKEND env var; unset/empty means `github` — the
+#       and print a stable token on stdout: `github` | `jira` | `azdo`
+#       (SPEC-105/SPEC-110).
+#       Resolution: SGE_ALM_BACKEND env var; unset/empty means `github` — the
 #       status quo, so every existing repo is untouched until it declares a
 #       non-GitHub tracker. An UNRECOGNISED value FAILS LOUD naming the value
 #       (SPEC-105 DR1): a silent GitHub fallback would dispatch against the
@@ -87,8 +89,8 @@
 #                                            # or return non-zero after a loud error
 #
 # <target> forms:
-#   name              e.g. sgd
-#   owner/name        e.g. WealthTechPros/sgd   (owner is then verified too)
+#   name              e.g. sge
+#   owner/name        e.g. WealthTechPros/sge   (owner is then verified too)
 #   GitHub URL        e.g. https://github.com/owner/name/issues/123
 #                     (an issue/PR's repository URL works as-is)
 #
@@ -96,7 +98,7 @@
 #   0. If the CURRENT checkout's `origin` already matches the target, use it.
 #      This keeps in-repo sessions working and covers git worktrees whose
 #      directory names don't match the repo name (e.g. issue-NNN worktrees).
-#   1. <root>/<name> for each root in SGD_CHECKOUT_ROOTS (';'-separated —
+#   1. <root>/<name> for each root in SGE_CHECKOUT_ROOTS (';'-separated —
 #      ';' not ':' so Windows drive-letter paths survive).
 #   2. <root>/<name> where <root> is the parent directory of the current
 #      checkout (the sibling-clone layout hub/control sessions use).
@@ -160,6 +162,17 @@ _wrc_url_host() {
       h="${url#*@}"            # host:owner/name
       h="${h%%:*}"             # host
       ;;
+    *@*:*)                     # scp-like with a non-git user, e.g. Azure Repos'
+      h="${url%%@*}"           # <org>@vs-ssh.visualstudio.com:v3/... (#2946)
+      case "$h" in
+        ''|*[!A-Za-z0-9._-]*) h="" ;;   # the user part must be a bare login
+        *)
+          h="${url#*@}"        # host:path
+          h="${h%%:*}"         # host
+          case "$h" in */*) h="" ;; esac
+          ;;
+      esac
+      ;;
     *) h="" ;;
   esac
   printf '%s' "$h"
@@ -171,29 +184,38 @@ _wrc_url_host() {
 #             Forgejo and Gitea share one API surface; the token is `forgejo`
 #             because Forgejo is the host the enabler targets (ADR-0010).
 #             We recognise it by host substring (forgejo/gitea) OR by the
-#             SGD_FORGEJO_HOSTS allow-list (';'-separated bare hosts) so a
-#             self-hosted instance with a vanity domain (e.g. git.feaw.co.uk)
+#             SGE_FORGEJO_HOSTS allow-list (';'-separated bare hosts) so a
+#             self-hosted instance with a vanity domain (e.g. git.example.com)
 #             classifies correctly without a code change.
+#   azdo    — Azure DevOps / Azure Repos (issue #2946, SPEC-094 §2.1). EXACT
+#             host match only, never a substring: dev.azure.com and
+#             ssh.dev.azure.com, vs-ssh.visualstudio.com, and the legacy
+#             <org>.visualstudio.com form. So dev.azure.com.evil.example and
+#             evilvisualstudio.com stay `unknown` (invariant I1). Routing only,
+#             not trust: azdo-adapter.sh still checks SGE_AZDO_HOSTS before
+#             it attaches a credential (SPEC-110 §2.5).
 #   unknown — a real, nameable answer; NOT a failure. Downstream code branches
 #             on it (and may itself fail loud if it has no adapter for it).
 # GitHub Enterprise Server (self-hosted GHES) is intentionally NOT auto-mapped
 # to `github` here — it needs its own gh/API config; declare it via
-# SGD_GITHUB_HOSTS (';'-separated) if a fleet uses one.
+# SGE_GITHUB_HOSTS (';'-separated) if a fleet uses one.
 _wrc_host_kind() { # <host>
   local host
   host="$(_wrc_lower "$1")"
   [ -n "$host" ] || { printf 'unknown'; return 0; }
   local h
-  if [ -n "${SGD_GITHUB_HOSTS:-}" ]; then
-    local ghs=(); IFS=';' read -r -a ghs <<< "$(_wrc_lower "$SGD_GITHUB_HOSTS")"
+  if [ -n "${SGE_GITHUB_HOSTS:-${SGD_GITHUB_HOSTS:-}}" ]; then
+    local ghs=(); IFS=';' read -r -a ghs <<< "$(_wrc_lower "${SGE_GITHUB_HOSTS:-$SGD_GITHUB_HOSTS}")"
     for h in "${ghs[@]}"; do [ -n "$h" ] && [ "$host" = "$h" ] && { printf 'github'; return 0; }; done
   fi
-  if [ -n "${SGD_FORGEJO_HOSTS:-}" ]; then
-    local fjs=(); IFS=';' read -r -a fjs <<< "$(_wrc_lower "$SGD_FORGEJO_HOSTS")"
+  if [ -n "${SGE_FORGEJO_HOSTS:-${SGD_FORGEJO_HOSTS:-}}" ]; then
+    local fjs=(); IFS=';' read -r -a fjs <<< "$(_wrc_lower "${SGE_FORGEJO_HOSTS:-$SGD_FORGEJO_HOSTS}")"
     for h in "${fjs[@]}"; do [ -n "$h" ] && [ "$host" = "$h" ] && { printf 'forgejo'; return 0; }; done
   fi
   case "$host" in
     github.com|*.github.com) printf 'github' ;;
+    dev.azure.com|ssh.dev.azure.com|vs-ssh.visualstudio.com|*.visualstudio.com)
+                             printf 'azdo' ;;
     *forgejo*|*gitea*)       printf 'forgejo' ;;
     *)                       printf 'unknown' ;;
   esac
@@ -219,16 +241,17 @@ _wrc_host() { # [<target>]
 # _wrc_host: `host` classifies the GIT host from the origin URL; this resolves
 # the ISSUE TRACKER, which a repo declares explicitly (a GitHub-hosted repo may
 # track work in Jira). Unset/empty = `github` (the status quo — the port stays
-# dark until a repo declares a non-GitHub tracker, SPEC-105 §3). An
+# dark until a repo declares a non-GitHub tracker, SPEC-105 §3 / SPEC-110 §6).
 # unrecognised value FAILS LOUD naming it (DR1): a silent GitHub fallback would
 # dispatch against the wrong tracker.
 _wrc_alm_backend() {
-  local backend="${SGD_ALM_BACKEND:-}"
+  local backend="${SGE_ALM_BACKEND:-${SGD_ALM_BACKEND:-}}"
   case "$(_wrc_lower "$backend")" in
     ''|github) printf 'github\n' ;;
     jira)      printf 'jira\n' ;;
+    azdo|azuredevops|azure-devops) printf 'azdo\n' ;;
     *)
-      _wrc_err "unrecognised ALM backend '$backend' (SGD_ALM_BACKEND) — known backends: github, jira; refusing to fall back to GitHub (SPEC-105 DR1)"
+      _wrc_err "unrecognised ALM backend '$backend' (SGE_ALM_BACKEND) — known backends: github, jira, azdo; refusing to fall back to GitHub (SPEC-105 DR1)"
       return 1
       ;;
   esac
@@ -314,9 +337,9 @@ _wrc_resolve() {
 
   # Build the ordered root list.
   local roots=() r
-  if [ -n "${SGD_CHECKOUT_ROOTS:-}" ]; then
+  if [ -n "${SGE_CHECKOUT_ROOTS:-${SGD_CHECKOUT_ROOTS:-}}" ]; then
     local _wrc_env_roots=()
-    IFS=';' read -r -a _wrc_env_roots <<< "$SGD_CHECKOUT_ROOTS"
+    IFS=';' read -r -a _wrc_env_roots <<< "${SGE_CHECKOUT_ROOTS:-$SGD_CHECKOUT_ROOTS}"
     for r in "${_wrc_env_roots[@]}"; do
       [ -n "$r" ] && roots+=("$r")
     done
@@ -353,7 +376,7 @@ _wrc_resolve() {
       printf "  rejected (directory exists but its git 'origin' is not %s):\n" "$want"
       for cand in "${mismatches[@]}"; do printf '    - %s\n' "$cand"; done
     fi
-    printf '  Fix: clone %s under one of those roots, or point SGD_CHECKOUT_ROOTS\n' "$want"
+    printf '  Fix: clone %s under one of those roots, or point SGE_CHECKOUT_ROOTS\n' "$want"
     printf "  (';'-separated) at the directory that contains your checkouts.\n"
     printf '  Refusing to fall back to the ambient working directory (SPEC-057 fail-loud convention).\n'
   } >&2
@@ -604,7 +627,7 @@ _wrc_main() {
       _wrc_host "${2:-}"
       ;;
     alm)
-      [ "$#" -le 1 ] || _wrc_usage "alm takes no arguments (backend is declared via SGD_ALM_BACKEND)"
+      [ "$#" -le 1 ] || _wrc_usage "alm takes no arguments (backend is declared via SGE_ALM_BACKEND)"
       _wrc_alm_backend
       ;;
     assert-repo)

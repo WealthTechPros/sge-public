@@ -56,7 +56,7 @@ extend the standard Lean Agent Contract prompt with:
 ### Token and allow-list prerequisites (Forgejo)
 
 The adapter is a no-op (fails loud) when:
-- `FORGEJO_API_TOKEN` (preferred) or `GITEA_TOKEN` is not set — set via Doppler.
+- `FORGEJO_API_TOKEN` (preferred) or `GITEA_TOKEN` is not set — set it via your secrets manager (named by `secretsStore` in `.claude/sge.json`).
 - The target host is not in `SGE_FORGEJO_HOSTS` (`;`-separated bare hosts) or
   `SGE_FORGEJO_DEFAULT_HOST` — add it to the fleet's env config before running.
 

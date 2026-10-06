@@ -33,7 +33,7 @@ proceed to Step 1 (full-fork path). Log nothing — this is the safe fallback.
 
 **Also risk-map-gated (proportional-governance proposal).** A `trivial` result from
 `resolve-context-depth.mjs` alone is not enough to take the inline path — additionally run
-the risk map from `resolve-governance-tier.mjs` (PII, `docs/compliance/**`, trust-fabric
+the risk map from `resolve-governance-tier.mjs` (PII, `docs/compliance/**`, trust-portal
 evidence, regulatory-trace, plus `resolve-context-depth.mjs`'s own CRITICAL_RE) over the same
 `ISSUE_PATHS`:
 

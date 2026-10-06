@@ -2,19 +2,17 @@
   "name": "wtp-plugins",
   "owner": {
     "name": "WealthTech Pros",
-    "email": "rob.duncan@wealthtechpros.com",
     "url": "https://wealthtechpros.com"
   },
   "metadata": {
     "description": "WealthTech Pros — Specification-Governed Engineering (SGE) tooling for regulated financial-services engineering teams.",
-    "version": "4.36.9"  },
+    "version": "4.38.25"  },
   "plugins": [
     {
       "name": "sge",
-      "description": "SGE methodology + shared workflow skills for all WTP repos — spec-governed implementation, PR merge gates, governance drift sweeps, and an FS AI-governance register.",
-      "version": "4.36.9",      "author": {
+      "description": "SGE methodology + shared workflow skills for spec-governed repos — spec-governed implementation, PR merge gates, governance drift sweeps, and an FS AI-governance register.",
+      "version": "4.38.25",      "author": {
         "name": "WealthTech Pros",
-        "email": "rob.duncan@wealthtechpros.com",
         "url": "https://wealthtechpros.com"
       },
       "homepage": "https://wealthtechpros.com",
@@ -34,8 +32,8 @@
     },
     {
       "name": "sgd",
-      "description": "[DEPRECATED - renamed to sge, please run /plugin install sge instead] SGD methodology + shared workflow skills for all WTP repos — spec-governed implementation, PR merge gates, governance drift sweeps, and an FS AI-governance register.",
-      "version": "4.36.9",      "source": "./"
+      "description": "[DEPRECATED - renamed to sge, please run /plugin install sge instead] SGD methodology + shared workflow skills for spec-governed repos — spec-governed implementation, PR merge gates, governance drift sweeps, and an FS AI-governance register.",
+      "version": "4.38.25",      "source": "./"
     }
   ]
 }

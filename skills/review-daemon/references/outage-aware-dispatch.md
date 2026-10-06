@@ -61,7 +61,7 @@ disables the carve-out) *consecutive* hook-terminates for a PR are
 retry-later. From the next one on, the dispatch is a **transient** failure
 (self-healing quarantine, below): jittered exponential backoff, an uncounted
 `sge:dispatch-transient` breadcrumb naming the cap, and **never** quarantine
-(superseding #2652's count-then-quarantine, Rob 2026-09-29). Any other
+(superseding #2652's count-then-quarantine). Any other
 dispatch outcome breaks the streak. The streak counter is in-memory, so a
 daemon restart re-grants at most one cap's worth of retries. Every dispatch
 span carries `sge.dispatch.hook_terminate` (true/false) for fleet-wide
