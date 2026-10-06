@@ -20,7 +20,7 @@
 # never rides a cross-host redirect, and path components validated before URL
 # construction.
 #
-# Configuration (environment; per the Doppler-injected convention — never
+# Configuration (environment; per the secrets-manager-injected convention — never
 # stored in the repo, never logged):
 #   SGE_JIRA_BASE_URL   https://<host> of the Jira instance (Cloud or Server).
 #                       Caller/config-supplied → treated as UNTRUSTED until the

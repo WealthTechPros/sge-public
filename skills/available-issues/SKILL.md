@@ -1,5 +1,5 @@
 ---
-description: Use when you need a conflict-safe set of open GitHub issues that multiple agents or pipelines can work in parallel without colliding — when /sge:team-pipeline asks for a work pool, when the user wants to "find issues safe to parallelise", "what can we work on at once", or "pick the next non-conflicting issue", or to surface what is blocked vs ready. With --fleet, aggregates the same conflict-safe, dependency-annotated worklist across every repo in a fleet (a GitHub org or an explicit repo list) for org-wide dispatch. Read-only discovery and analysis; it does not implement issues.
+description: Use when you need a conflict-safe set of open issues that agents can work in parallel — a /sge:team-pipeline work pool, "what can we work on at once", "pick the next non-conflicting issue", or blocked vs ready. --fleet spans many repos. Read-only; does not implement.
 argument-hint: "[--parallel] [--count N] [--setup] [--mode autonomous-next] [--blocking] [--analyze N] [--module <name>] [--milestone <name>] [--repo <owner/name>] [--fleet <org|r1,r2,...>]"
 ---
 
@@ -35,18 +35,7 @@ This is the discovery half of `/sge:team-pipeline`. The pipeline's Phase 1 prefe
 
 `$ARGUMENTS` parsing:
 
-| Flag | Default | Meaning |
-|------|---------|---------|
-| `--parallel` | off | Return the largest **conflict-free** set instead of a plain ranked list |
-| `--count N` | unbounded (`--parallel`: pool budget) | Cap the returned set size |
-| `--setup` | off | After selecting, claim each issue and create its worktree (see *Setup*) |
-| `--mode autonomous-next` | off | Emit exactly **one** issue — the top-priority ready one — as machine-readable JSON for an autonomous loop |
-| `--blocking` | off | Report only blocked issues and their blockers (the inverse view) |
-| `--analyze N` | off | Deep-analyse a single issue `N` (dependencies, conflict surface) and stop |
-| `--module <name>` | all | Filter to the `module:<name>` GitHub label |
-| `--milestone <name>` | all | Scope to a GitHub milestone |
-| `--repo <target>` | current checkout | Explicit single-repo target (`name`, `owner/name`, or GitHub URL) — resolved via the SPEC-057 helper (see *Pre-flight*). Pass it whenever the session is not already checked out in the target repo (hub/control sessions) |
-| `--fleet <org\|r1,r2,…>` | off | Aggregate the worklist across a **fleet** of repos — a GitHub org (single token, no comma/slash) or an explicit comma-separated repo list. Fleet membership comes from this argument only — never from names baked into the skill. See *Fleet mode* |
+Flag table: [`references/flags.md`](references/flags.md).
 
 ---
 
@@ -72,6 +61,7 @@ Resolve the repo context **explicitly, before the first `gh`/`git` call** — ne
 # cd in one call is gone in the next: re-enter the context every time.
 WRC="${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/with-repo-cwd.sh"
 IR="${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/issue-read.sh"
+LP="${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/linked-prs.sh"
 
 # Target = the --repo value, the current --fleet member, or — when neither
 # flag is given — the current checkout's own origin, made explicit:
@@ -98,13 +88,7 @@ fi
 echo "repo context: $(git remote get-url origin) ($(pwd)) host: ${HOST_KIND}"
 ```
 
-`IR` (`scripts/issue-read.sh`, #1237) is the seam for all issue read operations in this skill: with a normalised JSON output shape so the rest of the skill is backend-agnostic. It resolves **two** independent dimensions — the **ALM (issue-tracker) backend** first (`with-repo-cwd.sh alm` → `github`|`jira`, SPEC-105 S2 #1700: a repo may be GitHub-hosted yet track work in Jira, routing `list`→P1 `list-dispatchable` / `view`→P2 `view-item` / `dependencies`→P7 `item-dependencies` / `dispatch-label`→P9 `dispatch-label-config` through `scripts/jira-adapter.sh`), then the **git host** (`gh` for GitHub, `scripts/forgejo-adapter.sh` for Forgejo/Gitea). `SGE_ALM_BACKEND` unset keeps the GitHub path byte-identical; an unrecognised value fails loud (DR1) — never a silent GitHub fallback. A Jira backend also needs `SGE_JIRA_PROJECT` (the project P1 enumerates) and the jira-adapter's credential/host-allow-list env.
-
-**Self-hosted Forgejo/Gitea:** `HOST_KIND` is classified from the `origin` remote by hostname substring (`*forgejo*`/`*gitea*`) — a self-hosted instance on a vanity domain (e.g. `git.example.com`) does not match either substring and classifies as `unknown` until the operator declares it. Declare it via `SGE_FORGEJO_HOSTS` (`;`-separated bare hosts, no code change needed) before running this skill against such a repo. `unknown` is not silently swallowed: `IR` fails loud naming the host and pointing at `SGE_FORGEJO_HOSTS`/`SGE_FORGEJO_DEFAULT_HOST` (ADR-0010) — if you hit that error, this is the fix.
-
-The helper verifies the checkout's `origin` actually matches the requested repo (a directory with the right name but the wrong origin is rejected) and refuses — with an actionable error — rather than proceeding in the ambient directory. Announce the resolved context once so the caller can catch a wrong-repo invocation immediately. Every `gh`/`git` snippet in the phases below assumes this entry sequence has just run in the same shell call.
-
-Read the repo's `CLAUDE.md` for the **spec/feature artefact globs** (used to tell a spec-only issue's diff surface from a code change — same resolution `/sge:pr-monitor` does for spec-only PRs; do **not** hardcode a glob, fall back to `features/**`, `docs/**` only if `CLAUDE.md` is silent) and the **module-label convention** if one exists.
+`IR` seam, Forgejo/Gitea + `SGE_FORGEJO_HOSTS`, origin check, artefact globs: [`references/repo-context.md`](references/repo-context.md).
 
 This skill is **read-only** unless `--setup` is given. It never edits issue bodies, never comments, never pushes.
 
@@ -120,9 +104,7 @@ Resolve the dispatch-label name via the port — `"$IR" dispatch-label` returns 
 
 #### The `orchestrator-only` exclusion (quality-confirmed ≠ worker-dispatchable)
 
-A `dispatch-label` says an issue's build quality is confirmed. It does **not** say an autonomous worker can safely build it. Some quality-confirmed issues are structurally out of a worker's reach: changes to infrastructure-as-code, CI workflows, branch protection, Pulumi/cloud state, live-host operations, or secrets provisioning — surfaces where an unattended agent must never act, either because the change is a control the swarm depends on or because applying it is a guarded human/orchestrator step.
-
-The **`orchestrator-only`** label encodes exactly that bit. It is orthogonal to the quality label: an issue may carry *both* `sge-ready` and `orchestrator-only` — meaning "ready, but the orchestrator (or a human), not a worker, builds it." Discovery **always** excludes `orchestrator-only` from the worker ready pool, regardless of whether a `dispatch-label` is declared, and surfaces those issues in a separate "orchestrator queue" report so they are visible, not silently dropped.
+`orchestrator-only` marks quality-confirmed work a worker must never pick up (infra, CI, secrets, live hosts): [`references/triage-exclusions.md`](references/triage-exclusions.md).
 
 #### Routing verdict labels (triage exclusions)
 
@@ -186,25 +168,9 @@ else
     )] | sort_by(.number)')
   AWAITING_LABEL="[]"
 fi
-
-# Orchestrator queue — quality-confirmed but worker-excluded work, surfaced so
-# it is visible rather than silently dropped from the ready pool. When a
-# dispatch label is declared, scope to it (ready AND orchestrator-only);
-# otherwise report every orchestrator-only issue. The orchestrator / a human
-# picks these up; a worker never does.
-if [ -n "$DISPATCH_LABEL" ]; then
-  ORCH_QUEUE=$("$IR" list --state open --limit 100 --label "$DISPATCH_LABEL" \
-    | jq '[.[] | select(
-      ([.labels[].name] | index("orchestrator-only")) and
-      ([.labels[].name] | index("agent-lock") | not)
-    ) | {number, title}]')
-else
-  ORCH_QUEUE=$("$IR" list --state open --limit 100 --label orchestrator-only \
-    | jq '[.[] | select(
-      ([.labels[].name] | index("agent-lock") | not)
-    ) | {number, title}]')
-fi
 ```
+
+`ORCH_QUEUE` (quality-confirmed, worker-excluded issues, surfaced not dropped): [`references/triage-exclusions.md`](references/triage-exclusions.md#orchestrator-queue-query).
 
 Apply optional scope filters before ranking:
 
@@ -218,10 +184,11 @@ Then drop anything **in-flight on a branch or PR** — an issue with live work i
 ```bash
 in_flight() {
   local n=$1
-  # open PR that closes the issue, or a branch named for it
-  gh pr list --state open --search "linked:issue $n" --json number -q '.[0].number' 2>/dev/null | grep -q . && return 0
-  gh pr list --state open --search "in:body Part of #$n" --limit 100 --json number,body 2>/dev/null \
-    | jq -e --arg n "$n" 'any(.[]; .body | test("(^|[^[:alnum:]])part[[:space:]]+of[[:space:]]+#" + $n + "([^0-9]|$)"; "i"))' >/dev/null 2>&1 && return 0
+  # open PR that references the issue (body keyword or branch name) -- the one
+  # shared linked-PR helper, $LP (#2915). Exit 2 (gh failed) is unknown:
+  # treat it as claimed, never as free.
+  bash "$LP" "$n" --state open >/dev/null; [ $? -ne 1 ] && return 0
+  # a pushed branch named for it, even with no PR yet
   git ls-remote --heads origin 2>/dev/null | grep -qE "refs/heads/(feat|fix|chore)/(issue-|sge-)0*${n}([^0-9]|$)" && return 0
   return 1
 }
@@ -264,7 +231,7 @@ A blocked candidate moves to the **blocked list** (its blockers recorded), not t
 An issue can be **tracked** in this repo but **executed** in another — its
 worktree, `agent-lock`, and PR belong in the execution repo while status/labels
 stay on the tracking issue (e.g. `sge#798`'s deliverable lived in
-`client-onboarding`). Resolve each candidate's execution repo from the
+`web-app`). Resolve each candidate's execution repo from the
 structured `Repo:` / `execution-repo:` body field — parsed via the shared
 SPEC-057 helper, **not** hand-rolled — passing the current repo as the tracking
 fallback:
@@ -332,20 +299,7 @@ For `--parallel`, the representative chosen from each serial group is its **high
 
 ### Default / `--parallel`
 
-A human-readable report **and** a machine-readable block (so a caller can parse it):
-
-```
-Ready (parallel-safe): #218 #224 #231        (3 of 7 ready issues, conflict-free)
-Serial groups:
-  group-1: #207, #219      (both touch app/auth/** — pick one, run the other after)
-  group-2: #240, #241, #245 (shared migration: orders table)
-Blocked:
-  #233  ← depends on #210 (open)
-Orchestrator queue (sge-ready + orchestrator-only):
-  #252 "governance posture: 1 control drifted"  (infra/branch-protection — not worker-safe)
-Awaiting quality label (sge-ready):
-  #250 "feat: add export endpoint"    (not yet quality-labelled — not dispatchable)
-```
+A human-readable report (sample: [`references/output-format.md`](references/output-format.md)) **and** this machine-readable block:
 
 ```json
 {
@@ -354,16 +308,12 @@ Awaiting quality label (sge-ready):
   "blocked": [{ "issue": 233, "blockedBy": [210] }],
   "orchestratorOnly": [{ "issue": 252, "title": "governance posture: 1 control drifted" }],
   "conflicts": [{ "a": 207, "b": 219, "on": ["app/auth/login.ts"] }],
-  "executionRepos": { "231": "acme/client-onboarding" },
+  "executionRepos": { "231": "acme/web-app" },
   "awaitingQualityLabel": [{ "issue": 250, "title": "feat: add export endpoint" }]
 }
 ```
 
-`awaitingQualityLabel` is present only when the repo declares a `dispatch-label:` in `CLAUDE.md`; it is omitted (not `[]`) when no label gate is active, preserving the existing single-repo shape for consumers that do not need it. The array is informational — these issues are **not** in `parallelSafe` and are never claimed.
-
-`orchestratorOnly` lists quality-confirmed issues excluded from the worker ready pool by the `orchestrator-only` label (always applied, label-gate or not). Like `awaitingQualityLabel` it is informational and never in `parallelSafe` — but the distinction matters: an `awaitingQualityLabel` issue is *not yet ready*, whereas an `orchestratorOnly` issue *is* ready and simply must be built by the orchestrator or a human, not an autonomous worker.
-
-`parallelSafe` is what `/sge:team-pipeline` consumes as its work queue; it holds at most `--count` issues and is guaranteed pairwise conflict-free. The bare-number shape is **unchanged** (single-repo back-compat). `executionRepos` (Phase 2R, additive) maps issue number → its `executionRepo` **only for candidates that execute in a different repo than this run's tracking repo** — the signal `/sge:team-pipeline` / `/sge:fleet-dispatch` use to create the worktree / `agent-lock` / PR in the execution repo. An issue absent from the map executes in the tracking repo (the common case).
+Field semantics: [`references/output-format.md`](references/output-format.md).
 
 ### `--mode autonomous-next`
 
@@ -391,33 +341,13 @@ One invocation → one conflict-safe, dependency-annotated worklist spanning eve
 
 > Single-repo only — `--setup` is refused under `--fleet` (see *Fleet mode*).
 
-`--setup` turns discovery into action for the selected set — it **claims** each chosen issue and creates its worktree, exactly the way `/sge:team-pipeline` Phase 3c does, so the two are interchangeable and never double-claim. The in-repo `.worktrees/issue-N` path below is team-pipeline's documented exception to the canonical sibling `../<repo>-worktrees/<purpose>-<id>` layout — see [`worktrees`](../worktrees/SKILL.md):
-
-```bash
-gh label create "agent-lock" --color "D93F0B" \
-  --description "Issue claimed by a pipeline agent" 2>/dev/null || true
-
-WORKSPACE_ROOT=$(git rev-parse --show-toplevel)
-BRANCH_PREFIX="${SGE_BRANCH_PREFIX:-fix/issue-}"   # default preserves fix/issue-<N>
-for ISSUE in $PARALLEL_SAFE; do
-  # claim is the mutex — if the label add loses a race, skip and re-derive next run
-  gh issue edit "$ISSUE" --add-label "agent-lock" 2>/dev/null \
-    || { echo "[Skip] could not claim #$ISSUE"; continue; }
-  git -C "$WORKSPACE_ROOT" worktree add \
-    "$WORKSPACE_ROOT/.worktrees/issue-${ISSUE}" -b "${BRANCH_PREFIX}${ISSUE}" origin/main \
-    || { echo "[Skip] worktree exists for #$ISSUE"; gh issue edit "$ISSUE" --remove-label "agent-lock"; }
-done
-```
-
-The branch prefix is `SGE_BRANCH_PREFIX` (default `fix/issue-`, so existing behaviour is unchanged when unset). Set `SGE_BRANCH_PREFIX=claude/issue-` for [Claude Code Routine](https://docs.claude.com/en/docs/claude-code/routines)-triggered runs so the Anthropic-hosted sandbox's default `claude/`-only branch-push guardrail stays intact; leave it unset for normal interactive, local, or headless use.
-
-Claiming with the label **before** handing the set out closes the gap where two concurrent discovery runs pick the same issue. Without `--setup`, this skill claims nothing — the caller (or `/sge:team-pipeline`) owns the claim.
+Claim/worktree procedure and `SGE_BRANCH_PREFIX`: [`references/setup.md`](references/setup.md).
 
 ---
 
 ## Running across sessions
 
-The ready pool is derived **live** every run from open issues, the `agent-lock` mutex, open branches and PRs, and dependency state — there is no remembered queue. That makes re-entry idempotent: a fresh `/sge:available-issues` after a blocker closes, a PR merges, or a lock releases just produces the now-correct set. For an autonomous picker, wrap `--mode autonomous-next` in a [recurring loop](../loops/SKILL.md#d-recurring--cross-session-loop) (`/loop <interval> /sge:available-issues --mode autonomous-next`) and stop when it emits `"issue": null`.
+The pool is re-derived live every run; nothing persists between sessions. Detail: [`references/setup.md`](references/setup.md#running-across-sessions).
 
 ---
 

@@ -1,7 +1,7 @@
 # Example: Cohort Reconciliation (spec-validate worked example)
 
 This is the worked example bundled with `/sge:spec-validate` (issue #761) —
-the reconciliation invariant Dave Howard's feedback named directly: *"How do
+the reconciliation invariant a reviewer's feedback named directly: *"How do
 we validate the rules and spec are aligned? … like C1 must be ≤ Addressable −
 Exclusions."* `SPEC-147` (the issue's original example) lives in a different
 repo; this stands in as the format's canonical demo, per `docs/specs/README.md`.

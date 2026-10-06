@@ -1,6 +1,6 @@
 ---
 name: onboard
-description: Interactive onboarding skill — guided first-week path for a new developer (--dev) or ceremony-overlay adoption for an existing agile team (--team)
+description: Use when onboarding people to SGE — a guided first-week path for a new developer (--dev) or ceremony-overlay adoption for an existing agile team (--team). Interactive.
 argument-hint: "[--dev | --team]"
 allowed-tools: Bash(gh:*), Read, Glob, Grep
 context:

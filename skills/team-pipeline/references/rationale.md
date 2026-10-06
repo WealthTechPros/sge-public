@@ -119,19 +119,19 @@ deferring the full quality battery — never by skipping governance.
 
 ## Duration Mode — the two former issue-swarm contradictions, fixed
 
-Duration Mode was folded in from `/sge:issue-swarm` (#808, epic #730); that
-skill is now a router stub to this mode. Two contradictions in the old
-issue-swarm text are retired here:
+Duration Mode was folded in from the former `/sge:issue-swarm` (#808, epic
+#730); that skill became a router stub to this mode and was removed in #2915.
+Two contradictions in the former issue-swarm text are retired here:
 
 - **Lanes run the Phase 3c Lean Agent Contract — never a full
   `/sge:sge-implement` dispatch.** Duration mode changes *when the pipeline
-  stops*, not *what a lane does*. The old issue-swarm Phase 5 text that told
+  stops*, not *what a lane does*. The former issue-swarm Phase 5 text that told
   lanes to drive an issue to a reviewed, green PR contradicted its own
   lean-contract invariant; the reviewed-green-PR outcome belongs to the
   Phase 3d review agents and pr-monitor, not the build lane.
 - **Stale or over-budget lanes are NOT auto-requeued.** The *Stale-lane kill
   procedure* applies verbatim — kill, unlock, remove worktree, comment a
-  re-scope recommendation, `failedIssues`, never requeue. The old issue-swarm
+  re-scope recommendation, `failedIssues`, never requeue. The former issue-swarm
   ":286 requeued once" wording resurrected exactly what commit 879d5f6 removed
   from this file; it is retired with that stub.
 
@@ -173,7 +173,7 @@ simultaneously), so `agentMax = max(1, int(nproc x 0.80 / 3))`:
 
 **Model routing (lowest-safe tier per agent):** route each spawned agent to the
 cheapest model that is safe for its task, per
-[`agents/agent-registry.md`](../../../agents/agent-registry.md). Implementation
+[`docs/agent-registry.md`](../../../docs/agent-registry.md). Implementation
 agents were flat-routed to **sonnet** for every issue until #2488: every lane —
 a dead-file deletion and a schema migration alike — inherited the same tier
 (worse, prior to #2488 no `model` was even passed to the spawn, so a lane
@@ -200,7 +200,7 @@ Claude Orchestrator (this session)
 +-- State: /tmp/team-pipeline-state.json   <- local, ephemeral
 +-- Issue locking: GitHub agent-lock label <- durable, cross-agent safe
 |
-+-- PR Monitor Agent [always-on, spawned first — named Task, stoppable]
++-- PR Monitor Agent [bounded pass, spawned first — named Task, stoppable]
 |   +-- /sge:pr-monitor loop -> /sge:pr-fix as needed -> reports to state file
 |
 +-- Implementation Agents [0..N, resource-gated — named Tasks, stoppable]
@@ -209,6 +209,6 @@ Claude Orchestrator (this session)
 |   +-- (slot opens) -> resource check -> spawn next or wait
 |
 +-- Review Agents [one per PR, spawned by orchestrator — named Tasks, stoppable]
-    +-- review-<PR_A>: /sge:pr-review #PR_A -> approve or request changes -> undraft
-    +-- review-<PR_B>: /sge:pr-review #PR_B -> approve or request changes -> undraft
+    +-- review-<PR_A>: /sge:pr-review #PR_A -> approve or request changes
+    +-- review-<PR_B>: /sge:pr-review #PR_B -> approve or request changes
 ```

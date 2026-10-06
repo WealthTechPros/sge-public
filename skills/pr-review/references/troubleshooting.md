@@ -35,7 +35,7 @@ the watch's completion continuing the same turn.
 
 ## Dispatched lanes redundantly re-running the full project test suite (issue #2456)
 
-**Symptom.** Reviewing a large but low-risk PR (`data-remediation#780`, 1071 weighted lines,
+**Symptom.** Reviewing a large but low-risk PR (a product repo's #780, 1071 weighted lines,
 behaviour-preserving refactor, fully self-documented with a per-commit pytest baseline in the PR
 body) classified `high` risk on line count alone (no security-glob match). The full ~4800-test
 project suite (~8-10 min wall-clock per run) was independently run **at least 5 times** across
@@ -62,7 +62,7 @@ suite still pass" answer Phase 3's own gate had already established once.
    lane read that as licence to re-establish the suite-wide baseline itself, rather than trusting
    Phase 3's already-authoritative run.
 2. No instruction told a dispatched lane to check the target repo's own documented
-   dev-environment setup (a per-worktree virtualenv, in `data-remediation`'s case) before
+   dev-environment setup (a per-worktree virtualenv, in that repo's case) before
    invoking a bare `pytest`/`npm test` on PATH — one lane fell into exactly the hazard that
    convention exists to prevent, paying for an entire redundant verification cycle to discover
    and recover from it.

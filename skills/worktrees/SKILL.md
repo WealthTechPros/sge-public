@@ -48,7 +48,7 @@ one subdirectory per worktree, named `<purpose>-<id>`:
 
 | Purpose token | `<id>` | Example | Typical creator |
 |---|---|---|---|
-| `issue` | issue number | `../sge-worktrees/issue-806` | implementation skills (`sge-implement`, `implement-issue`) |
+| `issue` | issue number | `../sge-worktrees/issue-806` | implementation skills (`sge-implement`) |
 | `pr-fix` | PR number | `../sge-worktrees/pr-fix-812` | `pr-fix` Step 1 |
 | `pr-review` | PR number | `../sge-worktrees/pr-review-812` | `pr-review` inline-fix phases |
 | `qa` | PR number | `../sge-worktrees/qa-812` | `qa-audit` |

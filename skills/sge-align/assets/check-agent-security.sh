@@ -193,21 +193,52 @@ fi
 DEFAULT="$(git -C "$ROOT" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@' || true)"
 DEFAULT="${DEFAULT:-main}"
 scope="commits on origin/${DEFAULT}..HEAD"
+# Each commit is emitted as a \037-prefixed header line (SHA, TAB, the trailing-block
+# Agent-Id values joined by commas) followed by its full message body (#2680). The body
+# is needed because a GitHub squash merge folds every commit message of a PR into ONE
+# body: each commit's Agent-Id trailer lands MID-body and the trailing paragraph (often
+# Co-authored-by:) becomes the real trailer block, so %(trailers:...) alone reads 0 —
+# sge itself scored 0/50 while 38 of those commits carried an exact Agent-Id line.
+zt5_fmt='%x1f%H%x09%(trailers:key=Agent-Id,valueonly,separator=%x2C)%n%B'
 if git -C "$ROOT" rev-parse --verify --quiet "origin/${DEFAULT}" >/dev/null 2>&1 \
    && [ "$(git -C "$ROOT" rev-list --count "origin/${DEFAULT}..HEAD" 2>/dev/null || echo 0)" -gt 0 ]; then
-  log="$(git -C "$ROOT" log "origin/${DEFAULT}..HEAD" --format='%H%x09%(trailers:key=Agent-Id,valueonly)' 2>/dev/null || true)"
+  log="$(git -C "$ROOT" log "origin/${DEFAULT}..HEAD" --format="$zt5_fmt" 2>/dev/null || true)"
 else
   scope="the last 50 commits on HEAD"
-  log="$(git -C "$ROOT" log -50 --format='%H%x09%(trailers:key=Agent-Id,valueonly)' 2>/dev/null || true)"
+  log="$(git -C "$ROOT" log -50 --format="$zt5_fmt" 2>/dev/null || true)"
 fi
 # SHA match avoids {7,40} interval-expression syntax on purpose: it is the single
 # most common awk portability gap (mawk — the Debian/Ubuntu default awk — needs
 # --re-interval on some builds; POSIX awk does not guarantee interval expressions
 # at all), so a plain "one or more hex digits" match is used instead — still
-# anchored, still cannot false-match the (deliberately non-hex) blank/no-trailer
-# lines that %(trailers:...) can emit.
-zt5_total="$(printf '%s\n' "$log" | awk -F'\t' '$1 ~ /^[0-9a-f]+$/ {t++} END{print t+0}')"
-zt5_agent="$(printf '%s\n' "$log" | awk -F'\t' '$1 ~ /^[0-9a-f]+$/ && $2 != "" {a++} END{print a+0}')"
+# anchored. The same reason keeps the id pattern below interval-free.
+#
+# A commit counts as attributed (at most once) when EITHER its trailing trailer block
+# has an Agent-Id value (the pre-#2680 rule, unchanged) OR any body line is EXACTLY
+#   Agent-Id: claude-code/<id>     (<id> = one [A-Za-z0-9] then [A-Za-z0-9._-]*)
+# Exact match is the spoofing guard: wrong case, indentation, missing/extra spaces, an
+# empty id, trailing junk, another tool prefix or a prefixed key never count. Only a
+# trailing CR (CRLF-authored messages) is tolerated. Output: "<total> <agent> <body-only>".
+zt5_counts="$(printf '%s\n' "$log" | awk '
+  function flush() { if (have) { t++; if (hit) a++; if (hit && !trl) b++ } }
+  substr($0, 1, 1) == "\037" {
+    flush(); have = 0; hit = 0; trl = 0
+    hdr = substr($0, 2); tab = index(hdr, "\t")
+    sha = (tab ? substr(hdr, 1, tab - 1) : hdr)
+    if (sha ~ /^[0-9a-f]+$/) { have = 1; if (tab && substr(hdr, tab + 1) != "") { hit = 1; trl = 1 } }
+    next
+  }
+  have {
+    line = $0; sub(/\r$/, "", line)
+    if (line ~ /^Agent-Id: claude-code\/[A-Za-z0-9][A-Za-z0-9._-]*$/) hit = 1
+  }
+  END { flush(); print t + 0, a + 0, b + 0 }
+')"
+read -r zt5_total zt5_agent zt5_body <<EOF_ZT5
+${zt5_counts:-0 0 0}
+EOF_ZT5
+zt5_via=""
+[ "${zt5_body:-0}" -gt 0 ] && zt5_via=" (${zt5_body} via an exact Agent-Id: claude-code/<id> body line, e.g. squash-merged)"
 if [ "$zt5_total" = 0 ]; then
   add_control ZT-5 "Agent Identity" pass "no commits found (empty history) — nothing to attribute"
 elif [ "$zt5_agent" = 0 ]; then
@@ -224,8 +255,8 @@ elif [ "$zt5_agent" = 0 ]; then
   # Hook discovery (any one counts as installed):
   #   - core.hooksPath (relative to the repo root, or absolute) containing
   #     prepare-commit-msg
-  #   - .githooks/prepare-commit-msg  (the wtp-org canonical vendored location)
-  #   - .husky/prepare-commit-msg     (husky-driven repos, e.g. client-onboarding)
+  #   - .githooks/prepare-commit-msg  (the canonical vendored location)
+  #   - .husky/prepare-commit-msg     (husky-driven repos)
   zt5_hookpath="$(git -C "$ROOT" config --get core.hooksPath 2>/dev/null || true)"
   zt5_hook=""
   if [ -n "$zt5_hookpath" ]; then
@@ -247,14 +278,14 @@ elif [ "$zt5_agent" = 0 ]; then
   if [ -n "$zt5_hook" ]; then
     add_control ZT-5 "Agent Identity" fail "0/${zt5_total} of ${scope} carry an Agent-Id: trailer, but the attribution hook IS installed (${zt5_hook}) — it is not firing (commonly the session-id env var -- the hook must read CLAUDE_CODE_SESSION_ID, not only CLAUDE_SESSION_ID; also check it is executable, its shebang, and that core.hooksPath points where you think)"
   else
-    add_control ZT-5 "Agent Identity" fail "0/${zt5_total} of ${scope} carry an Agent-Id: trailer and NO attribution hook is installed (checked core.hooksPath, .githooks/, .husky/) — agent-authored commits here cannot be told apart from human ones. Vendor wtp-org's .githooks/prepare-commit-msg and run git config core.hooksPath .githooks (sge#2520)"
+    add_control ZT-5 "Agent Identity" fail "0/${zt5_total} of ${scope} carry an Agent-Id: trailer and NO attribution hook is installed (checked core.hooksPath, .githooks/, .husky/) — agent-authored commits here cannot be told apart from human ones. Vendor the canonical .githooks/prepare-commit-msg and run git config core.hooksPath .githooks (sge#2520)"
   fi
 else
   pct=$((100 * zt5_agent / zt5_total))
   if [ "$pct" -ge 80 ]; then
-    add_control ZT-5 "Agent Identity" pass "${pct}% (${zt5_agent}/${zt5_total}) of ${scope} carry an Agent-Id: trailer"
+    add_control ZT-5 "Agent Identity" pass "${pct}% (${zt5_agent}/${zt5_total}) of ${scope} carry an Agent-Id: trailer${zt5_via}"
   else
-    add_control ZT-5 "Agent Identity" fail "only ${pct}% (${zt5_agent}/${zt5_total}) of ${scope} carry an Agent-Id: trailer (< 80%)"
+    add_control ZT-5 "Agent Identity" fail "only ${pct}% (${zt5_agent}/${zt5_total}) of ${scope} carry an Agent-Id: trailer (< 80%)${zt5_via}"
   fi
 fi
 

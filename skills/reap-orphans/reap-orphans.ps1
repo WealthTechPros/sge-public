@@ -5,13 +5,24 @@
 # current session tree, and reports live resource hogs. See ../SKILL.md for
 # the contract, flags, and how it is invoked.
 #
-# Usage: pwsh -File reap-orphans.ps1 [-DryRun] [-HogMB <MB>]
+# -Heavy (the skill's --heavy, was /sge:cleanup — #2915) first runs the bundled
+# heavy-reset.ps1: kill Playwright/headless Chromium test runners and, unless
+# -NoWSL, shut down WSL. The orphan scan below then runs on what is left.
+#
+# Usage: pwsh -File reap-orphans.ps1 [-Heavy [-NoWSL]] [-DryRun] [-HogMB <MB>]
 param(
   [switch]$DryRun,
-  [int]$HogMB = 400
+  [int]$HogMB = 400,
+  [switch]$Heavy,
+  [switch]$NoWSL
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
+
+if ($Heavy) {
+  & (Join-Path $PSScriptRoot 'heavy-reset.ps1') -DryRun:$DryRun -NoWSL:$NoWSL
+  Write-Output ""
+}
 
 # Build process map with INT keys (UInt32/Int32 mismatch silently breaks lookups)
 $alive = @{}

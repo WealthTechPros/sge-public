@@ -135,3 +135,34 @@ subagent. It must stay within ≤ 5 000 tokens total:
    The value is embedded in the Phase 6 PR body as `"verification"` inside the
    `sge-phase5-verdict` HTML comment, making it visible to `/sge:pr-review` and
    queryable in CI logs.
+
+## Phase 2.5 (moved from SKILL.md)
+
+Moved verbatim from `SKILL.md` (issue #2917, 24 KB size budget).
+
+Read governance context **as deep as the work's risk demands, and no deeper** (epic #785). Phase 2's complexity tier and the touched paths together set the depth.
+
+### Step A — pick the depth tier for this change
+
+Resolve the tier from the file plan (spec lane → preflight's "Files to Create/Modify"; no-spec lane → the 0B phased plan) and the Phase 2 complexity score:
+
+```bash
+node "$SGE_ROOT/scripts/resolve-context-depth.mjs" \
+  --paths "<comma-separated planned paths>" --score <Phase 2 complexityScore>
+```
+
+It returns a `depth` (and the `tier` + per-path `classifications` for the audit trail):
+
+| Tier | Trigger | Depth | What to read |
+|------|---------|-------|--------------|
+| **trivial** | docs/config-only **and** complexity ≤ 15 | `digest` | The digest only (item 1); skip the scope resolver. |
+| **standard** | any code change | `scoped` | Digest **+** the path-scoped specs/ADRs from `resolve-context-scope.mjs` (items 1–3). |
+| **critical** | a **CRITICAL path** — security/auth, DB migrations, or multi-tenant / data-isolation (the same list `docs/agent-registry.md` escalates to `opus`) | `full` | The digest **and the full L0–L8 artefact stack**. Scoping is **deliberately bypassed**. |
+
+> **Non-goal guard — CRITICAL context is never thinned.** CRITICAL wins over every signal; never run `resolve-context-scope.mjs` to thin a `critical` read.
+
+### Step B — read to that depth
+
+Always read the digest (`docs/sge-digest.md`) and the governing spec in full; for `standard` tier also resolve the path-scoped deep-read set via `resolve-context-scope.mjs` (`trivial` skips it, `critical` reads the full stack instead); fail-safe to digest-first if scoping can't narrow; leave the tier/depth audit trail in the Phase 3 starting map. Re-run Step A if the plan changes to touch new paths.
+
+Full mechanics, worked examples, and the re-tiering/audit-trail detail: [`context-depth.md`](context-depth.md).

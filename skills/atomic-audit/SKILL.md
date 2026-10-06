@@ -1,5 +1,5 @@
 ---
-description: Use when assessing how far a repo — or a whole portfolio of repos — has adopted atomic design; when design-token, primitive-layer, catalog, or enforcement maturity needs an evidence-backed score; when /sge:sge-align needs its L2 Design System signal (check C10); or before planning a design-system investment, extraction, or migration roadmap. Advisory and read-only — not for making changes.
+description: Use when scoring how far a repo or portfolio has adopted atomic design — design tokens, primitive layer, catalog, enforcement maturity — for /sge:sge-align check C10 or before planning a design-system roadmap. Advisory and read-only.
 argument-hint: "[repo path] [--json] [--stack <key>] [--out <file>] [--fleet <repos…>]"
 context: fork
 allowed-tools: Read, Glob, Grep, Agent, Bash(bash:*), Bash(sh:*), Bash(ls:*), Bash(find:*), Bash(grep:*), Bash(cat:*), Bash(head:*), Bash(wc:*), Bash(git ls-files:*), Bash(git rev-parse:*), Bash(gh repo list:*), Bash(gh repo clone:*)
@@ -361,4 +361,4 @@ layers**. Always qualify ("atomic maturity L1"), per the Step 3 callout.
 
 - `/sge:sge-align` — governance-cascade drift (Vision→Code); its check C10 consumes this skill's `--json` tier as the L2 signal
 - `/sge:refactor` — execute the extraction/migration slices this audit recommends
-- `/sge:implement-issue <N>` — build a remediation slice once it's an issue
+- `/sge:sge-implement <N>` — build a remediation slice once it's an issue

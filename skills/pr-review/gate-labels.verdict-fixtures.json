@@ -1,0 +1,2326 @@
+[
+ {
+  "name": "review verdict in the fence",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "verdict": "pass"
+ },
+ {
+  "name": "item 1: prose head: after the fence never overrides (the fence must be last: the node blocks)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```\n\nhead: deadbeefcafefeed0123456789abcdef01234567",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "item 1: trailing head: line inside the fence never overrides commit:",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nhead: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "verdict": "pass"
+ },
+ {
+  "name": "item 7: sha: is read when commit: is absent",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\nsha: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "verdict": "pass"
+ },
+ {
+  "name": "item 7: head: is read when commit: and sha: are absent",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\nhead: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "verdict": "pass"
+ },
+ {
+  "name": "item 7: two commit: lines in one fence are ambiguous (the node blocks)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "item 7: a body with two sge-verdict fences is ambiguous (a blocking candidate, never skipped)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```\n```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "item 7: a fence without a SHA key is still the newest verdict (unproven)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "```sge-verdict\nverdict: pass\n```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "pass"
+ },
+ {
+  "name": "item 6: the verdict value is extracted (fail)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: FAIL\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "verdict": "fail"
+ },
+ {
+  "name": "item 2: a newer comment verdict beats an older review verdict",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "<!-- sge-review-verdict -->\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "verdict": "pass"
+ },
+ {
+  "name": "item 2: a newer review verdict beats an older comment verdict",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: fail\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T12:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "<!-- sge-review-verdict -->\n```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "verdict": "fail"
+ },
+ {
+  "name": "trust: an untrusted (NONE) newer verdict is ignored",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "rando"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "sha": "deadbeefcafefeed0123456789abcdef01234567",
+  "verdict": "pass"
+ },
+ {
+  "name": "sge#2808: a MEMBER-association comment is not a verdict source, marker or not",
+  "reviews": [],
+  "comments": [
+   {
+    "body": "<!-- sge-review-verdict -->\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "human"
+    },
+    "author_association": "MEMBER"
+   }
+  ],
+  "sha": "",
+  "verdict": ""
+ },
+ {
+  "name": "sge#2808: a github-actions[bot] comment is not a verdict source, marker or not",
+  "reviews": [],
+  "comments": [
+   {
+    "body": "<!-- sge-review-verdict -->\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "github-actions[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "sha": "",
+  "verdict": ""
+ },
+ {
+  "name": "trust: a pinned allow-list is the sole authority (MEMBER ignored)",
+  "env": {
+   "REVIEW_DAEMON_TRUSTED_VERDICT_AUTHORS": "pinned-bot[bot]"
+  },
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "pinned-bot[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "human"
+    },
+    "author_association": "OWNER"
+   }
+  ],
+  "sha": "deadbeefcafefeed0123456789abcdef01234567",
+  "verdict": "pass"
+ },
+ {
+  "name": "trust: a pinned allow-list drops the default bot logins",
+  "env": {
+   "REVIEW_DAEMON_TRUSTED_VERDICT_AUTHORS": " Pinned-Bot[bot] , other"
+  },
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "pinned-bot[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "<!-- sge-review-verdict -->\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "sha": "deadbeefcafefeed0123456789abcdef01234567",
+  "verdict": "pass"
+ },
+ {
+  "name": "a DISMISSED review is a withdrawn verdict: its SHA with verdict 'dismissed', never a pass (skeptic R2 item 4)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "DISMISSED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "verdict": "dismissed"
+ },
+ {
+  "name": "the PR author's own verdict never counts",
+  "pr_author": "pr-author",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "<!-- sge-review-verdict -->\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "pr-author"
+    },
+    "author_association": "MEMBER"
+   }
+  ],
+  "sha": "deadbeefcafefeed0123456789abcdef01234567",
+  "verdict": "pass",
+  "env": {
+   "REVIEW_DAEMON_TRUSTED_VERDICT_AUTHORS": "wtp-sge[bot],pr-author"
+  }
+ },
+ {
+  "name": "M1: an sge-verdict fence echoed inside a ```text block is not a verdict (the node blocks)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "<!-- sge-review-verdict -->\nQA output:\n\n```text\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```\n```\n",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "M1: an sge-verdict fence echoed inside a ~~~ block is not a verdict (the node blocks)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "<!-- sge-review-verdict -->\nQA output:\n\n~~~\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```\n~~~\n",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "M1: an sge-verdict fence nested in a longer ```` fence is not a verdict (the node blocks)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "<!-- sge-review-verdict -->\nQA output:\n\n````text\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```\n````\n",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "M1: a top-level fence beside a nested echo is ambiguous (the node blocks)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "<!-- sge-review-verdict -->\n````text\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```\n````\n\n```sge-verdict\nverdict: fail\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "no verdict at all",
+  "reviews": [
+   {
+    "body": "LGTM",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "APPROVED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": ""
+ },
+ {
+  "name": "sge#2808: the review identity's comment verdict counts only with the review-verdict marker",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "<!-- sge-review-verdict -->\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "verdict": "pass"
+ },
+ {
+  "name": "sge#2808: a pinned allow-list login's marked comment verdict counts",
+  "env": {
+   "REVIEW_DAEMON_TRUSTED_VERDICT_AUTHORS": "pinned-bot[bot]"
+  },
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "pinned-bot[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "<!-- sge-review-verdict -->\n```sge-verdict\nverdict: fail\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "pinned-bot[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "verdict": "fail"
+ },
+ {
+  "name": "sge#2808 variant 1 (bare echo): the review identity's comment without the marker is not a verdict",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "QA output:\n\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```\n",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "sha": "deadbeefcafefeed0123456789abcdef01234567",
+  "verdict": "pass"
+ },
+ {
+  "name": "sge#2808 variant 1 (bare echo): an OWNER comment (qa-audit under the operator) is not a verdict",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "<!-- sge-review-verdict -->\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "operator"
+    },
+    "author_association": "OWNER"
+   }
+  ],
+  "sha": "deadbeefcafefeed0123456789abcdef01234567",
+  "verdict": "pass"
+ },
+ {
+  "name": "sge#2808 variant 1 (bare echo): a marker echoed inside a fence does not mark the comment",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "```text\n<!-- sge-review-verdict -->\n```\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "sha": "deadbeefcafefeed0123456789abcdef01234567",
+  "verdict": "pass"
+ },
+ {
+  "name": "sge#2808 variant 2 (nested decoy): a fence indented 4 spaces is an indented code block, not a second verdict (the node blocks)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "```sge-verdict\nverdict: fail\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```\n\nEchoed:\n\n    ```sge-verdict\n    verdict: pass\n    commit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n    ```\n",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "sge#2808 variant 2 (nested decoy): a fence inside an HTML comment is not a second verdict (the node blocks)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "<!--\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```\n-->\n```sge-verdict\nverdict: fail\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "sge#2808 variant 2 (nested decoy): a fence inside a <pre> HTML block is not a verdict (the node blocks)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "<pre>\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```\n</pre>",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "sge#2808 variant 3: a closer indented 4 spaces does not close the outer fence (the node blocks)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "```text\nlog\n    ```\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "sge#2808 variant 3: a tab-indented closer does not close the outer fence (the node blocks)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "```text\nlog\n\t```\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "sge#2808 variant 4: a form feed after the info string is not an sge-verdict fence (the node blocks)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "```sge-verdict\f\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "sge#2808 variant 4: a vertical tab after a closer does not close the outer fence (the node blocks)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "```text\nlog\n```\u000b\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "sge#2808 variant 4: a form feed before the fence is not indentation (the node blocks)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "\f```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "sge#2808 variant 5 (bare-fence breakout): a body left with an unclosed fence is not a verdict (the node blocks)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "```text\nlog\n```\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```\n```\n",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "sge#2808: an unclosed sge-verdict fence is not a verdict (the node blocks)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "sge#2808: a ~~~sge-verdict fence and a case-folded info string count (schema fence grammar)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "~~~ SGE-Verdict \t\nverdict: fail\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n~~~~",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "verdict": "fail"
+ },
+ {
+  "name": "sge#2808: a fence indented up to 3 spaces is still a fence",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "   ```sge-verdict\nverdict: fail\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n   ```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "verdict": "fail"
+ },
+ {
+  "name": "PR #2800 skeptic C1 (bare echo): a marker echoed below line 1 does not mark the comment",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "<!-- qa-audit-report -->\n## QA Audit Report\n\nTest output:\n\n<!-- sge-review-verdict -->\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\n```\n\n## Test Summary\n3 passed",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "sha": "deadbeefcafefeed0123456789abcdef01234567",
+  "verdict": "pass"
+ },
+ {
+  "name": "PR #2800 skeptic C2: breakout + marker + forged fence + unclosed <!-- is not a verdict (marker not line 1)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "<!-- qa-audit-report -->\n## QA Audit Report\n\n```text\nnpm test\n```\n<!-- sge-review-verdict -->\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\n```\n<!--\n```\n\n## Test Summary\n3 passed",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "sha": "deadbeefcafefeed0123456789abcdef01234567",
+  "verdict": "pass"
+ },
+ {
+  "name": "PR #2800 skeptic C3: breakout + marker + forged fence + unclosed <pre> is not a verdict",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "<!-- qa-audit-report -->\n## QA Audit Report\n\n```text\nnpm test\n```\n<!-- sge-review-verdict -->\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\n```\n<pre>\n```\n\n## Test Summary\n3 passed",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "sha": "deadbeefcafefeed0123456789abcdef01234567",
+  "verdict": "pass"
+ },
+ {
+  "name": "PR #2800 skeptic C4: ~~~~text wrapper breakout + marker + forged + <!-- is not a verdict",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "<!-- qa-audit-report -->\n## QA Audit Report\n\n~~~~text\nnpm test\n~~~~~~~~\n<!-- sge-review-verdict -->\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\n```\n<!--\n~~~~\n\n## Test Summary\n3 passed",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "sha": "deadbeefcafefeed0123456789abcdef01234567",
+  "verdict": "pass"
+ },
+ {
+  "name": "PR #2800 skeptic C5 (absorb): a marked verdict comment whose echoed opener swallows its own fail fence blocks",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "<!-- sge-review-verdict -->\n## PR Review: #5\n\nThe author wrote:\n```sge-verdict\nverdict: pass\n\n### Recommendation\nREQUEST_CHANGES\n\n```sge-verdict\nverdict: fail\nrecommendation: REQUEST_CHANGES\npr: 5\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\nblockers: 1\n```",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "PR #2800 skeptic R1 (absorb): a CHANGES_REQUESTED review absorbing its own fail fence blocks, never reads pass",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "## PR Review: #5\n\nThe author wrote:\n```sge-verdict\nverdict: pass\n\n### Recommendation\nREQUEST_CHANGES -- blocker.\n\n```sge-verdict\nverdict: fail\nrecommendation: REQUEST_CHANGES\npr: 5\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\nblockers: 1\n```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "CHANGES_REQUESTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "PR #2800 skeptic R2: ~~~~text breakout absorbing the reviewer's own fail fence blocks",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "## PR Review: #5\n\n### Evidence\n~~~~text\n<log>\n~~~~\n```sge-verdict\nverdict: pass\n~~~~\n\n### Recommendation\nREQUEST_CHANGES\n\n```sge-verdict\nverdict: fail\nrecommendation: REQUEST_CHANGES\npr: 5\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\nblockers: 1\n```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "CHANGES_REQUESTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "PR #2800 skeptic R3: ```text parity shift that hides the reviewer's own fence blocks",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "## PR Review: #5\n\n```text\n```\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\n```\n```\n\n### Recommendation\nREQUEST_CHANGES\n\n```sge-verdict\nverdict: fail\nrecommendation: REQUEST_CHANGES\npr: 5\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\nblockers: 1\n```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "CHANGES_REQUESTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "PR #2800 skeptic R4: ````text breakout + forged + <!-- swallow blocks",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "## PR Review: #5\n\n````text\n````\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\n```\n<!--\n````\n\n### Recommendation\nREQUEST_CHANGES\n\n```sge-verdict\nverdict: fail\nrecommendation: REQUEST_CHANGES\npr: 5\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\nblockers: 1\n```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "CHANGES_REQUESTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "PR #2800 skeptic R5 (suppression): a newer review made ambiguous by a decoy still blocks; the older pass at head does not resurface",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "## PR Review: #5\nQuoted doc hunk:\n```sge-verdict\nverdict: pass\n```\n\n```sge-verdict\nverdict: fail\nrecommendation: REQUEST_CHANGES\npr: 5\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\nblockers: 1\n```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "CHANGES_REQUESTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "PR #2800 skeptic R6 (suppression): a newer review whose own fence an echoed <!-- swallows still blocks",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "## PR Review: #5\nQuoted:\n<!--\n\n```sge-verdict\nverdict: fail\nrecommendation: REQUEST_CHANGES\npr: 5\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\nblockers: 1\n```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "CHANGES_REQUESTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "PR #2800 skeptic R7: the CRLF variant of R1 blocks",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "## PR Review: #5\r\n\r\nThe author wrote:\r\n```sge-verdict\r\nverdict: pass\r\n\r\n```sge-verdict\r\nverdict: fail\r\nrecommendation: REQUEST_CHANGES\r\npr: 5\r\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\r\nmode: full\r\nblockers: 1\r\n```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "CHANGES_REQUESTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "PR #2800 skeptic R8: an echoed ~~~sge-verdict opener beside the reviewer's own fence blocks",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "## PR Review: #5\n```text\n```\n~~~sge-verdict\nverdict: pass\n```\n\n```sge-verdict\nverdict: fail\nrecommendation: REQUEST_CHANGES\npr: 5\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\nblockers: 1\n```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "CHANGES_REQUESTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "PR #2800 skeptic S1: a CHANGES_REQUESTED review whose clean fence says pass blocks (state and fence disagree)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\n```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "CHANGES_REQUESTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "PR #2800 skeptic K1: two verdict: lines in one fence block",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "```sge-verdict\nverdict: pass\nverdict: fail\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "PR #2800 skeptic K2: prose after the verdict fence blocks (the fence must be the last block)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\n```\n\nSee the findings above.",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "PR #2800 skeptic K3: trailing blank lines after the verdict fence are fine",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "## PR Review\n\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\n```\n\n  \n",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "verdict": "pass"
+ },
+ {
+  "name": "PR #2800 skeptic X1: NBSP before ```sge-verdict is not a fence but still blocks (opener-shaped)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": " ```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\n```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "PR #2800 skeptic X2: an info string padded with NBSP is not sge-verdict but still blocks",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "```sge-verdict \nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\n```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "PR #2800 skeptic X3: fullwidth backticks are no verdict node at all",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "｀｀｀sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\n｀｀｀",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "deadbeefcafefeed0123456789abcdef01234567",
+  "verdict": "pass"
+ },
+ {
+  "name": "PR #2800 skeptic X4: a zero-width joiner inside sge-verdict is no verdict node at all",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "```sge‍-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\n```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "deadbeefcafefeed0123456789abcdef01234567",
+  "verdict": "pass"
+ },
+ {
+  "name": "PR #2800 skeptic X5: lone-CR line endings block",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "```sge-verdict\rverdict: pass\rcommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\rmode: full\r```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "PR #2800 skeptic X6: a marked github-actions[bot] comment is not a verdict",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "<!-- sge-review-verdict -->\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\n```",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "github-actions[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "sha": "deadbeefcafefeed0123456789abcdef01234567",
+  "verdict": "pass"
+ },
+ {
+  "name": "PR #2800 skeptic X9: a marker spelled with a tab is not the marker",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "<!--\tsge-review-verdict -->\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\n```",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "sha": "deadbeefcafefeed0123456789abcdef01234567",
+  "verdict": "pass"
+ },
+ {
+  "name": "PR #2800 skeptic X10: a marker indented 4 spaces is not the marker",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "    <!-- sge-review-verdict -->\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\n```",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "sha": "deadbeefcafefeed0123456789abcdef01234567",
+  "verdict": "pass"
+ },
+ {
+  "name": "PR #2800 skeptic X10b: a marker on line 2 is not the marker",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "\n<!-- sge-review-verdict -->\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\n```",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "sha": "deadbeefcafefeed0123456789abcdef01234567",
+  "verdict": "pass"
+ },
+ {
+  "name": "PR #2800 skeptic X11: an EDITED marked comment (updated_at != created_at) blocks",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "<!-- sge-review-verdict -->\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\n```",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE",
+    "updated_at": "2026-10-01T12:00:00Z"
+   }
+  ],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "PR #2800 skeptic X11b: an unedited marked comment (updated_at == created_at) counts",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "<!-- sge-review-verdict -->\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\n```",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE",
+    "updated_at": "2026-10-01T11:00:00Z"
+   }
+  ],
+  "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "verdict": "pass"
+ },
+ {
+  "name": "PR #2800 skeptic X12: a marked comment with no fence blocks",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "<!-- sge-review-verdict -->\nAdvisory: see findings.",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "PR #2800 skeptic U1: <scrıpt> (dotless i) is not an HTML raw block in any runtime",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "<scrıpt>\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\n```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "verdict": "pass"
+ },
+ {
+  "name": "PR #2800 skeptic U2: </scrıpt> (dotless i) does not close a raw block in any runtime",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "<script>\nx\n</scrıpt>\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\n```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "PR #2800 skeptic U3: a non-ASCII verdict value is never lower-cased onto ASCII",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "```sge-verdict\nverdict: PAİS\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\n```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "verdict": "paİs"
+ },
+ {
+  "name": "PR #2800 skeptic L1: a 1001-backtick fence run is compared by length (no RE2 repeat-count limit)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "## PR Review\n`````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````\nlog\n`````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````\n\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: full\n```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "verdict": "pass"
+ },
+ {
+  "name": "skeptic R2 #1: an EDITED review (lastEditedAt) carrying pass@head is malformed",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE",
+    "lastEditedAt": "2026-10-01T10:05:00Z"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "skeptic R2 #1: an edited APPROVED review cannot stand in for a fence stripped from a newer CHANGES_REQUESTED review",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "APPROVED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE",
+    "lastEditedAt": "2026-10-01T11:30:00Z"
+   },
+   {
+    "body": "Changes needed.",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "CHANGES_REQUESTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE",
+    "lastEditedAt": "2026-10-01T11:31:00Z"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "skeptic R2 #1: an edited CHANGES_REQUESTED review rewritten to a clean fail is still malformed (edit = not the reviewer's words)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: fail\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "CHANGES_REQUESTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE",
+    "lastEditedAt": "2026-10-01T10:01:00Z"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "skeptic R2 #1: an UNEDITED review (lastEditedAt null) counts",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE",
+    "lastEditedAt": null
+   }
+  ],
+  "comments": [],
+  "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "verdict": "pass"
+ },
+ {
+  "name": "skeptic R2 #2: a comment edited within the second it was posted (updated_at == created_at, lastEditedAt set) is malformed",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "<!-- sge-review-verdict -->\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE",
+    "updated_at": "2026-10-01T11:00:00Z",
+    "lastEditedAt": "2026-10-01T11:00:00Z"
+   }
+  ],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "skeptic R2 #4: dismissing the newest trusted FAIL does not resurface an older pass at the same head",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "```sge-verdict\nverdict: fail\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "DISMISSED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "verdict": "dismissed"
+ },
+ {
+  "name": "skeptic R2 #4: a dismissed verdict at an OLD head is provably stale (the writer still strips on push)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "DISMISSED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "deadbeefcafefeed0123456789abcdef01234567",
+  "verdict": "dismissed"
+ },
+ {
+  "name": "skeptic R2 #3: a PENDING review is not a verdict at all",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "```sge-verdict\nverdict: fail\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": null,
+    "state": "PENDING",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "deadbeefcafefeed0123456789abcdef01234567",
+  "verdict": "pass"
+ },
+ {
+  "name": "skeptic R2 #5: a ~~~ line inside a backtick sge-verdict fence is malformed",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n~~~\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "skeptic R2 #5: a mid-line ``` inside the sge-verdict fence is malformed",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nnote: see ``` here\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "skeptic R2 #5: a long-s (U+017F) info string is not sge-verdict -- no Unicode case folding",
+  "reviews": [
+   {
+    "body": "```ſge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```\n\n```sge-verdict\nverdict: fail\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "verdict": "fail"
+ },
+ {
+  "name": "skeptic R2 #5: a CHANGES_REQUESTED review whose fence says PASS (any ASCII case) is malformed",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "```sge-verdict\nverdict: PASS\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "CHANGES_REQUESTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "skeptic R2 #5: a GraphQL-shaped comment (createdAt, lastEditedAt) edited after posting is malformed",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "<!-- sge-review-verdict -->\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "createdAt": "2026-10-01T11:00:00Z",
+    "lastEditedAt": "2026-10-01T12:00:00Z",
+    "author": {
+     "login": "wtp-sge",
+     "__typename": "Bot"
+    }
+   }
+  ],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "skeptic R2 #7: an empty-body trusted comment is not a verdict node (jq/gojq parity)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "verdict": "pass"
+ },
+ {
+  "name": "trust (sge#2800 major): an EMPTY allow-list value -- an unset Actions vars.* -- keeps the default, wtp-sge[bot] only",
+  "env": {
+   "REVIEW_DAEMON_TRUSTED_VERDICT_AUTHORS": ""
+  },
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "<!-- sge-review-verdict -->\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "human"
+    },
+    "author_association": "OWNER"
+   }
+  ],
+  "sha": "deadbeefcafefeed0123456789abcdef01234567",
+  "verdict": "pass"
+ },
+ {
+  "name": "trust (sge#2800 major): a separators/space/tab-only allow-list is no list -- the default applies, not trust-nobody or trust-everyone",
+  "env": {
+   "REVIEW_DAEMON_TRUSTED_VERDICT_AUTHORS": " , ,\t,  "
+  },
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "<!-- sge-review-verdict -->\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "human"
+    },
+    "author_association": "OWNER"
+   }
+  ],
+  "sha": "deadbeefcafefeed0123456789abcdef01234567",
+  "verdict": "pass"
+ },
+ {
+  "name": "trust (sge#2800 hostile): wildcard/regex entries are literal logins, never globs",
+  "env": {
+   "REVIEW_DAEMON_TRUSTED_VERDICT_AUTHORS": "*,wtp-*,.*,^.*$"
+  },
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "<!-- sge-review-verdict -->\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "human"
+    },
+    "author_association": "OWNER"
+   }
+  ],
+  "sha": "",
+  "verdict": ""
+ },
+ {
+  "name": "trust (sge#2800 hostile): a tab/space-padded human login with empty items trusts exactly that login",
+  "env": {
+   "REVIEW_DAEMON_TRUSTED_VERDICT_AUTHORS": ",\t  Alice \t,,"
+  },
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "alice"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff\n```",
+    "submitted_at": "2026-10-01T12:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [
+   {
+    "body": "<!-- sge-review-verdict -->\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "created_at": "2026-10-01T11:00:00Z",
+    "user": {
+     "login": "alice2"
+    },
+    "author_association": "OWNER"
+   }
+  ],
+  "sha": "deadbeefcafefeed0123456789abcdef01234567",
+  "verdict": "pass"
+ },
+ {
+  "name": "trust (sge#2800 hostile): a pinned login never trusts a login it is a substring/prefix of",
+  "env": {
+   "REVIEW_DAEMON_TRUSTED_VERDICT_AUTHORS": "alice-bot"
+  },
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "alice"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff\n```",
+    "submitted_at": "2026-10-01T12:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "alice-bot-2"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": ""
+ },
+ {
+  "name": "trust (sge#2800 minor 3): an NBSP-padded entry is NOT trimmed (ASCII space/tab only, jq = gojq = Python)",
+  "env": {
+   "REVIEW_DAEMON_TRUSTED_VERDICT_AUTHORS": " pinned-bot[bot]"
+  },
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "pinned-bot[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": ""
+ },
+ {
+  "name": "trust (sge#2800 hostile): a non-ASCII entry never case-folds onto an ASCII login (KELVIN SIGN)",
+  "env": {
+   "REVIEW_DAEMON_TRUSTED_VERDICT_AUTHORS": "Kelvin"
+  },
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "kelvin"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": ""
+ }
+]
