@@ -9,6 +9,7 @@ description: |
 
   A repo MAY override this with its own `.claude/agents/security-auditor.md`
   carrying stack-specific threat models; the project agent takes precedence.
+tools: Read, Glob, Grep, Bash
 model: opus
 ---
 

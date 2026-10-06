@@ -1,5 +1,5 @@
 ---
-description: Use when you want to run multiple SGE implementation agents in parallel, continuously implementing and reviewing issues as a pipeline. Invoke when the user asks to "run the pipeline", "work issues in parallel", "batch implement issues", or wants unattended multi-issue progress. With --duration it is also the time-boxed swarm engine ("swarm the issues for 2 hours", "burn down the backlog until lunch") — duration-bounded progress that never overruns.
+description: Use when running several SGE implementation agents in parallel as a continuous implement-and-review pipeline — "run the pipeline", "work issues in parallel", "batch implement issues". With --duration it is the time-boxed swarm ("swarm the issues for 2 hours") and never overruns.
 argument-hint: "[--duration <Nm|Nh>] [--agents N] [--module <name>] [--milestone <name>] [--ci-limit N] [--session-budget <tokens>] [--unattended] [--dry-run]"
 ---
 
@@ -68,51 +68,22 @@ Phase 3/4 stall-detection and hard-kill work.
 
 ## Per-Task Budget Contract (MANDATORY)
 
-Every spawned Task states an explicit token-budget target in its prompt. There is
-**no SDK enforcement** — the `Task` tool has no `budget` parameter and throws
-nothing on overrun. What stops a runaway lane is the **time-box kill** (stale-kill
-`staleKillMinutes` default 20m, no draft PR; hard-kill 45m total — Phase 4
-*Stale-lane kill procedure*), which works because every agent is a named `Task`
-(Stoppable-Only rule). There is **no separate "budget-exceeded" kill** — an
-overrunning lane is caught by that same time-box.
-
-State these ceilings in every Task prompt (*near the ceiling: stop
-scope-expansion — commit, push, update the draft PR, terminate*).
-
-| Task | Target ceiling (output tokens) |
-|------|---------------------------------|
-| `impl-<N>` (implementation) | **250 000** |
-| `review-<PR>` (review) | **60 000** |
-| `pr-monitor` (monitor) | **40 000** |
-
-**Session budget** (`--session-budget`, default **2 000 000**): caps
-**cumulative** output across the run, from **harness-MEASURED** token-meter usage
-(`measured_session_tokens` over `memory/token-usage.jsonl` — #857), **not**
-self-reported `tokensUsed` (under-reports 2–4×). On exhaustion: finish in-flight
-lanes, stop spawning, enter Phase 6. Never raise a budget to "fix" a stall —
-decompose instead. Full rationale + session-budget bash:
-[budget-model](references/budget-model.md).
-
-**GitHub API budget** — a second shared ceiling: all lanes share ONE org REST
-bucket (5000/hr); fan-out that ignores it stalls every lane in lockstep (#1153).
-Dispatch prompts carry the GraphQL-first / floor-check / switch-on-403 rules:
-[dispatch-prompts](references/dispatch-prompts.md).
+Every spawned Task states its token-budget target in its prompt — `impl-<N>` **250 000**, `review-<PR>` **60 000**, `pr-monitor` **40 000** output tokens — and the session budget (`--session-budget`, default **2 000 000**, harness-measured, #857) caps the run. Nothing enforces these in the SDK: the time-box kill (Phase 4) is the backstop; never raise a budget to fix a stall. Detail, and the shared GitHub API budget: [`references/per-task-budget.md`](references/per-task-budget.md).
 
 ---
 
 ## Lean Agent Contract (MANDATORY — applies to every impl agent)
 
+**Lean flow + merge-not-rebase (#2829, #2914):** PR Warden is the one reviewer, so lanes add no skeptic subagent and no advisory pr-review. The one exception is a single adversarial pass (reverted-fix test) when the diff is security- or control-bearing. Lanes update a PR branch by merging main, never rebase + force-push. See [`dispatch-prompts.md`](references/dispatch-prompts.md) impl steps 7a/8.
+
 > Dispatched impl agents follow three rules, always. The contract is **not** a
-> full `/sge:sge-implement` dispatch, but keeps its one non-negotiable gate:
-> before building, every lane runs `/sge:governance-trace` headlessly and parks
-> the issue `outcome: "blocked"` on a blocking verdict/low-confidence match
-> (Phase 3c Step 2). Speed comes from capping recon and deferring the full
+> full `/sge:sge-implement` dispatch, but keeps its non-negotiable gates:
+> before building, every lane passes `intake-check.sh` and the governance-trace
+> gate, parking the issue `outcome: "blocked"` on a failed intake or a blocking
+> verdict/low-confidence match (Phase 3c Step 2). Speed comes from capping recon and deferring the full
 > battery — never from skipping governance.
 
-**Rule 1 — Capped reconnaissance.** Orient from ONLY the issue's file-map (or
-preflight comment); **no open-ended searches** (`grep -r`, `find`, `rg --glob`,
-recursive reads). Read only file-map files + files you directly edit; if no
-file-map, read ≤ 5 files to locate the surface, then build.
+**Rule 1 — Capped reconnaissance:** orient only from the intake acMap file-map, no open-ended searches.
 
 **Rule 2 — Draft PR on first commit.** After the **first commit** (even if
 partial), immediately `git push origin "${SGE_BRANCH_PREFIX:-fix/issue-}<N>"` and
@@ -122,81 +93,19 @@ stall signal). Keep working; push each commit. Commit via `/sge:commit --no-push
 `SGE_BRANCH_PREFIX` (default `fix/issue-`); `claude/issue-` for Routine
 runs — see [dispatch-prompts](references/dispatch-prompts.md#branch-prefix).
 
-**Rule 3 — Cheap inline quality gates only.** Before the final push run ONLY
-type-check / static analysis (repo's typecheck per `CLAUDE.md`), the specific
-test(s) you wrote or touched, and write-format the files you changed
-(discovered per `/sge:pr-fix`; dispatch Rule 3). **Do NOT run** the full test
-suite, linter, whole-repo format-check, or build-storybook — those belong to
-the separate `/sge:pr-review` step (Phase 3d's full battery).
-[Why these rules exist](references/rationale.md).
+**Rule 3 — Cheap inline quality gates only:** type-check, the touched tests and write-format; the full battery belongs to `/sge:pr-review`. Full Rule 1 and Rule 3 text: [`references/lean-agent-contract.md`](references/lean-agent-contract.md); [why](references/rationale.md).
 
 ---
 
 ## Duration Mode (`--duration`) — the time-boxed swarm
 
-> An **overlay** on the normal phases (same engine, waves, lean contract, kill
-> thresholds) plus one master stop — the wall clock. Folded in from
-> `/sge:issue-swarm` (#808, epic #730), now a router stub to this mode.
-
-`--duration <Nm|Nh>` makes the wall-clock budget the **master terminal
-condition**: every decision is checked against remaining budget, and when it runs
-out the pipeline **stops spawning, drains in-flight lanes, and reports** — never
-overrunning or abandoning a half-done lane. (Without `--duration`, it runs to
-queue drain.)
-
-**Deadline arithmetic (Phase 0 overlay)** — compute the deadline first
-(`DURATION_SECS` = `Nm*60` or `Nh*3600`; `DEADLINE = $(date -u +%s) +
-DURATION_SECS`) and add `"deadline"`, `"durationSecs"`, `"stopReason": null` to
-Phase 0 state. All other Phase 0 guarantees (agentMax ≤ 15, waveSize ≤ 5,
-staleKill, budgets) apply **unchanged**.
-
-**Discover → gate → decompose front end (Phase 1 overlay).** Prefer the gated
-front end over the raw list: discover via `/sge:available-issues`, reconcile
-(MANDATORY, Phase 1 pre-flight), then **gate every candidate through
-`/sge:build-ready-audit` before any claim** — **READY** → queue, **NOT_READY** →
-drop (blocker in `failedIssues`; never lock/spawn), **TOO_LARGE** →
-`/sge:decompose-issue` (re-gate children, merge READY ones, never claim the
-parent). That build-ready pass is also the **Phase 1.5 batch pre-classification**
-(#1266): its #872 fold's `governance` verdicts front-load `SGE_GOVTRACE_VERDICT`
-into each lane. **Re-fill** when the queue runs low, only if
-`time_remaining >= MIN_AGENT_RUNWAY`. [Full steps + fallbacks](references/mechanisms.md).
-
-**Spawn gate overlay (Phase 3).** A new impl lane spawns only if `now < DEADLINE`
-**and** `time_remaining >= MIN_AGENT_RUNWAY` **and** the wave/resource/CI gates
-pass **and** the queue is non-empty. `MIN_AGENT_RUNWAY` is a conservative
-one-issue estimate (default **20 min**); front-load, let the tail drain. **The
-clock is a first-class wake event:** every `Monitor` wait in Phases 3/4 is also
-bounded by `DEADLINE`, waking there to trigger shutdown.
-
-**Terminal conditions (`stopReason`):** `now >= DEADLINE` → **primary**, stop
-spawning, drain in-flight, report (`bound-hit`); `queue-empty`;
-`budget-exhausted`; `user-stop`. At the deadline: stop spawning at once (no
-new claims/worktrees), but **never hard-kill a productive in-flight lane because
-the clock struck** — allow a grace window (default **10 min** past `DEADLINE`) for
-the tail to drain, then hard-stop any remainder per the normal kill threshold,
-then Phase 6.
-
-**Invariants:** lanes run the Phase 3c Lean Agent Contract, never a full
-`/sge:sge-implement`; stale/over-budget lanes are NOT auto-requeued;
-the duration bound is the master stop (no run-forever);
-never start a lane that cannot finish before the deadline; never weaken a control
-to exit the loop (no skipped tests/`--no-verify`). Two former issue-swarm
-contradictions fixed: [rationale](references/rationale.md).
-
-`--dry-run` + `--duration`: discovery + gate read-only, print the plan **and
-budget arithmetic** (deadline, runway, projected waves), claim nothing. The
-Pre-Dispatch Safety Gate still runs in full.
+An overlay on the normal phases (folded in from the former `/sge:issue-swarm`, #808): `--duration <Nm|Nh>` makes the wall clock the **master terminal condition**. Defaults that apply every run: **deadline** — Phase 0 computes `DEADLINE = $(date -u +%s) + DURATION_SECS` (`Nm*60`/`Nh*3600`) and records `deadline`/`durationSecs`/`stopReason`; **runway** — spawn a lane only if `now < DEADLINE` and `time_remaining >= MIN_AGENT_RUNWAY` (default **20 min**); **drain** — at the deadline stop spawning at once, never hard-kill a productive lane, allow a **10 min** grace past `DEADLINE`, then Phase 6 (`stopReason: bound-hit`). Lanes run the Phase 3c Lean Agent Contract, never a full `/sge:sge-implement`; stale/over-budget lanes are NOT auto-requeued; never weaken a control to exit the loop. Gated front end, terminal conditions, invariants and `--dry-run` arithmetic: [`duration-mode.md`](references/duration-mode.md).
 
 ---
 
 ## Architecture
 
-Orchestrator state is ephemeral (`/tmp/team-pipeline-state.json`); issue locking
-is durable (GitHub `agent-lock` label). All spawned agents are **named `Task`
-invocations** (never detached/remote) so `TaskStop` can terminate any — the basis
-of Phase 4 stall detection and Phase 6 shutdown. Cross-session resume relies on
-the pushed branches, draft PRs, and `agent-lock` labels. Diagram + detail:
-[rationale](references/rationale.md).
+State is ephemeral (`/tmp/team-pipeline-state.json`), locking durable (`agent-lock`), every agent a named `Task`. Detail: [`references/architecture.md`](references/architecture.md).
 
 ---
 
@@ -229,19 +138,7 @@ Phase 0 state.
 
 ## Pre-Flight (MANDATORY)
 
-> **Target repo.** When dispatched from outside the target repo's checkout (a
-> hub/control session), apply [`gh-repo`](../gh-repo/SKILL.md): `cd` into the
-> target checkout and run its startup echo (raw `git`/worktree paths resolve from
-> cwd; `GH_REPO` alone is not enough).
-
-Run `git branch` (on main/base), `git status` (clean), `gh auth status`
-(authenticated — but in a Claude Code Routine sandbox the GitHub proxy injects
-auth and `GH_TOKEN`/`GITHUB_TOKEN` is the placeholder `proxy-injected`, so treat
-that as authenticated and skip the hard-exit; see
-[docs/routines-environment.md](../../docs/routines-environment.md)); resolve
-`WORKSPACE_ROOT`, `WORKTREE_BASE` (`$WORKSPACE_ROOT/.worktrees` — the pipeline's
-sanctioned exception), and `SIBLING_BASE` (canonical `../<repo>-worktrees/`).
-Commands: [mechanisms](references/mechanisms.md).
+Apply [`gh-repo`](../gh-repo/SKILL.md) when dispatched from outside the target checkout; confirm base branch, clean tree and `gh` auth; resolve `WORKSPACE_ROOT`, `WORKTREE_BASE` and `SIBLING_BASE`. Detail: [`references/preflight.md`](references/preflight.md).
 
 ---
 
@@ -294,23 +191,7 @@ gh label create "agent-lock" --color "D93F0B" \
 
 ## Phase 0.5 — Flush Unpushed Worktrees (MANDATORY)
 
-Before issue discovery, scan existing worktrees for commits never pushed; push
-them and create draft PRs so those issues become visible to CI and reviewers and
-the `agent-lock` label releases. Pass `--skip-flush` to bypass when worktrees are
-known clean. Scan **both** layouts — the in-repo `$WORKTREE_BASE/issue-*`
-exception **and** the canonical sibling `$SIBLING_BASE/*` (scanning only
-`.worktrees/issue-*` let stray-path worktrees escape — epic #730).
-
-**Reconcile before pushing (MANDATORY — issue #856):** never flush landed work. A
-candidate is flushed only if **both** gates pass — (1) **Novelty:**
-`git cherry origin/main` shows patches not already on main (robust to
-single-commit squash); (2) **Open-issue:** the linked issue is still **open** (a
-closed issue's branch is presumed landed — catches the multi-commit squash
-false-positive gate 1 misses). Anything failing either is **a `/sge:tidy-worktrees`
-candidate, never pushed**. The bundled, regression-tested `assets/reconcile-flush.sh`
-(#729) applies both gates across both layouts and emits JSON (`candidates[]` with
-`decision` `"flush"`/`"tidy"` + reason). **Push + draft-PR only `flush`
-candidates**; hand `tidy` off. Bash: [mechanisms](references/mechanisms.md).
+Before discovery, flush never-pushed worktree commits (both the in-repo `$WORKTREE_BASE/issue-*` and sibling `$SIBLING_BASE/*` layouts) to draft PRs — but only candidates that pass `assets/reconcile-flush.sh`'s novelty and open-issue gates (#856); everything else is a `/sge:tidy-worktrees` hand-off, never pushed. `--skip-flush` bypasses. Detail: [`references/flush.md`](references/flush.md).
 
 ---
 
@@ -331,38 +212,29 @@ already does this — don't double-filter). Optional filters `--module` (label
 
 After building the candidate list, **always** run
 `scripts/reconcile-worklist.mjs` before storing the queue — it drops issues
-already closed or with a merged PR so no agent re-does completed work. Guard the
+already closed or with a merged PR so no agent re-does completed work, then
+`scripts/linked-prs.sh` drops any issue an open PR already references. Guard the
 call `|| { echo "reconcile failed — aborting pipeline"; exit 1; }`: on exit code 2
 (`gh` unavailable) or any error the pipeline stops rather than proceed with a
 stale queue. **Never omit this guard.** Store the result as an ordered array in
 `/tmp/team-pipeline-queue.json`. Exact discovery, dependency-gate, and reconcile
 commands: [mechanisms](references/mechanisms.md).
 
-### Phase 1.5 — Batch pre-classification (front-load governance; DEFAULT)
+### Phase 1.5 — Intake gate (MANDATORY, SPEC-126)
 
-Once the queue is stored, **batch-classify the whole wave in ONE hop** before
-fanning out: run `/sge:build-ready-audit` over the queued issues (its #872 fold
-runs `/sge:governance-trace` per issue, returning a `governance` verdict each). Store verdicts by issue; Phase 3c injects
-each into its lane as `SGE_GOVTRACE_VERDICT`, which the lane's gate **adopts**
-instead of forking — removing the 10–15 min/lane fork (#10729); gate
-stays. **Opt-out/fallback:** any issue the batch can't classify (dropped,
-errored, `--skip-governance`) arrives with no `SGE_GOVTRACE_VERDICT` and its lane
-falls through to a per-lane fork exactly as before — the gate is never skipped,
-only its fork front-loaded away. Full contract: [dispatch-prompts](references/dispatch-prompts.md).
+Once the queue is reconciled, keep **only** issues whose `scripts/intake-check.sh`
+passes; the rest are `awaiting-intake` in `failedIssues` — never claimed. The
+human-approved governance verdict travels in the intake record and each lane
+adopts it there (Phase 3c Step 2), so no per-lane fork runs for it; no lane is
+ever handed an `SGE_GOVTRACE_VERDICT` (never adopted — provenance unknown).
+Commands: [intake gate](references/mechanisms.md#intake-gate).
 **Same pass, run `resolve-tier.sh` per issue, store the result** (#2488) — [commands](references/mechanisms.md#per-lane-model-tier-2488).
 
 ---
 
 ## Phase 2 — Spawn PR Monitor Agent (always first)
 
-Before spawning any implementation agent, start the PR monitor as a **named
-Task** (stoppable-only). Its prompt MUST state: the 40 000-token budget target;
-run `/sge:pr-monitor` continuously until signalled to stop; append one JSON line
-per action to `/tmp/team-pipeline-prmonitor.log`; at each cycle end read
-`/tmp/team-pipeline-state.json` and exit after the cycle if
-`prMonitorStatus == "stop"`; do NOT implement issues. The name `"pr-monitor"`
-lets `TaskStop "pr-monitor"` work in Phase 6. Full prompt: [dispatch-prompts](references/dispatch-prompts.md).
-Set `prMonitorStatus = "running"`.
+Before any implementation agent, start the PR monitor as a named Task `"pr-monitor"` running `/sge:pr-monitor` as a **bounded pass**, never an unbounded poller (#2914); set `prMonitorStatus = "running"`. Prompt requirements: [`references/pr-monitor-agent.md`](references/pr-monitor-agent.md).
 
 ---
 
@@ -373,42 +245,15 @@ honour the verdict (the fan-out gate env-health documents team-pipeline as
 calling). Re-run once at the start of each subsequent wave's dispatch (not per
 agent).
 
-| Verdict | Action |
-|---|---|
-| `PASS` | proceed — spawn the wave at full `waveSize`. |
-| `THROTTLE` | proceed at reduced concurrency + env-health's stagger spacing. |
-| `REFUSE` | do NOT spawn. Let env-health remediate (or wait on the saturation condition), then re-run the preflight before retrying. |
+`PASS` spawns the full wave, `THROTTLE` spawns at reduced concurrency with env-health's stagger, `REFUSE` spawns nothing until a re-run preflight passes ([verdict table](references/env-health-gate.md)).
 
 ---
 
 ## Phase 3 — Wave-Gated Agent Spawning
 
-> **Wave discipline:** spawn at most `waveSize` (≤ 5) impl agents per wave. A
-> wave is "landed" when ≥1 lane opens a draft PR or is stale/hard-killed by the
-> time-box. Only after a wave lands may the next begin — enforced **before** the
-> resource gate (a secondary check within each wave dispatch).
+Spawn at most `waveSize` (≤ 5) impl agents per wave; when the wave is full, **BLOCK until a lane lands** (≥1 draft PR, or a stale/hard-killed lane), event-driven on completion files, and spawn nothing more meanwhile even if load would allow it. Detail and log lines: [`references/wave-discipline.md`](references/wave-discipline.md).
 
-When `count(activeAgents) >= waveSize`, the wave is full: **BLOCK until a lane
-lands** (event-driven — `Monitor` on completion files, not `sleep`). While a wave
-has not landed, **do not spawn additional agents** even if CPU/load gating would
-permit it. Log `[Wave] wave_active=<N>/<waveSize> — waiting for landing` per
-blocked check.
-
-### 3a. Resource gate
-
-Before EVERY new spawn within a wave: sample cores + load; if
-`LOAD_INT >= LOAD_LIMIT` (80% of cores) **wait on the condition, not the clock** —
-the [wait-for-condition loop](../loops/SKILL.md#b-wait-for-condition-loop):
-`Monitor` re-sampling load, waking when it drops (never a foreground `sleep`).
-After the gate passes, stagger by a **Monitor-managed minimum delay** (10s/30s/60s
-at <30% / 30-60% / >60% load). Commands + stagger table:
-[mechanisms](references/mechanisms.md).
-
-### 3b. CI capacity gate
-
-Count open PRs; if `OPEN_PRS >= CI_LIMIT`, **wait until a slot frees** (a merge)
-via `Monitor` re-counting open PRs — not a fixed interval. Command:
-[mechanisms](references/mechanisms.md).
+**3a/3b gates.** Before every spawn within a wave, wait on the condition (never a foreground `sleep`) until load is under `LOAD_LIMIT` (80% of cores), then stagger; and while open PRs are at `CI_LIMIT`, wait for a slot to free. Detail: [`references/resource-and-ci-gates.md`](references/resource-and-ci-gates.md).
 
 ### 3c. Claim and spawn
 
@@ -420,9 +265,10 @@ budget target, the full **Lean Agent Contract** (Rules 1–3), and these Steps
 (full template: [dispatch-prompts](references/dispatch-prompts.md)):
 
 1. Export `SGE_AGENT_ID=impl-<N>` + `SGE_UNATTENDED=1` if unattended (#2487); cd worktree; read issue.
-2. **Governance-trace gate (MANDATORY, before writing any code):** adopt the
-   front-loaded `SGE_GOVTRACE_VERDICT` (Phase 1.5) when it matches this issue,
-   else run `/sge:governance-trace <N>` via `Agent`, never `Skill(args=)`
+2. **Intake + governance-trace gate (MANDATORY, before writing any code):** run
+   `intake-check.sh <N>` before any code — non-zero → `blocked` (`note:"intake: …"`);
+   file-map = its acMap. Adopt the record's verdict via `fork-util.mjs`
+   join, else run `/sge:governance-trace <N>` via `Agent`, never `Skill(args=)`
    (#2452); branch per `/sge:sge-implement` Phase 0.5's *Headless completion contract*.
    MATCHES_EXISTING
    / NO_SPEC_WARRANTED / NOT_ONBOARDED with `matchConfidence` not low → proceed.
@@ -430,7 +276,7 @@ budget target, the full **Lean Agent Contract** (Rules 1–3), and these Steps
    `/tmp/team-pipeline-agent-<N>.json` (`"outcome":"blocked","prNumber":null`,
    `note:"governance-trace: <why>"`) and **terminate WITHOUT building** (Phase 4
    4a parks it; never auto-override). **Caller owns Step W (§2.4a, #1938):** on
-   adoption `create_entities` the adopted verdict, `path: front-loaded`
+   adoption `create_entities` the adopted verdict, `path: intake`
    (fire-and-forget).
    **Fork result contract (#2452):** no verdict JSON / no `issue` echo / issue-repo mismatch → blocked ([ref](references/dispatch-prompts.md)).
 3. Implement the change (TDD per AC) per the Lean Agent Contract — draft PR on
@@ -449,7 +295,7 @@ When the health monitor reads a completion file with `outcome == "success"` and 
 `prNumber`, immediately spawn a review agent as a named Task
 `"review-<PR_NUMBER>"` (stoppable-only; **not** remote/detached; NOT
 resource-gated). Its prompt (60 000-token budget; resolve the **execution**
-checkout first; `/sge:pr-review #<PR>`; approve + `gh pr ready` or request-changes;
+checkout first; `/sge:pr-review #<PR>`; approve or request-changes (never `gh pr ready`: the impl lane undrafts, #2806);
 write `/tmp/team-pipeline-review-<PR>.json`) is in
 [dispatch-prompts](references/dispatch-prompts.md). Update `pendingReviews`.
 
@@ -478,68 +324,7 @@ JSONL="$(git rev-parse --show-toplevel)/memory/token-usage.jsonl"; mkdir -p "$(d
 
 ## Phase 4 — Health Monitor Loop
 
-Run while `activeAgents` or `pendingReviews` is non-empty. **Event-driven, not a
-fixed 60s poll** — the
-[wait-for-condition loop](../loops/SKILL.md#b-wait-for-condition-loop): `Monitor`
-wakes on the next completion-file or a stall threshold, whichever first (never
-busy-loop on a foreground `sleep`).
-
-**Implementation agents:**
-
-1. Read `/tmp/team-pipeline-agent-<N>.json` — if `completedAt` set the agent
-   finished; go straight to step 4/4a by `outcome` (a completed agent is never
-   stale, however long it ran). Only run steps 2–3 when `completedAt` is unset.
-2. Stall / stale detection (wall-clock only — no separate token-based kill):
-   - 0-15 min normal; 15–`staleKillMinutes` min, no PR → log activity `[WARN]`.
-   - > `staleKillMinutes` (default 20), no draft PR → STALE (time-box kill)
-   - > 45 min total → HARD KILL (same procedure; also catches a lane that overran
-     its Per-Task Budget target)
-3. On stale/kill: see *Stale-lane kill procedure*.
-4. On clean completion (`success` + `prNumber`): `persist_lane_usage` **before**
-   releasing the worktree (meter lives there — see *Durable token-usage
-   persistence*), comment the finish notice on the issue, spawn the review
-   agent, release worktree + lock, pull next issue — marks wave landed.
-4a. On governance-blocked completion (`outcome == "blocked"`, `prNumber` null) —
-    the governance-trace gate pausing for a human decision, not a stall/failure:
-    `persist_lane_usage` **before** releasing the worktree; comment the
-    needs-decision notice on the issue; release worktree + lock as a clean
-    completion would; append to `governanceBlockedIssues[]`
-    (`{"issue":<N>, "notedAt":"<ISO>", "note":"<note>"}`); log `[Blocked] Lane
-    #<N> paused — <note>`; pull the next issue (marks wave landed). Do **not**
-    add to `staleLanes`/`failedIssues` — the fix is a human decision on the
-    issue, not a re-scope.
-
-**Review agents:** read `/tmp/team-pipeline-review-<PR>.json`; > 10 min → stall
-(leave PR draft; pr-monitor handles it); on completion → `reviewedPRs` or log
-findings. **Running agents are never killed to free resources for a new spawn.**
-
-**Per-lane last-activity line + resource log (every tick, all active lanes)** —
-the **stall-detection signal**. Bash:
-[mechanisms](references/mechanisms.md).
-
-### Stale-lane kill procedure
-
-When a lane is stale (no draft PR after `staleKillMinutes`) — also the path for a
-lane past its *Per-Task Budget Contract* target (caught here by the wall clock),
-in order: (1) `TaskStop "impl-<N>"`; (2) remove
-`agent-lock` from the **tracking** issue (status stays there even for a cross-repo
-lane, SPEC-057 #1024); (3) `persist_lane_usage` **before** removing the worktree,
-using the recorded execution path `${AGENT_WORKTREE[<N>]}` (0 if never metered —
-the record still shows the lane ran); (4)
-`git -C "${AGENT_EXEC_ROOT[<N>]}" worktree remove … --force` from the **execution**
-checkout; (5) append to `staleLanes[]` (issue, killedAt, ageMinutes, lastCommit,
-`recommendation:"re-scope"`); (6) **comment the re-scope recommendation on the
-issue itself** (state is /tmp, dies with the session); (7) log
-`[Kill] Lane #<N> stale after <M>min`; (8) do NOT re-queue — add to `failedIssues`
-(reason `stale-killed`); (9) mark wave landed. A human decides whether to
-decompose before re-dispatch. All three templates:
-[mechanisms](references/mechanisms.md#lane-transition-issue-comments).
-
-### Adaptive scale-up
-
-If load < 40% for 3 consecutive checks AND the queue has issues AND
-`count(activeAgents) < waveSize` AND the wave has landed — spawn the next issue
-immediately (still wave-size-capped).
+Run while `activeAgents` or `pendingReviews` is non-empty, event-driven via the [wait-for-condition loop](../loops/SKILL.md#b-wait-for-condition-loop) (never a busy `sleep`). A completed lane goes straight to clean completion (persist usage **before** releasing the worktree, comment, spawn review, release, pull next) or the governance-blocked path (`governanceBlockedIssues[]`, not a failure). A lane with no draft PR after `staleKillMinutes` is STALE (> 45 min: HARD KILL) and takes the stale-lane kill procedure: not re-queued, re-scope recommendation commented on the issue. Running agents are never killed to free resources. Lane-transition comment templates: [mechanisms](references/mechanisms.md#lane-transition-issue-comments). Steps, kill procedure and adaptive scale-up: [`references/health-monitor.md`](references/health-monitor.md).
 
 ---
 
@@ -552,77 +337,19 @@ state -q '.state'` — if `CLOSED`, move BLOCKED → READY and spawn if a slot f
 
 ## Phase 6 — Shutdown and Report
 
-When queue is empty AND all agent maps are empty (or a Duration Mode terminal
-condition fired — that section covers the grace-window drain before this phase in
-a `--duration` run):
-
-1. Set `prMonitorStatus = "stop"`, wait ≤ 90s for the monitor to finish its cycle.
-2. Cleanup all worktrees and `agent-lock` labels: remove each lane's tree from the
-   **execution** checkout it was created in (`git -C "${AGENT_EXEC_ROOT[<N>]}"
-   worktree remove … --force` — a cross-repo tree lives under the execution repo,
-   SPEC-057 #1024); labels come off the **tracking** issue.
-3. Compute + print the summary (below), held as `$PHASE6_REPORT` for step 5.
-4. **Persist token usage durably (mandatory):** a gap-filler sweep for any file
-   Phase 4 didn't persist (a crash/resume can leave one unprocessed); lanes it
-   handled carry a `.persisted` marker and `persist_lane_usage` no-ops on them:
-   ```bash
-   for f in /tmp/team-pipeline-agent-*.json; do
-     [ -f "$f" ] || continue
-     ISSUE=$(jq -r '.issue' "$f"); TOKENS=$(jq -r '.tokensUsed // 0' "$f"); TS=$(jq -r '.completedAt' "$f")
-     persist_lane_usage "$ISSUE" "impl-${ISSUE}" "" "$TOKENS" "$TS"   # idempotent; skips marked lanes
-   done
-   ```
-5. **Post the run report durably (mandatory).** **Default:** append
-   `$PHASE6_REPORT` as a comment on the rolling "pipeline runs" tracking issue
-   (find-or-create once per repo). **When `SGE_BACKEND_URL` is set:** also POST via
-   the `/sge:roi-report` Step 6 snapshot (`reportType:"pipeline-run"`); on failure
-   do NOT abort (the issue-comment copy is primary). Bash: [mechanisms](references/mechanisms.md).
-6. **Emit the machine-readable exit report** — one fenced ` ```exit-report `
-   block in the final message, validating against the shared
-   [`exit-report`](../exit-report/SKILL.md) contract
-   ([`schema.json`](../exit-report/schema.json)): `skill: "team-pipeline"`,
-   `runId`, `duration` (s); one `outcomes[]` per worked issue (`item: "issue:<N>"`,
-   `status` per exit-report's legacy-shape table — `success`/`blocked` pass
-   through, `failed`/stale-killed→`failed` with the re-scope rec in `detail`);
-   `stopReason`; `followUps[]` (issues filed). A parent orchestrator parses it.
-
-Print the human-readable `$PHASE6_REPORT` (captured in step 3) with lines
-`Completed` (issues → PRs), `Reviewed` (approved + undrafted), `Changes` (PRs
-flagged), `Failed`, `Stale-killed` (per-lane: killed-at / age / re-scope rec),
-`Blocked (governance)` (per-issue note), `Duration`.
-Template: [mechanisms](references/mechanisms.md).
-
-`Stale-killed` is the human's action list (each needs decomposition or a file-map
-before re-dispatch). `Blocked (governance)` lists issues the governance-trace gate
-paused (from `governanceBlockedIssues[]`) — **not** failures or re-scope
-candidates; the issue carries the gate's comment; a human re-runs
-`/sge:sge-implement <n>` once resolved.
+When the queue is empty and all agent maps are empty (or a Duration Mode terminal condition fired): stop the PR monitor, remove every lane worktree from its **execution** checkout and the `agent-lock` labels from the **tracking** issues, then — all mandatory — run the `persist_lane_usage` gap-filler sweep (for any lane Phase 4 didn't persist), post `$PHASE6_REPORT` as a comment on the rolling "pipeline runs" tracking issue, and emit one fenced `exit-report` block per the shared [`exit-report`](../exit-report/SKILL.md) contract. Steps, report lines and the `Stale-killed` / `Blocked (governance)` semantics: [`references/shutdown-and-report.md`](references/shutdown-and-report.md).
 
 ---
 
 ## Options
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--duration <Nm\|Nh>` | off | Duration Mode: wall-clock master stop (see that section) |
-| `--agents N` | auto, capped at 3 | Max parallel impl agents (hard-clamped 15) |
-| `--wave-size N` | min(agentMax, 5) | Max lanes/wave; **hard-capped at 5** |
-| `--stale-kill Xm` | 20m | Kill no-draft-PR lanes after X min; → `staleLanes`, not requeued |
-| `--session-budget <tokens>` | 2 000 000 | Cap cumulative output, then stop spawning |
-| `--pool-size N` | agentMax x 3 | Issues to discover upfront |
-| `--module <name>` / `--milestone <name>` | all | Filter by `module:` label / milestone |
-| `--ci-limit N` | 25 | Max open PRs before pausing spawns |
-| `--dry-run` / `--skip-flush` | off | Preview only / skip the Phase 0.5 flush |
+Flags: `--duration <Nm|Nh>`, `--agents N` (auto, capped at 3; hard-clamped 15), `--wave-size N` (hard-capped at 5), `--stale-kill Xm` (20m), `--session-budget <tokens>` (2 000 000), `--pool-size N`, `--module`/`--milestone`, `--ci-limit N` (25), `--dry-run`, `--skip-flush`. Defaults and descriptions: [`references/options.md`](references/options.md).
 
 ---
 
 ## Global-Blast-Radius Carve-Outs
 
-A **carve-out** PR (lockfiles, shared config, CI workflows, codegen/migrations,
-or bot-authored) has global blast radius: partial test runs are **not**
-evidence of green — **never consider it green until the full suite passes on
-CI**, enforced by pr-monitor, the Phase 4 monitor, and the Phase 3d agent.
-Detector: [`pr-monitor` Appendix A](../pr-monitor/SKILL.md#appendix-a--global-blast-radius-carve-outs).
+A carve-out PR (lockfiles, shared config, CI workflows, codegen/migrations, bot-authored) is **never green until the full suite passes on CI**. Detail: [`references/carve-outs.md`](references/carve-outs.md).
 
 ---
 
@@ -635,13 +362,7 @@ Recovery for "No issues found", "Worktree already exists", "Agent stalled",
 
 ## Related commands
 
-- `/sge:issue-swarm` (router stub) · `/sge:issue-loop` (serial, full `/sge:sge-implement`)
-- `/sge:available-issues`, `/sge:build-ready-audit`, `/sge:decompose-issue` — discover/gate/decompose
-- `/sge:tidy-worktrees` — Phase 0.5 non-flush hand-off (never pushed)
-- `/sge:sge-implement [N]` — single issue end-to-end (blocked-fix path)
-- `/sge:governance-trace [N]` — pre-build gate; batched (Phase 1.5) as `SGE_GOVTRACE_VERDICT` (#1266)
-- `/sge:pr-monitor`, `/sge:pr-review [PR]`, `/sge:pr-fix [PR]` — shepherd/review/drive green
-- `/sge:cleanup`, `/sge:reap-orphans` — dev-box reset+reaper (`/loop 30m` hygiene)
+The serial sibling `/sge:issue-loop`, plus the discover, gate, implement, review and hygiene skills this pipeline composes: [`references/related-commands.md`](references/related-commands.md).
 
 Shared refs (canonical, cited above): [`worktrees`](../worktrees/SKILL.md) ·
 [`gh-repo`](../gh-repo/SKILL.md) · [`exit-report`](../exit-report/SKILL.md).

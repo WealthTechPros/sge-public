@@ -8,7 +8,7 @@
 # can pass `model: <tier>` to Agent(name, model:) instead of a bare spawn that
 # silently inherits whatever model the session happens to be running.
 #
-# Tier heuristic (per issue #2488's "Proposed" + agents/agent-registry.md's
+# Tier heuristic (per issue #2488's "Proposed" + docs/agent-registry.md's
 # routing table, which this mirrors rather than replaces):
 #   haiku  — mechanical/docs/rename, <=50 changed-lines estimate (from the
 #            issue's file-map line-count hints, when present), no
@@ -37,7 +37,7 @@
 
 # NO `set -e` at file scope: this file is sourced by the test suite.
 
-# CRITICAL escalation signal (agents/agent-registry.md's CRITICAL escalation
+# CRITICAL escalation signal (docs/agent-registry.md's CRITICAL escalation
 # rule) — security/auth, DB migrations, multi-tenant/data-isolation. Checked
 # LAST so it always overrides a haiku/sonnet match on the same text.
 _critical_signal() {

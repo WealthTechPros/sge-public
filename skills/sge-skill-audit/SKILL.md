@@ -1,5 +1,5 @@
 ---
-description: Use when you want to score the quality of one or more SGE skills against the SQ-0–SQ-5 skill-quality dimensions (Frontmatter Integrity, Executability, Cost-Awareness, Scope Clarity, UNTRUSTED DATA annotation, Tool Sequencing). Run against a single skill before merging a SKILL.md change, or sweep all skills for a fleet quality report. Also the delegation target for /sge:sge-align's skill-quality dimension (that wiring lives in sge-align; this skill works identically standalone).
+description: Use when scoring SGE skill quality against SQ-0–SQ-5 (frontmatter, executability, cost-awareness, scope, UNTRUSTED DATA annotation, tool sequencing) — one skill before merging a SKILL.md change, or a fleet sweep. Delegation target for /sge:sge-align --dimension skill-quality.
 argument-hint: "[skill-name | --all] [--fix]"
 ---
 
@@ -42,7 +42,7 @@ When sge-align routes its skill-quality dimension here (`/sge:sge-align --dimens
 |----|-----------|---------------|-----|
 | **SQ-0** | Frontmatter Integrity | Does `SKILL.md` open with a **closed** `---` YAML frontmatter block containing a non-empty `description:`? Broken frontmatter means the model never sees the skill — auto-invocation silently dies | Script: `assets/scan-skills.sh` |
 | **SQ-1** | Executability | When invoked with minimal well-formed input, can the skill reach a valid terminal state without a tool error or internal abort? | Static (model-judged): checks for unbounded recursion, missing required `$ARGUMENTS` handling, tool calls with no fallback path |
-| **SQ-2** | Cost-Awareness | Does the skill avoid known token-expensive anti-patterns, and stay within the **35 KB (35,840-byte) SKILL.md size budget**? | Static (model-judged): detects recursive tool chains with no depth bound, context-dump reads without scoping (`ls -R /`, `cat -r`), unrestricted web fetches in loops. Size budget is a byte count — also enforced as a **fatal** gate by the skills CI (`.github/scripts/skills-ci-lint.sh` check 5, issue #825) |
+| **SQ-2** | Cost-Awareness | Does the skill avoid known token-expensive anti-patterns, and stay within the **24 KB (24,576-byte) SKILL.md size budget**? | Static (model-judged): detects recursive tool chains with no depth bound, context-dump reads without scoping (`ls -R /`, `cat -r`), unrestricted web fetches in loops. Size budget is a byte count — also enforced as a **fatal** gate by the skills CI (`.github/scripts/skills-ci-lint.sh` check 5, issue #825) |
 | **SQ-3** | Scope Clarity | Does `SKILL.md` have both `## Role` and `## Out of scope` headers? | Script: `assets/scan-skills.sh` |
 | **SQ-4** | UNTRUSTED DATA | When the skill accepts user-supplied or external inputs, does it annotate them as UNTRUSTED DATA? | Script: `assets/scan-skills.sh` |
 | **SQ-5** | Tool Sequencing | For skills that call multiple tools, does `SKILL.md` describe the intended call order or dependency? | Script: `assets/scan-skills.sh` |
@@ -122,10 +122,10 @@ Flag as **WARN** if:
 **SQ-2: Cost-Awareness**
 
 Read the SKILL.md body. Flag as **FAIL** if any of:
-- **The SKILL.md exceeds the 35 KB size budget (35,840 bytes).** A skill's whole
+- **The SKILL.md exceeds the 24 KB size budget (24,576 bytes).** A skill's whole
   body is loaded into context on auto-invocation, so an over-budget SKILL.md
   taxes every session that triggers it. Measure with `wc -c SKILL.md`; over
-  35,840 bytes = FAIL. Remedy: move detail into `references/` and load it on
+  24,576 bytes = FAIL. Remedy: move detail into `references/` and load it on
   demand (progressive disclosure). This budget is also a **fatal** skills-CI
   gate (`.github/scripts/skills-ci-lint.sh` check 5, issue #825), so an
   over-budget skill blocks its PR regardless of this audit.

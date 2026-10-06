@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * resolve-context-depth.mjs — complexity-tiered context depth for
- * `/sgd:sgd-preflight` and `/sgd:sgd-implement` (#809, epic #785 S2).
+ * `/sge:sge-preflight` and `/sge:sge-implement` (#809, epic #785 S2).
  *
  * Pure function over a change's touched paths (and optional complexity score):
  * paths in, a context-DEPTH decision out. It answers the question "how deep
@@ -18,7 +18,7 @@
  *   - `critical` -> depth `full`    — the change touches a CRITICAL path
  *                  (security/auth, database migrations, or multi-tenant /
  *                  data-isolation boundaries — the *same* list
- *                  `agents/agent-registry.md` escalates to `opus`). Read the
+ *                  `docs/agent-registry.md` escalates to `opus`). Read the
  *                  full L0-L8 artefact stack; scoping is DELIBERATELY bypassed.
  *
  * Non-goal guard (epic #785; issue #809): CRITICAL-path context must NEVER be
@@ -49,12 +49,16 @@ function normalisePath(p) {
 }
 
 // CRITICAL-path patterns — kept deliberately aligned with the CRITICAL
-// escalation rule in `agents/agent-registry.md`: "security/auth, database
+// escalation rule in `docs/agent-registry.md`: "security/auth, database
 // migrations, or multi-tenant / data-isolation boundaries". Matching is on
 // path segments / filenames. Over-matching here is SAFE (it only ever reads
 // *more* context); under-matching would breach the non-goal guard, so the
 // terms err toward inclusion.
-const CRITICAL_RE = [
+// Exported (in addition to the local alias below) so sibling classifiers —
+// e.g. resolve-governance-tier.mjs's process-tier risk map — reuse this
+// exact pattern set rather than re-deriving it (proportional
+// governance proposal).
+export const CRITICAL_RE = [
   // security / auth
   /(^|\/)(auth|authn|authz|security|login|logout|signin|signup|session|sessions|credential|credentials|secret|secrets|oauth|oidc|saml|sso|rbac|password|passwords|permission|permissions)([/._-]|$)/i,
   // database migrations
@@ -87,7 +91,7 @@ const TRIVIAL_RE = TRIVIAL;
 
 // A trivial-tier change must also be genuinely small. A docs/config-only diff
 // with a high complexity score (e.g. a large config-driven surface) is treated
-// as `standard`, not `trivial`. Mirrors the sgd-implement Phase 2 rubric
+// as `standard`, not `trivial`. Mirrors the sge-implement Phase 2 rubric
 // (<= 15 == Small).
 const TRIVIAL_SCORE_MAX = 15;
 
@@ -187,7 +191,7 @@ export function resolveContextDepth(input = {}) {
 const USAGE = `Usage: node scripts/resolve-context-depth.mjs [--paths "a,b,c"] [--score N] [path ...]
 
 Maps a change's touched paths (+ optional complexity score) to a context
-DEPTH for /sgd:sgd-preflight and /sgd:sgd-implement:
+DEPTH for /sge:sge-preflight and /sge:sge-implement:
   trivial  -> digest  (docs/config-only, low complexity)
   standard -> scoped  (code change: digest + resolve-context-scope specs/ADRs)
   critical -> full    (security/auth, DB migration, or multi-tenant path: full L0-L8, never thinned)

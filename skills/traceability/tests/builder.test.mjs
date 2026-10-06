@@ -77,7 +77,7 @@ const SAMPLE_PRS = [
   { number: 1, title: 'feat: add SPEC-001 thing', state: 'closed', merged: true, headRefName: 'feat/spec-001-foo', body: 'Spec: SPEC-001', author: 'alice', createdAt: '2024-01-01T00:00:00Z', mergedAt: '2024-01-02T00:00:00Z', url: 'https://github.com/org/repo/pull/1' },
   { number: 2, title: 'feat: SPEC-002 other', state: 'closed', merged: true, headRefName: 'feat/spec-002-bar', body: '', author: 'bob', createdAt: '2024-01-03T00:00:00Z', mergedAt: '2024-01-04T00:00:00Z', url: 'https://github.com/org/repo/pull/2' },
   { number: 3, title: 'chore: update deps', state: 'closed', merged: true, headRefName: 'chore/deps', body: 'No spec', author: 'carol', createdAt: '2024-01-05T00:00:00Z', mergedAt: '2024-01-06T00:00:00Z', url: 'https://github.com/org/repo/pull/3' },
-  { number: 4, title: 'feat: another SPEC-001 change', state: 'open', merged: false, headRefName: 'feat/spec-001-baz', body: 'SPEC-001', author: 'dave', createdAt: '2024-01-07T00:00:00Z', mergedAt: null, url: 'https://github.com/org/repo/pull/4' },
+  { number: 4, title: 'feat: another SPEC-001 change', state: 'open', merged: false, headRefName: 'feat/spec-001-baz', body: 'SPEC-001', author: 'dana', createdAt: '2024-01-07T00:00:00Z', mergedAt: null, url: 'https://github.com/org/repo/pull/4' },
 ];
 
 describe('buildTraceabilityData', () => {

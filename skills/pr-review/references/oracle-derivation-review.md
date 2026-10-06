@@ -2,7 +2,7 @@
 
 **Reading the diff is not enough when the diff defines what "correct" means.** `DIFF_RISK` and the adversarial tier (`CONTROL_BEARING`) both verify that controls work and code is correct — but they verify *against the spec*. If the spec's own acceptance criterion or test oracle was derived by the same AI session that drafted the spec, a second AI session verifying implementation against that spec is still just checking two AI-derived artefacts for internal consistency, not whether the oracle itself is true. This lens operates one layer upstream: **invariant-vs-truth**, not implementation-vs-invariant.
 
-Confirmed in practice: adviser-mcp ADR-0008 added this as a control after observing that "AI checks its own AI-derived work" is a structural risk whenever specs and tests are substantially AI-drafted — not specific to any one repo.
+Confirmed in practice: a product repo's ADR added this as a control after observing that "AI checks its own AI-derived work" is a structural risk whenever specs and tests are substantially AI-drafted — not specific to any one repo.
 
 ```bash
 ORACLE_BEARING=$(rl_diff_oracle_bearing "$PR")   # 1|0, issue #2222
@@ -20,7 +20,7 @@ When `ORACLE_BEARING=1`, apply the oracle-derivation lens:
 
 **Q2 — Adversarial construction.** Can the reviewer construct a case where this invariant is satisfied by *incorrect* output (the invariant passes, but the actual domain rule is violated)? If yes: `{severity:"major", category:"correctness", finding:"oracle admits incorrect output — <constructed counterexample>"}`.
 
-**Q3 — Derivation independence.** Was this invariant/oracle derived by a session different from the one that drafted the spec it supports? (This is a different independence axis from reviewer-identity independence in `#2219` — it is about the reasoning session that produced the oracle, not the identity reviewing code.) If the same session both drafted the spec and derived the oracle, note it as `{severity:"minor", category:"traceability", finding:"oracle derivation not independently reviewed — same session authored both spec and invariant (adviser-mcp ADR-0008 pattern)"}`.
+**Q3 — Derivation independence.** Was this invariant/oracle derived by a session different from the one that drafted the spec it supports? (This is a different independence axis from reviewer-identity independence in `#2219` — it is about the reasoning session that produced the oracle, not the identity reviewing code.) If the same session both drafted the spec and derived the oracle, note it as `{severity:"minor", category:"traceability", finding:"oracle derivation not independently reviewed — same session authored both spec and invariant (a product repo's ADR pattern)"}`.
 
 ## What "applies" means in practice
 

@@ -11,6 +11,14 @@
  *   • File path already present on the `main` branch (or --base-branch)
  *   • BDD spec ID already claimed in more than one open PR's diff (conflict)
  *
+ * and FLAGS (keeps, listed under "partial") an open issue that a merged
+ * `Part of #N` PR has partly built (#2793) — no closing reference exists.
+ * The Part-of search is best-effort (#2796): it reads at most 100 merged PRs
+ * per issue, and when the `gh` search fails the issue is kept and listed under
+ * "partialUnchecked" with the error, never silently treated as untouched.
+ * intake-check.sh runs its own search and fails closed, so this flag is a
+ * report, not the gate.
+ *
  * Returns only genuinely-remaining work so dispatch skills never re-do
  * completed work.
  *
@@ -39,6 +47,8 @@
  * Output (--json):
  *   {
  *     "keep":    [103, "src/bar.ts"],
+ *     "partial": [{"item": 103, "prs": [470]}],
+ *     "partialUnchecked": [],   // [{"item": N, "error": "..."}] when the Part-of search failed
  *     "dropped": [
  *       {"item": 101, "reason": "closed issue"},
  *       {"item": 102, "reason": "merged PR (#456)"},
@@ -114,7 +124,7 @@ Exit codes: 0=ok  1=usage error or conflict detected  2=gh not available
 
 Examples:
   # Check BDD ownership before dispatching parallel agents
-  node scripts/reconcile-worklist.mjs --spec-ids SPEC-057,SPEC-069 --repo WealthTechPros/sgd
+  node scripts/reconcile-worklist.mjs --spec-ids SPEC-057,SPEC-069 --repo WealthTechPros/sge
 
   # Machine-readable conflict report
   node scripts/reconcile-worklist.mjs --spec-ids SPEC-057,SPEC-069 --json
@@ -239,7 +249,28 @@ async function checkIssue(num) {
     return { keep: false, reason: `merged PR (#${mergedRef.number})` };
   }
 
+  // `Part of #N` creates no closing reference, so a partly-built issue looks
+  // untouched above (#2793). Keep it, but flag the merged slices.
+  try {
+    const merged = ghJson(
+      "pr", "list", "--state", "merged", "--limit", "100",
+      "--search", `"Part of #${num}" in:body`, "--json", "number,body",
+      ...repoFlag
+    );
+    const prs = partOfPrs(num, merged);
+    if (prs.length) return { keep: true, reason: null, partial: prs };
+  } catch (err) {
+    console.error(`warning: could not search merged Part-of PRs for #${num}: ${err.message}`);
+    return { keep: true, reason: null, partialError: err.message };
+  }
+
   return { keep: true, reason: null };
+}
+
+// Pure: numbers of the PRs whose body says `Part of #<num>` (not #<num>0…).
+export function partOfPrs(num, prs) {
+  const re = new RegExp(`Part of #${num}(?![0-9])`, "i");
+  return prs.filter((pr) => re.test(pr.body ?? "")).map((pr) => pr.number);
 }
 
 // ---------------------------------------------------------------------------
@@ -544,10 +575,14 @@ if (isMain && specIds.length > 0) {
 if (isMain) {
 const keepList = [];
 const droppedList = [];
+const partialList = [];
+const partialUncheckedList = [];
 
 // Check issues
 for (const num of issueNums) {
-  const { keep, reason } = await checkIssue(num);
+  const { keep, reason, partial, partialError } = await checkIssue(num);
+  if (partial) partialList.push({ item: num, prs: partial });
+  if (partialError) partialUncheckedList.push({ item: num, error: partialError });
   if (keep) {
     keepList.push(num);
   } else {
@@ -576,7 +611,7 @@ const stats = {
 // Output
 // ---------------------------------------------------------------------------
 if (jsonMode) {
-  console.log(JSON.stringify({ keep: keepList, dropped: droppedList, stats }, null, 2));
+  console.log(JSON.stringify({ keep: keepList, dropped: droppedList, partial: partialList, partialUnchecked: partialUncheckedList, stats }, null, 2));
 } else {
   console.log(
     `Reconcile pre-flight: ${stats.total} candidate(s) → ` +
@@ -595,6 +630,14 @@ if (jsonMode) {
       console.log(`DROPPED  ${typeof item === "number" ? `#${item}` : item}  ${dropped.reason}`);
     } else {
       console.log(`KEEP     ${typeof item === "number" ? `#${item}` : item}`);
+    }
+    const part = partialList.find((x) => x.item === item);
+    if (part) {
+      console.log(`PARTIAL  #${item}  merged Part-of PR ${part.prs.map((n) => `#${n}`).join(", ")}`);
+    }
+    const unchecked = partialUncheckedList.find((x) => x.item === item);
+    if (unchecked) {
+      console.log(`UNCHECKED #${item}  Part-of search failed: ${unchecked.error}`);
     }
   }
 }
