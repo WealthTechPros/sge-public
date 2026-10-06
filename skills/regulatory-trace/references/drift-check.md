@@ -89,7 +89,7 @@ C10/C11). Concretely:
    ```
 5. **Step 5 JSON:** add a `checks[]` entry `{ "id": "C12", "layer": "regulatory", ... }`
    and a top-level `regulatoryTraceability` key mirroring the `agentSecurity`
-   block — the machine-readable record FCA/DD reviewers and trust-fabric consume:
+   block — the machine-readable record FCA/DD reviewers and a trust portal consume:
    ```json
    "regulatoryTraceability": {
      "status": "fail",

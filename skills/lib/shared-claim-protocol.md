@@ -1,6 +1,6 @@
 # Shared PR claim protocol
 
-Every agent that touches a PR takes and honours **one** claim. That includes orchestrator sessions, their subagents, `/sge:pr-review`, `/sge:pr-fix`, and the review daemon (PR Warden). This stops two agents from working the same PR at once. Tracked as WealthTechPros/wtp-org#992, item 5.
+Every agent that touches a PR takes and honours **one** claim. That includes orchestrator sessions, their subagents, `/sge:pr-review`, `/sge:pr-fix`, and the review daemon (PR Warden). This stops two agents from working the same PR at once.
 
 ## The claim
 

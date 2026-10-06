@@ -1,5 +1,5 @@
 ---
-description: Use when a single GitHub issue is too large to implement in one session and should be split into ordered, parallel-safe child sub-tasks — an enabler plus independent vertical slices that can be worked concurrently without touching the same files. Use whenever the user asks to decompose, break down, split, or fan out a large issue, or when /sge:sge-implement Phase 2 sizes an issue as Large (> 30). Not for building — it creates the child issues and the orchestration plan, then hands off to the implementation pipeline.
+description: Use when an issue is too large for one session and should be split into ordered, parallel-safe child issues (an enabler plus vertical slices) — decompose, break down, split or fan out, or /sge:sge-implement sizes it Large. Creates the child issues and plan; does not build.
 argument-hint: "<issue-number> [--dry-run] [--no-comment]"
 ---
 
@@ -9,17 +9,17 @@ argument-hint: "<issue-number> [--dry-run] [--no-comment]"
 Split one oversized GitHub issue into an enabler plus parallel-safe story children, with dependency and conflict metadata, so they can be pipelined concurrently.
 
 ## Out of scope
-- Implementing any child issue (hands off to `/sge:sge-implement` / `/sge:implement-issue`)
+- Implementing any child issue (hands off to `/sge:sge-implement`)
 - Decomposing issues that score Small or Medium unless the user insists
 - Deep per-spec entry checks (that is `/sge:sge-preflight`)
 
 **Take one large issue and split it into ordered child sub-tasks — a technical enabler plus independent vertical slices — annotated with dependency and conflict metadata so they can be worked concurrently and flowed through `/sge:team-pipeline`.**
 
-This is the standalone version of the complexity-sizing and child-issue logic that lives inside `/sge:sge-implement` (Phase 2). It does **not** implement anything: it sizes the issue, decides whether a split is warranted, and — if so — creates the child issues and records the build order. The hand-off to build is `/sge:sge-implement <child>` (SGE spec issues) or `/sge:implement-issue <child>` (general issues).
+This is the standalone version of the complexity-sizing and child-issue logic that lives inside `/sge:sge-implement` (Phase 2). It does **not** implement anything: it sizes the issue, decides whether a split is warranted, and — if so — creates the child issues and records the build order. The hand-off to build is `/sge:sge-implement <child>` (spec and general issues alike).
 
 It runs **inline** in the main conversation — do not fork it into a subagent. The sizing and conflict analysis (Phase 2–3) may be delegated to subagents for a large blast radius; the split decision (Phase 4) and the child-issue creation (Phase 5) are interactive.
 
-> **Target repo.** Phases 1–6 read the parent (`gh issue view`) and write the children through the ALM write seam `$IW` (`scripts/issue-write.sh` — `create`/`comment`; `gh issue edit` for labels on the GitHub path) against the current working directory. When decomposing from a hub/control checkout (e.g. `wtp-org`) or when `/sge:sge-implement` Phase 2 dispatches this against another repo, apply the shared repo-targeting convention — [`gh-repo`](../gh-repo/SKILL.md) — first: `cd` into the target checkout (or `export GH_REPO=owner/repo`) and run its startup echo, so the child issues are created in the right repo rather than silently in the hub. Same-repo: leave `GH_REPO` unset.
+> **Target repo.** Phases 1–6 read the parent (`gh issue view`) and write the children through the ALM write seam `$IW` (`scripts/issue-write.sh` — `create`/`comment`; `gh issue edit` for labels on the GitHub path) against the current working directory. When decomposing from a hub/control checkout (e.g. an org hub repo) or when `/sge:sge-implement` Phase 2 dispatches this against another repo, apply the shared repo-targeting convention — [`gh-repo`](../gh-repo/SKILL.md) — first: `cd` into the target checkout (or `export GH_REPO=owner/repo`) and run its startup echo, so the child issues are created in the right repo rather than silently in the hub. Same-repo: leave `GH_REPO` unset.
 
 ## Usage
 
@@ -39,7 +39,7 @@ It runs **inline** in the main conversation — do not fork it into a subagent. 
 > attempt and executed arbitrary commands — the harness never gives `bash -c`
 > a real argv, so that pattern isn't actually safe here even though it is in
 > a normal shell; see
-> [`no-positional-args-in-injection.test.sh`](../tests/no-positional-args-in-injection.test.sh)
+> `no-positional-args-in-injection.test.sh` (SGE source repo: `skills/tests/no-positional-args-in-injection.test.sh`)
 > and upstream anthropics/claude-code#16163). Fetch the issue as a **real
 > Bash tool call you issue yourself**, extracting the leading numeric token
 > from the parsed `$ARGUMENTS` text of your own invocation (not re-interpolated
@@ -84,7 +84,7 @@ Score the parent against the **canonical SGE complexity rubric** — the same on
 
 For non-backend work, map the signals analogously (e.g. stores/schemas ≈ models, components ≈ methods, screens/routes ≈ routes).
 
-- **≤ 15**: Small — does **not** warrant a split. Report the score and recommend implementing directly via `/sge:sge-implement` / `/sge:implement-issue`. Stop here unless the user insists.
+- **≤ 15**: Small — does **not** warrant a split. Report the score and recommend implementing directly via `/sge:sge-implement`. Stop here unless the user insists.
 - **16–30**: Medium — a split is optional. Implementable directly with incremental commits per vertical slice. Offer the split as a choice but recommend against it unless the slices are genuinely parallelisable across agents.
 - **> 30**: Large — **split into child issues before implementing.** Proceed to Phase 3.
 
@@ -145,30 +145,7 @@ The output of this phase is a small DAG: the enabler at the root, vertical slice
 
 A file map is only worth the recon it saves if its paths are real. The Lean Agent Contract tells lanes to orient **only** from the file map (capped recon, no open-ended search), so a phantom path sends a lane hunting for files that aren't there before it can even start — a wrong map is worse than none. (In the 2026-07-16 swarm a child map named `skills/lib/forgejo-adapter.sh` and `skills/**/with-repo-cwd.sh`; `skills/lib/` did not exist and the resolver was at `scripts/with-repo-cwd.sh`, so the lane burned recon budget reconciling the map mid-build — #1271.)
 
-So before you emit any child's `owns` footprint, run every path through the mechanical validator — do **not** eyeball it:
-
-```bash
-VFM="${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/validate-file-map.sh"
-# Validate one child's owns footprint (comma-separated, as it will be written):
-printf 'Owns: %s\n' "services/import_service.parse*, parsers/csv.*, tests/csv_*" \
-  | "$VFM" owns
-```
-
-It classifies each path against `git ls-files` and prints one annotated line:
-
-- `ok <path>` — a concrete path that exists, or a glob that matched ≥1 tracked file → emit as-is.
-- `new <path> (new)` — a concrete path absent from the tree → the child will **create** it; emit it **with the `(new)` marker** so the lane does not hunt for it.
-- `flag <path> <reason>` — a phantom: a concrete path you meant as an **existing** surface that matches nothing, or a glob that expands to zero files. **Correct it (nearest real path) or drop it — never emit it silently.** The validator exits non-zero if any path is flagged.
-
-When a path is meant to be an existing surface (not one the child creates), assert that with `--existing` so an absent one is flagged rather than quietly marked new:
-
-```bash
-"$VFM" check --existing services/import_service.ts services/import_service.parse
-```
-
-Only paths the child genuinely creates should carry `(new)`; everything else must resolve to a real file or glob match, or be dropped. Run this for **every** child before Phase 5.
-
-> **Cross-repo children.** For a child stamped with a different execution `Repo:` (Phase 5), validate its `owns` paths against **that** repo's tree — run the validator from that checkout (`cd "$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh resolve owner/other-repo)"` then `"$VFM" owns`), since `git ls-files` is repo-local.
+Before you emit any child's `owns` footprint, run every path through `scripts/validate-file-map.sh` — do not eyeball it: emit `ok` paths as-is, mark paths the child creates `(new)`, and correct or drop every `flag`ged phantom (cross-repo children: validate against that repo's tree). Commands and output format: [`references/file-map-validation.md`](references/file-map-validation.md).
 
 ---
 
@@ -200,14 +177,14 @@ Then capture the decision via **AskUserQuestion** — one question, never a free
 - **Options:**
   - **"Create all child issues"** — proceed to Phase 5
   - **"Adjust the split first"** — loop back to Phase 3 with the user's steer (merge two slices, split one further, move a file into the enabler)
-  - **"Don't split — implement directly"** — abandon the decomposition; recommend `/sge:sge-implement <N>` / `/sge:implement-issue <N>`
+  - **"Don't split — implement directly"** — abandon the decomposition; recommend `/sge:sge-implement <N>`
   - **"Cancel"**
 
 ---
 
 ## Phase 5: Create the Child Issues
 
-One enabler issue, then one issue per vertical slice. Each child carries its dependency and conflict metadata **in the body** so a flow consumer (`/sge:team-pipeline`, or a repo-shipped `/sge:available-issues` / `/sge:issue-swarm` if present) can read it, and so a human landing on the issue understands its place in the DAG.
+One enabler issue, then one issue per vertical slice. Each child carries its dependency and conflict metadata **in the body** so a flow consumer (`/sge:team-pipeline`, or a repo-shipped `/sge:available-issues` if present) can read it, and so a human landing on the issue understands its place in the DAG.
 
 > **Children are created through `$IW`, not `gh issue create` directly** (SPEC-105 S3, #1701). `scripts/issue-write.sh` is the backend-aware write seam: on GitHub it delegates to `gh` unchanged; on a Jira-tracked repo it routes to P6 `create-item` so the children reach the tracker the work actually lives in. Shelling `gh issue create` here means a Jira repo's decomposition silently produces nothing. `create` is scope-gated per DP3, so it needs the explicit `JIRA_ADAPTER_ALLOW_CREATE=1` opt-in — `$IW` supplies the write flag but never the create scope. Full routing table: [`../team-pipeline/references/alm-routing.md`](../team-pipeline/references/alm-routing.md).
 >
@@ -217,39 +194,7 @@ One enabler issue, then one issue per vertical slice. Each child carries its dep
 
 **Spec lane** (parent references `SPEC-NNN`):
 
-```bash
-IW="${CLAUDE_PLUGIN_ROOT:-.}/scripts/issue-write.sh"
-PARENT=312
-SPEC=SPEC-027
-
-E1=$(JIRA_ADAPTER_ALLOW_CREATE=1 "$IW" create-deduped \
-  "${SPEC}-E1: Enabler — Migration + Model + Service Shell + Types" \
-  "$(cat <<EOF
-Parent: #${PARENT}
-DependsOn: —
-Owns: db/migrations/*import*, models/import_job.*, services/import_service.* (shell only)
-
-Technical foundation only — no user-facing output, no TDD required.
-Verified by: migration runs and rolls back cleanly, types compile, module resolves, lint passes.
-EOF
-)")
-gh issue edit "$E1" --add-label "sge,enabler"   # GitHub path; Jira labels are S4 (P9)
-
-JIRA_ADAPTER_ALLOW_CREATE=1 "$IW" create-deduped \
-  "${SPEC}-S1: CSV ingest + validation (TDD)" \
-  "$(cat <<EOF
-Parent: #${PARENT}
-DependsOn: #${E1}
-Owns: services/import_service.parse*, parsers/csv.*, tests/csv_*
-ParallelSafeWith: S2, S3
-ConflictsWith: —
-
-One vertical slice. Strict TDD: failing test → minimum implementation → passing test.
-Acceptance criterion: <the specific criterion this slice satisfies>
-<!-- Sweep child only: AC includes value-level greps for every concrete value being swept, enumerated from the source of truth (e.g. brand-assets/tokens.json) — not just name greps. -->
-EOF
-)"
-```
+Spec-lane example (enabler `E1` via `"$IW" create-deduped` with `Parent:`/`DependsOn:`/`Owns:` body lines, then one story slice per criterion carrying `ParallelSafeWith:`/`ConflictsWith:`): [`references/child-issue-examples.md`](references/child-issue-examples.md).
 
 > **Sweep-child AC line.** If a story child is a **sweep** (Phase 3b), its body's
 > acceptance criterion **must** carry the value-level checklist line:
@@ -305,76 +250,11 @@ removed deliberately.
 
 ### Execution-repo stamping — children inherit the parent's execution repo (SPEC-057, #863/#1024)
 
-A parent decomposed from a hub can have children whose deliverable lives in a
-**different** repo than the parent's tracking repo — the `sge#798` shape: the
-tracking issue sat in `sge`, but the deliverable belonged in `client-onboarding`
-(and a real decomposition's children `sge#839/#840` executed in `wtp-org`).
-Without a signal, the pipeline assumes each child executes in the parent's repo
-and sets up the worktree/branch/PR there — the wrong place.
-
-So **stamp `Repo: owner/name` on every child whose execution repo differs from
-the parent's tracking repo.** Use the canonical grammar (short `Repo:` form,
-value MUST be `owner/name` or a GitHub URL) — do NOT hand-roll a variant. It is
-the same field `/sge:team-pipeline` and `/sge:fleet-dispatch` HONOR when they
-target the worktree/branch/PR (via `scripts/with-repo-cwd.sh issue-repo`), and
-the grammar/parser is defined once in
-[`docs/skill-authoring-repo-context.md`](../../docs/skill-authoring-repo-context.md).
-Children that execute in the parent's repo carry `Repo: —` (or omit the field).
-
-Worked example — a child whose deliverable lives in another repo (the `sge#798`
-shape), stamped so team-pipeline routes its worktree/PR to `owner/other-repo`:
-
-```bash
-S4=$(JIRA_ADAPTER_ALLOW_CREATE=1 "$IW" create-deduped \
-  "${SPEC}-S4: Wire the adviser allowlist (TDD)" \
-  "$(cat <<EOF
-Parent: #${PARENT}
-DependsOn: #${E1}
-Repo: owner/other-repo            # executes here, not in the parent's repo
-Owns: app/allowlist/*, tests/allowlist_*
-ParallelSafeWith: S1, S2
-ConflictsWith: —
-
-One vertical slice whose deliverable lives in owner/other-repo. Strict TDD.
-Acceptance criterion: <the specific criterion this slice satisfies>
-EOF
-)")
-gh issue edit "$S4" --add-label "sge,story"
-```
-
-Status/labels (including `agent-lock`) stay on the tracking child issue created
-here; only the worktree/branch/PR follow the stamped `Repo:` — that split is the
-honoring contract team-pipeline/fleet-dispatch implement.
+When a child's deliverable lands in a repo other than the parent's tracking repo, stamp `Repo: owner/name` in its body (canonical grammar: `skill-authoring-repo-context`, execution-repo convention). Full procedure: [`references/execution-repo-stamping.md`](references/execution-repo-stamping.md).
 
 ### Dependency metadata grammar
 
-This is the **canonical grammar** for machine-readable dependency edges in an
-issue body. Consumers (`/sge:available-issues` Phase 2, `/sge:team-pipeline`
-Phase 1) parse it case-insensitively with:
-
-```
-(depends[ -]?on|blocked[ -]?by|requires)[[:space:]:]+#[0-9]+
-```
-
-Matching forms — all declare "issue #123 must close/merge before this one starts":
-
-- `DependsOn: #123` (the field this skill writes on every child)
-- `Depends on #123` / `Depends-on #123`
-- `Blocked by #123` / `BlockedBy: #123`
-- `Requires #123`
-
-`DependsOn: —` (em dash) declares **no** dependencies — it contains no `#N`, so
-it never matches. Do not invent new keywords; extend the regex here first and
-mirror it in the consumers if a new form is ever needed.
-
-**Cross-repo refs** (`Depends on org/repo#99`) are recognised by the port and
-emitted as `unknown` (blocking, fail-closed) — they cannot be resolved
-repo-locally (#1732). Spaced refs like `# 12` are not matched (not a standard
-GitHub form). Multiple refs on a single `DependsOn:` line (comma-separated) are
-not supported; use one ref per line. Only **direct** dependencies are resolved;
-no transitive walk exists.
-
----
+The canonical `DependsOn:` grammar, its consumers and their parse pattern: [`references/dependency-grammar.md`](references/dependency-grammar.md).
 
 ## Phase 6: Record the DAG on the Parent
 
@@ -384,33 +264,13 @@ no transitive walk exists.
 gh issue edit "$PARENT" --add-label tracking   # GitHub path; Jira label parity is S4 (P9)
 ```
 
-This is not bookkeeping — it is the **mechanical** half of the #2241 fix. `/sge:sge-implement` Phase 6 refuses to emit a closing keyword for a `tracking`-labelled issue, `rl_ensure_closing_link` refuses to append one, and `.github/scripts/check-tracking-close-keyword.sh` refuses any PR whose closing keyword resolves to one. All three key off **this label**, so a decomposition that skips it leaves the parent auto-closeable by the first child that merges — exactly the incident (`data-remediation` #13, closed by a PR delivering 1 of its 5 ACs). Children are safe by construction: Phase 5 gives each `Parent: #N`, never a closing keyword.
+This is not bookkeeping — it is the **mechanical** half of the #2241 fix. `/sge:sge-implement` Phase 6 refuses to emit a closing keyword for a `tracking`-labelled issue, `rl_ensure_closing_link` refuses to append one, and `.github/scripts/check-tracking-close-keyword.sh` refuses any PR whose closing keyword resolves to one. All three key off **this label**, so a decomposition that skips it leaves the parent auto-closeable by the first child that merges — exactly the incident (a product repo's #13, closed by a PR delivering 1 of its 5 ACs). Children are safe by construction: Phase 5 gives each `Parent: #N`, never a closing keyword.
 
 > Label name overridable via `SGE_TRACKING_LABELS` (default `tracking,epic`); use whichever your repo declares, but apply one.
 
 Then comment on the parent with the full child sequence and the parallel lanes, so the parent becomes the single source of truth for the decomposition (skip only if `--no-comment` is passed — the label is applied regardless):
 
-```bash
-"$IW" comment "$PARENT" "$(cat <<'EOF'
-## Decomposed into parallel-safe sub-tasks
-
-**Complexity:** 41 (Large) — split warranted.
-
-| Child | Role | DependsOn | Parallel-safe with |
-|-------|------|-----------|--------------------|
-| #401 E1 | Enabler — migration + model + service shell | — | — |
-| #402 S1 | CSV ingest + validation | #401 | S2, S3 |
-| #403 S2 | Field mapping UI | #401 | S1, S3 |
-| #404 S3 | Async job runner + progress | #401 | S1, S2 |
-
-**Build order:** E1 first (foundation). Once #401 merges, S1/S2/S3 fan out — 3 concurrent lanes, no file overlap. No serialised pairs.
-
-**Hand-off:** `/sge:team-pipeline` to fan the slices out, or `/sge:sge-implement <child>` one at a time.
-
-_Decomposed via `/sge:decompose-issue`._
-EOF
-)"
-```
+Post it with `"$IW" comment "$PARENT" ...`: a `## Decomposed into parallel-safe sub-tasks` table (child, role, DependsOn, parallel-safe with), the build order and the hand-off. Full example: [`references/dag-comment.md`](references/dag-comment.md).
 
 Then report the created issue numbers and the comment URL back in chat.
 
@@ -418,10 +278,11 @@ Then report the created issue numbers and the comment URL back in chat.
 
 ## Phase 7: Hand-Off
 
-The decomposition is done — building is a separate step. Offer the next move via AskUserQuestion:
+The decomposition is done — building is a separate step. **Children need their own intake (SPEC-126, #2793):** a child inherits nothing from the parent's intake record — `intake-check.sh` judges only a marker on the child itself — so every build path refuses a child until a human approves it with `/sge:issue-intake`. Offer the next move via AskUserQuestion:
 
+- **"Approve the children for build now"** (recommended while the human is here) — `/sge:issue-intake <E1>,<S1>,…`, then any option below.
 - **"Fan out via the pipeline"** — `/sge:team-pipeline` discovers the enabler and slices, respects the `DependsOn` edges (the enabler unblocks the slices once it merges), and works the parallel lanes concurrently.
-- **"Start with the enabler"** — `/sge:sge-implement <E1>` (spec lane) or `/sge:implement-issue <E1>` (no-spec lane), then the slices once it merges.
+- **"Start with the enabler"** — `/sge:sge-implement <E1>` (it takes the spec or no-spec lane itself), then the slices once it merges.
 - **"Leave them for later"** — the children exist with full metadata; anyone can pick them up.
 
 > **Orchestration note:** always the enabler first — every slice `DependsOn` it. The slices are mutually parallel-safe **by construction** (Phase 3 guaranteed disjoint footprints), so they can run in separate worktrees concurrently (canonical placement: [`worktrees`](../worktrees/SKILL.md)), each running `/sge:tdd-workflow` for its acceptance criterion. Any pair the conflict map had to serialise is **not** parallel-safe — honour its `ConflictsWith` edge.
@@ -439,11 +300,4 @@ The decomposition is done — building is a separate step. Offer the next move v
 
 ## Related Skills
 
-- `/sge:sge-implement <n>` — Build an SGE spec issue (or a child) end-to-end; owns the canonical complexity rubric this skill reuses
-- `/sge:implement-issue <n>` — Build a general (non-SGE) child issue once it is unblocked
-- `/sge:team-pipeline` — Fan the parallel-safe children out across multiple concurrent implementation agents
-- `/sge:deep-dive <n>` — Investigate an unclear issue before deciding whether it even needs a split
-- `/sge:tdd-workflow` — The Red/Green/Refactor inner loop each story child runs
-- [`gh-repo`](../gh-repo/SKILL.md) — the shared cross-repo / hub-dispatch repo-targeting convention the child-issue `gh` writes follow
-- [`worktrees`](../worktrees/SKILL.md) — the canonical worktree placement the parallel-safe children run in
-- [`scripts/validate-file-map.sh`](../../scripts/validate-file-map.sh) — the mechanical Phase 3d validator that classifies each `owns` path against `git ls-files` (existing / new / phantom) so no phantom path reaches a lane (#1271)
+The implementation, pipeline, investigation and TDD skills plus the repo-targeting, worktree and file-map conventions this skill composes: [`references/related-skills.md`](references/related-skills.md).

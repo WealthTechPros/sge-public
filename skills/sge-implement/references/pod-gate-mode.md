@@ -7,7 +7,7 @@ rules live in their respective `SKILL.md` files; this file carries the full
 
 ## Motivation
 
-On repos covered by Autopilot review pods (`sge`, `client-onboarding`), two
+On repos covered by Autopilot review pods (for example `sge` and a product repo), two
 reviewer classes race the same `pr-reviewing` label mutex when both active:
 
 1. **The dispatched implementer** — `sge-implement` Phase 7 invokes
@@ -19,7 +19,7 @@ Both agents call `pr-labels.sh start-review`, which is the label mutex anchor.
 One wins; the other hits exit 3 (claim younger than TTL) and backs off. The
 winner commits fixes; the loser or a later retry sees them as new commits and
 re-reviews. In the 2026-07-17 incident the impl-2355 lane claimed `pr-reviewing`
-on `client-onboarding#2389` mid-Phase-7 and had to self-revert (`pr-labels.sh
+on a product repo's #2389 mid-Phase-7 and had to self-revert (`pr-labels.sh
 fail` + handoff comment) after orchestrator correction — two live reviewers for
 one PR is the root cause of most fleet stalls that day.
 
@@ -37,6 +37,7 @@ Equivalent signals — the first present wins:
 | `SGE_REVIEW_OWNER=daemon` env var | Per-dispatch — alias for `SGE_GATE_OWNER=pod` (issue #1313) | `SGE_REVIEW_OWNER=daemon /sge:sge-implement 2389` |
 | `.claude/sge.json` → `gateOwner: "pod"` | Repo-level (committed, applies to every dispatch) | `{ "gateOwner": "pod" }` |
 | `.claude/sge.json` → `reviewOwner: "daemon"` | Repo-level — alias for `gateOwner: "pod"` (issue #1313) | `{ "reviewOwner": "daemon" }` |
+| Repo listed in `SGE_REVIEW_DAEMON_REPOS`, or a `review-daemon` entry in the fleet pod registry (`$SGE_PODS_REGISTRY`, else `.claude/sge.json` `podsRegistry`, else `~/.sge/pods/pods.json`) | Daemon coverage (issue #2914), checked last, only when no explicit switch is set | `SGE_REVIEW_DAEMON_REPOS=WealthTechPros/sge` |
 
 **Env var takes precedence.** Across all four signals the resolver order is
 `SGE_GATE_OWNER` > `SGE_REVIEW_OWNER` > `gateOwner` > `reviewOwner` (any env
@@ -86,6 +87,27 @@ if [ -z "$GATE_OWNER" ] && [ -f ".claude/sge.json" ]; then
     "try{const c=require('./.claude/sge.json');process.stdout.write(c.gateOwner||(c.reviewOwner==='daemon'?'pod':''))}catch(e){}" \
     2>/dev/null || true)
 fi
+# Daemon coverage (issue #2914): a repo PR Warden covers is pod-gated even with
+# no explicit switch, so Phase 7 defers to PR Warden instead of stacking a
+# second review. Same coverage sources as hooks/pr-created.sh daemon mode:
+# SGE_REVIEW_DAEMON_REPOS (comma/space list), else review-daemon entries in the
+# fleet pod registry. Case-insensitive; CR-stripped (the registry is written on
+# Windows).
+if [ -z "$GATE_OWNER" ]; then
+  REPO_LC=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null | tr '[:upper:]' '[:lower:]')
+  if [ -n "${SGE_REVIEW_DAEMON_REPOS:-}" ]; then
+    COVERED=$(printf '%s' "$SGE_REVIEW_DAEMON_REPOS" | tr ', ' '\n\n')
+  else
+    REG="${SGE_PODS_REGISTRY:-$(jq -r '.podsRegistry // empty' .claude/sge.json 2>/dev/null)}"
+    case "$REG" in "~/"*) REG="$HOME/${REG#\~/}" ;; esac
+    COVERED=$(jq -r '(.pods // [])[] | select(.type == "review-daemon") | .repo // empty' \
+      "${REG:-$HOME/.sge/pods/pods.json}" 2>/dev/null || true)
+  fi
+  if [ -n "$REPO_LC" ] && printf '%s\n' "$COVERED" | tr -d '\r' | tr '[:upper:]' '[:lower:]' \
+       | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep -qxF "$REPO_LC"; then
+    GATE_OWNER="pod"
+  fi
+fi
 ```
 
 Handoff comment when `GATE_OWNER == "pod"` (replace `$PR_NUMBER`):
@@ -100,9 +122,12 @@ Phases 7/8 (pr-review + merge-gate) are owned exclusively by the Autopilot revie
 After Phase 6's commit + draft PR:
 
 1. Resolves `GATE_OWNER` (env var → `.claude/sge.json` fallback).
-2. If `pod`: posts a handoff comment on the PR, skips Phases 7 and 8 entirely,
-   emits a `SkillRunRecord` with `verdict "handed-off"` / `phaseReached "Phase 6.5"`,
-   and returns with the summary "Gate owned by pod — handed off as draft PR #N."
+2. If `pod`: posts a handoff comment on the PR, then marks it ready and removes
+   `hold` (`"$SGE_AUTHOR_WRAPPER" gh pr ready`, #2806 — the author lane is the single
+   owner of undrafting, and PR Warden never selects a draft or a held PR), skips
+   Phases 7 and 8 entirely, emits a `SkillRunRecord` with `verdict "handed-off"` /
+   `phaseReached "Phase 6.5"`, and returns with the summary "Gate owned by pod —
+   handed off as ready PR #N."
 3. If unset / not `pod`: continues to Phase 7 as before (self-drive).
 
 **The implementer never touches `pr-reviewing` or `pr-reviewed`.** The pod has
@@ -145,7 +170,7 @@ solo-repo pipeline works identically.
 
 | Mode | SkillRunRecord verdict | phaseReached | Summary |
 |---|---|---|---|
-| Pod-gate (gate owner = pod) | `handed-off` | `Phase 6.5` | "Gate owned by pod — handed off as draft PR #N" |
+| Pod-gate (gate owner = pod) | `handed-off` | `Phase 6.5` | "Gate owned by pod — handed off as ready PR #N" |
 | Self-drive (gate owner unset / not pod) | `merged` (success) / `blocked` | `Phase 8` / `Phase 0.5` | (unchanged) |
 
 ## Phase 5 is not suppressed in pod mode (issue #1324)

@@ -1,5 +1,5 @@
 ---
-description: Use when a repo should publish the SGE coherence dashboard — the brand-neutral single-page site (Vision → Capabilities → Features → Specs → Test Pyramid → Decisions → Live Coherence) generated from docs/sge-dag.json + the SGE markdown + the repo's own code. Invoke to adopt the sge-dashboard kit in a repo for the first time, to refresh/rebuild it, or to wire it into CI. Not for authoring specs (that is /sge:sge-init / /sge:sge-implement). Not for applying WTP's own brand — that is a separate, WTP-only step (see "Applying a brand" below); this skill's default output carries no customer's branding.
+description: Use when a repo should publish, refresh or CI-wire the brand-neutral SGE coherence dashboard (Vision → Capabilities → Features → Specs → Tests → Decisions) generated from docs/sge-dag.json and the SGE markdown. Not for authoring specs or applying WTP's brand.
 argument-hint: "[--ci]"
 ---
 
@@ -67,8 +67,9 @@ Start from `packages/sge-dashboard/sge-dashboard.config.example.json`. **Pre-fil
 ask only the gaps:
 - `productName` / `strapline` — from the Vision H1 and its one-line summary.
 - `overviewLede` / `archLede` — distil the Vision's problem/solution (inline HTML allowed).
-- `architectureMermaid` — optional; omit to reuse the repo's own `infra/README.md` diagram
-  instead of hand-drawing a second one.
+- Architecture — drawn from `docs/sgd-build/architecture.yaml` (SPEC-131) when it exists.
+  `architectureMermaid` is only a fallback; with neither, the repo's `infra/README.md` mermaid
+  block is used, else the section is left out.
 - `githubBlobBase` — `https://github.com/<org>/<repo>/blob/main/docs`.
 - `crossRepoNote` — optional; any pending cross-repo contract change.
 Validate against `sge-dashboard.config.schema.json`.
@@ -95,10 +96,9 @@ dashboard build and deploys `docs/` to GitHub Pages.
 This kit ships brand-neutral on purpose: SGE is a product other organisations install, and it
 must not default to any one customer's colours or logo.
 
-- **A WTP repo** applies WTP's own brand via `wtp-org`'s brand-override step (see the `wtp`
-  internal plugin), which points `SGE_DASHBOARD_TOKENS` at a tokens file derived from
-  `wtp-org/brand-assets/tokens.json` and `SGE_DASHBOARD_LOGO` at WTP's logo — an explicit opt-in,
-  not this kit's default.
+- **The publisher's own repos** apply its brand through a brand-override step in its internal
+  tooling, which points `SGE_DASHBOARD_TOKENS` at its tokens file and `SGE_DASHBOARD_LOGO` at
+  its logo — an explicit opt-in, not this kit's default.
 - **A client repo** supplies its own `SGE_DASHBOARD_TOKENS` / `SGE_DASHBOARD_LOGO` (or `logoUrl`
   in `sge-dashboard.config.json`), or simply keeps the neutral default.
 

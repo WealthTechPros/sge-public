@@ -1,0 +1,64 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/WealthTechPros/sge/docs/schemas/capability-model.schema.json",
+  "title": "SGE capability model (L1-L3)",
+  "description": "The capability model (docs/sgd-build/capability-model.yaml, or .claude/product-context/capability-model.yaml): a top-level version, then domains, each with capabilities, each with features. The file is read with the fixed-indent line parser in scripts/artefact-schemas.mjs: a domain '- id:' at 2 spaces and its name at 4; a capability '- id:' at 6 and its name at 8; one single-line feature mapping per line at 10, with the fields in the order id, name, mvp, status, spec. This schema validates what that parser reads, and a feature line the parser cannot read is reported too. SPEC-133.",
+  "type": "object",
+  "required": ["version", "domains"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Semantic version of the model. Specs pin it; bump it on a structural change."
+    },
+    "domains": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/domain" }
+    }
+  },
+  "additionalProperties": true,
+  "definitions": {
+    "domain": {
+      "type": "object",
+      "required": ["id", "name", "capabilities"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^CAP-[A-Z0-9][A-Z0-9-]*$" },
+        "name": { "type": "string", "minLength": 1 },
+        "capabilities": { "type": "array", "items": { "$ref": "#/definitions/capability" } }
+      }
+    },
+    "capability": {
+      "type": "object",
+      "required": ["id", "name", "features"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^CAP-[A-Z0-9][A-Z0-9-]*$" },
+        "name": { "type": "string", "minLength": 1 },
+        "features": { "type": "array", "items": { "$ref": "#/definitions/feature" } }
+      }
+    },
+    "feature": {
+      "type": "object",
+      "required": ["id", "name", "mvp", "status", "spec"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^F-[A-Z0-9][A-Z0-9-]*$" },
+        "name": { "type": "string", "minLength": 1 },
+        "mvp": { "type": "boolean" },
+        "status": {
+          "type": "string",
+          "enum": [
+            "draft", "proposed", "approved", "accepted", "ratified", "planned", "design",
+            "building", "in-progress",
+            "built", "implemented", "done", "active", "decided",
+            "superseded", "decommissioned", "retired", "withdrawn", "deprecated"
+          ]
+        },
+        "spec": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A spec id, a [list, of, ids], or free text such as TBD."
+        }
+      }
+    }
+  }
+}

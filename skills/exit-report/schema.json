@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/WealthTechPros/sge/main/skills/exit-report/schema.json",
   "title": "SGE orchestrated-skill exit report",
-  "description": "The one machine-readable exit-report shape every orchestrated SGE skill emits at the end of a run — consumed by orchestrators (team-pipeline, pr-monitor, issue-swarm) to decide the next move. See skills/exit-report/SKILL.md for the contract, emission channels, and mappings from legacy shapes.",
+  "description": "The one machine-readable exit-report shape every orchestrated SGE skill emits at the end of a run — consumed by orchestrators (team-pipeline, pr-monitor, issue-loop) to decide the next move. See skills/exit-report/SKILL.md for the contract, emission channels, and mappings from legacy shapes.",
   "type": "object",
   "required": ["skill", "runId", "outcomes", "stopReason"],
   "properties": {
@@ -10,7 +10,7 @@
       "type": "string",
       "minLength": 1,
       "description": "Emitting skill's identifier, without the plugin prefix.",
-      "examples": ["pr-fix", "pr-monitor", "team-pipeline", "issue-swarm"]
+      "examples": ["pr-fix", "pr-monitor", "team-pipeline", "issue-loop"]
     },
     "runId": {
       "type": "string",

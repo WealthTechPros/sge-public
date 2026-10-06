@@ -1,6 +1,6 @@
 ---
 name: spec-validate
-description: Use when a spec doc's `## Validation` section (docs/specs/README.md convention) needs to be run against a demo fixture — checking that a spec's stated business-rule invariants (e.g. "C1 must be ≤ Addressable − Exclusions", "Total = Exclusions + C1 + C2 + C3") actually hold, not just that a test exists for the scenario. Invoke after adding or editing a `## Validation` section, at spec-graduation time (draft → approved → implemented), or when /sge:sge-align's C4 sub-check flags an implemented spec with a missing or unverified Validation section.
+description: Use when running a spec's `## Validation` section against a demo fixture to check its business-rule invariants actually hold — after editing that section, at spec graduation (draft → approved → implemented), or when /sge:sge-align C4 flags a missing or unverified section.
 argument-hint: "<spec-file> [fixture.json]"
 allowed-tools: Read, Bash(node ${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/spec-validate/assets/spec-validate.mjs:*)
 ---
@@ -74,7 +74,7 @@ It:
 
 ## Worked example
 
-`docs/specs/README.md`'s worked example — the reconciliation invariant Dave
+`docs/specs/README.md`'s worked example — the reconciliation invariant a
 Howard named directly (*"C1 must be ≤ Addressable − Exclusions"*, *"Total =
 Exclusions + C1 + C2 + C3"*) — is bundled here as the demo:
 

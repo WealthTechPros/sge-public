@@ -1,5 +1,5 @@
 ---
-description: Use when committing work in a WTP/SGE repo — at the end of an implementation slice, before opening a PR, or whenever changes are ready to be recorded with quality gates and SGE traceability trailers. Also use when another skill says "commit via /sge:commit". Not for amending history or interactive rebase.
+description: Use when committing work in a WTP/SGE repo — end of an implementation slice, before opening a PR, or when another skill says "commit via /sge:commit". Runs quality gates and adds SGE traceability trailers. Not for amending history or interactive rebase.
 argument-hint: "[message hint] [--no-push]"
 allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git branch:*), Bash(git rev-parse:*), Bash(git config:*), Bash(git symbolic-ref:*), Bash(git ls-files:*), Bash(git add:*), Bash(git commit:*), Bash(git push:*), Read, Grep, Glob
 ---
@@ -21,7 +21,7 @@ Quality-gated, SGE-traceable commit and push.
 1. The **SGE trailer convention** (`Spec:` / `SGE-Override:` semantics, below).
 2. The **quality-gated commit flow** (gates → secrets scan → commit → guarded push).
 
-Sibling skills (/sge:sge-implement, /sge:pr-fix, /sge:refactor, /sge:implement-issue, /sge:tdd-workflow) do not restate this logic — they say "commit via /sge:commit" and this file must be sufficient on its own.
+Sibling skills (/sge:sge-implement, /sge:pr-fix, /sge:refactor, /sge:tdd-workflow) do not restate this logic — they say "commit via /sge:commit" and this file must be sufficient on its own.
 
 This skill runs **inline** in the main conversation — do not fork it into a subagent; it needs the conversation's context to draft an accurate message, and its safety gates are interactive.
 
@@ -73,6 +73,8 @@ Example: `/sge:commit retry backoff fix SPEC-031 --no-push` → message hint "re
 ### 1.5. Regenerate governance docs if this repo declares a generator
 
 Some repos keep a machine-generated coherence artefact (e.g. `docs/sge-dag.json` / `docs/coherence.md`) built from the capability model and spec files by a repo-declared script — check for an npm script literally named `build-dag` (in `docs-site/package.json`, the repo root `package.json`, or wherever the repo's own scripts live) or an equivalent convention named in `CLAUDE.md`. If one exists **and** the staged diff touches that generator's own source paths (its header comment or `CLAUDE.md` names them — typically the capability-model file and the spec directory), run it now and stage whatever it changes (e.g. `git add docs/sge-dag.json docs/coherence.md`) so the regenerated output lands in the **same commit** as the change that triggered it — never a stale doc alongside fresh source. Skip silently if the repo declares no such generator; most repos won't have one.
+
+**Post-merge regeneration repos — skip, and stage none of it.** If the repo's `CLAUDE.md` says its generated docs are regenerated on `main` after merge rather than committed per PR (sge does, sge#2951: `dag-freshness-check.yml` regenerates them and lands one rolling PR), do **not** run the generator for staging and do **not** stage the generated files even if a test run rewrote them (`git restore <file>` before committing). Committing them per PR is what made parallel PRs conflict.
 
 ### 1.6. TDD slice check (test evidence, issue #784)
 
@@ -139,7 +141,7 @@ Rules:
 
 When the committing agent has a per-instance identity, add an `Agent-Id:` trailer
 so the commit is traceable back to the exact agent that produced it (Zero-Trust
-**Agent Identity** control — see `agents/agent-registry.md`):
+**Agent Identity** control — see `docs/agent-registry.md`):
 
 ```
 Agent-Id: agent-<ulid>
@@ -243,3 +245,5 @@ git rev-parse --abbrev-ref --symbolic-full-name @{upstream} >/dev/null 2>&1 \
 - Commit secrets, `.env` files, or client data; auto-stage untracked files.
 - Use `git add -A` / `git add .` — stage deliberately (step 1).
 - Invent a `SPEC-NNN` or write a boilerplate `SGE-Override` reason to get past the hook.
+
+`hooks/git-policy-guard.sh` (SPEC-132) enforces the first two rules above: it denies a hook-skipping commit or push, and a force-push to a shared branch, before they run.

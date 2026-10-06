@@ -1,0 +1,22 @@
+# <Product> — Capability Model (Layer 1)
+#
+# Seeded by /sge:sge-init Step 3. Conforms to docs/schemas/capability-model.schema.json
+# in the SGE plugin (SPEC-132). The layout is fixed, because the SGE DAG
+# generator reads it line by line rather than as general YAML:
+#   - a domain "- id:" at 2 spaces, its "name:" at 4
+#   - a capability "- id:" at 6, its "name:" at 8
+#   - one feature per line at 10 spaces, as a single-line mapping with the
+#     fields in this order: id, name, mvp, status, spec
+# status is one of: planned | building | built | superseded (or another value
+# from the schema's lifecycle vocabulary). spec is a SPEC-NNN id, a
+# [SPEC-NNN, SPEC-MMM] list, or TBD. Bump version on a structural change;
+# specs pin it.
+version: 1.0.0
+domains:
+  - id: CAP-ONBOARD                # stable CAP-xx ids: upper case, digits and hyphens
+    name: <Domain name, a phase of the journey>
+    capabilities:
+      - id: CAP-ONBOARD-CONNECT
+        name: <Capability name>
+        features:
+          - { id: F-CONNECT, name: <Feature name>, mvp: true, status: planned, spec: SPEC-001 }

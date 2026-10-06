@@ -44,7 +44,7 @@ create_entities([{
     "verdict: <VERDICT>",
     "matchedSpec: <SPEC-NNN|none>",
     "matchConfidence: <high|medium|low>",
-    "path: <full|cache-hit|tier-gate|not-onboarded|front-loaded>",
+    "path: <full|cache-hit|tier-gate|not-onboarded|front-loaded|intake>",
     "classifiedAt: <ISO8601>"
   ]
 }])
@@ -81,16 +81,18 @@ Every other terminal path writes.
 
 ## Front-loaded verdicts — the caller owns the write
 
-A **front-loaded verdict** is one injected by an orchestrator rather than
-derived here: `SGE_GOVTRACE_VERDICT` (the agent-template convention) or
-`/sge:sge-implement`'s Phase 0.5 fast-path, which adopts a structurally valid
-verdict and *skips the fork entirely*.
+A **front-loaded verdict** is one recorded before the build rather than derived
+here: the `govtrace` in a validated `## SGE intake` record (SPEC-126), which
+`/sge:sge-implement`'s Phase 0.5, team-pipeline's lanes and agent-template
+orchestrators adopt — *skipping the fork entirely*. A bare
+`SGE_GOVTRACE_VERDICT` is no longer adopted anywhere (#2782, #2793).
 
 On that path **this skill never executes**, so it cannot write. The obligation
 does not vanish with it — the **adopting caller** owns the Step W write
-(`path: front-loaded`, reinforcing the existing entity). SKILL.md's Step W
+(`path: intake`, reinforcing the existing entity; `path: front-loaded` is the
+retired env-verdict path, kept in the vocabulary for existing entities). SKILL.md's Step W
 table records the contract; the caller-side wiring (#1938) lives in
-`/sge:sge-implement` Phase 0.5 (the front-loaded fast-path and, with
+`/sge:sge-implement` Phase 0.5 (the intake-adopted path, `path: intake`, and, with
 `path: tier-gate`, the inline-trivial tier gate), `/sge:team-pipeline`'s
 implementation lane, and the `agent-template` lane-side guard (the reference
 contract for custom fan-out orchestrators).
@@ -107,3 +109,21 @@ owe?".
 verdicts but logged zero `create_entities`, and separately flags writes that
 were logged against a graph which reads back empty (the QD-1 identity-misroute
 class, fixed by #1684). CI: `.github/workflows/cortex-write-gate-check.yml`.
+
+## Step W exit paths
+
+Moved verbatim from `SKILL.md` Step W (issue #2917, 24 KB size budget).
+
+| Exit path | Write |
+|---|---|
+| Full classification (Steps 1–5 ran) | create — the freshly derived verdict |
+| **Step 0.5 comment-cache hit** | **reinforce** — same entity, `cacheReused: true` in the observation |
+| **Step 0.6 trivial-tier gate** (`NO_SPEC_WARRANTED` inline) | **reinforce/create** — with the `tierGate` marker |
+| **`NOT_ONBOARDED` early return** (Step 1, skips Steps 2–5) | create/reinforce — `path: not-onboarded` |
+| Front-loaded verdict adopted by the caller | create/reinforce — the adopted verdict |
+
+On the **front-loaded** path this skill never executes, so the **adopting caller** owns the write (wired in `/sge:sge-implement` Phase 0.5 and `/sge:team-pipeline`'s lane; #1938). Two exemption classes write nothing and must not be conflated: **no verdict produced** (`NO_TARGET_ISSUE`), and **verdict produced but the write is impossible** (sge-memory unavailable — skip silently; a memory failure must never block the gate).
+
+**Reinforcement, not duplication.** `create_entities` on an existing entity name is *already* an upsert that bumps `reinforcement_count` and `current_confidence` — keep the name stable (`govtrace-<owner>-<repo>-<issue>`) and let the store reinforce. Never guard the write with an existence check.
+
+**Any future short-circuit added ahead of Step 5 must still pass through Step W** — the graph can only accumulate if the *frequent* path writes. The write used to sit on Step 0's cache-miss branch; Steps 0.5/0.6 were later added in front of it and the fleet write-rate silently went to zero on 2026-07-17.

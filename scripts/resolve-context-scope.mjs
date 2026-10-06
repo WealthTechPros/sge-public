@@ -5,7 +5,7 @@
  *
  * Pure function over the DAG manifest: paths in, artefact list out. Given the
  * set of repo-relative paths a change touches, resolve which specs and ADRs
- * actually govern them, so `/sgd:sgd-preflight` and `/sgd:sgd-implement` load
+ * actually govern them, so `/sge:sge-preflight` and `/sge:sge-implement` load
  * only those (plus the generated digest, #805) instead of the full L0–L8
  * artefact stack. An ADR about the payments adapter is never loaded for a
  * docs-site PR.
@@ -36,7 +36,7 @@
  *   leading `./` stripped) before matching.
  *
  * CLI:
- *   node scripts/resolve-context-scope.mjs --dag docs/sgd-dag.json \
+ *   node scripts/resolve-context-scope.mjs --dag docs/sge-dag.json \
  *     --paths "platform/payments/adapter.ts,docs/x.md" [more paths...]
  *
  * Prints the result as JSON on stdout. Exit codes: 0 resolved ·
@@ -212,7 +212,7 @@ export function resolveContextScope(dag, paths) {
 // CLI
 // ---------------------------------------------------------------------------
 
-const USAGE = `Usage: node scripts/resolve-context-scope.mjs --dag <sgd-dag.json> [--paths "a,b,c"] [path ...]
+const USAGE = `Usage: node scripts/resolve-context-scope.mjs --dag <sge-dag.json> [--paths "a,b,c"] [path ...]
 
 Resolves which spec/ADR artefacts in the DAG manifest govern the given
 repo-relative paths. Prints JSON: { scoped, paths, artefacts[], excluded[] }.
@@ -239,7 +239,7 @@ function main(argv) {
     }
   }
   if (!dagPath) {
-    console.error(`Missing required --dag <sgd-dag.json>\n\n${USAGE}`);
+    console.error(`Missing required --dag <sge-dag.json>\n\n${USAGE}`);
     return 2;
   }
   let dag;

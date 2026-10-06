@@ -1,17 +1,17 @@
 ---
-description: Use when you want to point an agent at a repo's backlog and drain it one issue at a time — each build-ready issue worked through the full SGE pipeline (implement → review gate → merge) until /sge:available-issues --mode autonomous-next returns no next issue. Invoke when the user says "work the backlog one issue at a time until it's done", "keep implementing the next issue until none are left", or wants a queue-empty-bounded (not duration-bounded) unattended serial run. For parallel or time-boxed runs use /sge:issue-swarm or /sge:team-pipeline instead.
+description: Use when draining a repo's backlog one issue at a time — each build-ready issue taken through implement, review and merge until none are left ("work the backlog one issue at a time"). Serial and queue-bounded; for parallel or time-boxed runs use /sge:team-pipeline.
 argument-hint: "[--repo owner/repo] [--max-issues N] [--module <name>] [--milestone <name>] [--merge-wait|--no-merge-wait] [--duration Nh] [--dry-run]"
 ---
 
 # /sge:issue-loop — Serial Issue-Drain Loop
 
 ## Role
-Drain a repo's build-ready backlog **one issue at a time** through the full SGE pipeline — pick, gate, dispatch a full `/sge:sge-implement`, confirm the independent review gate, land, advance — until the queue is empty or a bound stops the run. This is the serial counterpart to `/sge:issue-swarm`: queue-empty-bounded where the swarm is duration-bounded, one full-pipeline agent at a time where the swarm fans out lean agents. It is the consumer `/sge:available-issues --mode autonomous-next` was designed for.
+Drain a repo's build-ready backlog **one issue at a time** through the full SGE pipeline — pick, gate, dispatch a full `/sge:sge-implement`, confirm the independent review gate, land, advance — until the queue is empty or a bound stops the run. This is the serial counterpart to `/sge:team-pipeline --duration`: queue-empty-bounded where the swarm is duration-bounded, one full-pipeline agent at a time where the swarm fans out lean agents. It is the consumer `/sge:available-issues --mode autonomous-next` was designed for.
 
 Governed by **SPEC-065**. This is a **composition skill, not a new engine** — every step invokes an existing skill; nothing here re-implements discovery, gating, decomposition, implementation, review, or merge mechanics.
 
 ## Out of scope
-- **Parallelism of any kind** — that is `/sge:issue-swarm` / `/sge:team-pipeline`. This loop never has two implementation agents alive at once.
+- **Parallelism of any kind** — that is `/sge:team-pipeline` (and its `--duration` mode). This loop never has two implementation agents alive at once.
 - **Implementing issues inline** — the driver session dispatches and orchestrates; it writes no code itself.
 - **Owning the merge gate** — `pr-reviewed` and auto-merge belong exclusively to `/sge:pr-review` (via the dispatched pipeline). The driver confirms the gate ran; it never applies labels or arms merges itself.
 - **Weakening any gate to drain faster** — a skipped audit, a suppressed review, or a loosened check to empty the queue is a contract violation ([loops §C](../loops/SKILL.md#c-bounded-refinement-loop)).
@@ -38,7 +38,8 @@ Declared per the [loop anatomy gate](../loops/SKILL.md#loop-anatomy--the-six-par
 | Step | Command | Role |
 |------|---------|------|
 | Pick | `/sge:available-issues --mode autonomous-next` | one machine-readable next issue, or `{"issue": null}` to stop |
-| Reconcile | `/sge:reconcile-worklist` | drop the pick if it is already closed / merged before any dispatch |
+| Reconcile | `scripts/reconcile-worklist.mjs` | drop the pick if it is already closed / merged before any dispatch |
+| Intake | `scripts/intake-check.sh` | dispatch only an issue with a valid human intake record (SPEC-126) |
 | Gate | `/sge:build-ready-audit` | per-issue go/no-go: `READY` \| `NOT_READY` \| `TOO_LARGE` |
 | Decompose | `/sge:decompose-issue` | split a `TOO_LARGE` issue; children re-enter the pool on the next pick |
 | Implement | **full `/sge:sge-implement <N>`** | the complete pipeline — preflight, TDD, forked review, PR, pr-review loop |
@@ -66,7 +67,7 @@ The serial loop deliberately pays for the **full `sge-implement` pipeline** — 
 | `--max-issues N` | unbounded | Stop after N **completed** issues (`stopReason: max-issues`). |
 | `--module <name>` / `--milestone <name>` | all | Passed through to `/sge:available-issues` scope filters. |
 | `--merge-wait` / `--no-merge-wait` | `--merge-wait` | Default: block until each PR merges, then fast-forward main before the next pick. `--no-merge-wait` stacks PRs and hands them to `/sge:pr-monitor` — but forfeits serial-group drainage (below). |
-| `--duration Nh\|Nm` | off | Optional deadline on top of queue-empty. At the deadline, stop dispatching and let the in-flight issue finish — exactly `/sge:issue-swarm`'s clean-stop contract (`stopReason: duration`). |
+| `--duration Nh\|Nm` | off | Optional deadline on top of queue-empty. At the deadline, stop dispatching and let the in-flight issue finish — exactly team-pipeline Duration Mode's clean-stop contract (`stopReason: duration`). |
 | `--dry-run` | off | Run Pick → Reconcile → Gate for the current queue, print the drain plan, claim and dispatch nothing. |
 
 ## Governor (read before the first dispatch)
@@ -74,7 +75,7 @@ The serial loop deliberately pays for the **full `sge-implement` pipeline** — 
 - **Preflight gate, every cycle:** run `/sge:env-health --preflight` before **each** dispatch, not just the first, and honour the verdict: `PASS` → dispatch; `THROTTLE` → dispatch anyway (one agent is already minimum concurrency) but defer any auxiliary background work; `REFUSE` → dispatch **nothing** — wait on the saturation condition with a `Monitor` until-condition ([loops §B](../loops/SKILL.md#b-wait-for-condition-loop); never a foreground sleep), re-gate, and stop per the bounds if the condition never clears.
 - **Budget:** per-issue token budgets are inherited from the dispatched `/sge:sge-implement` run; the driver itself stays thin (it holds no diffs, no file contents — state lives in GitHub). Consult `/sge:cost-guard` on long drains.
 - **Bounds:** the thrash and systemic rules below, `--max-issues`, and the optional `--duration` deadline. Hitting a bound is a terminal report, never a silent extra cycle.
-- **Approvals:** every PR goes through the normal merge gate (`/sge:pr-review` + CI). The driver never applies `pr-reviewed`, never arms auto-merge, never merges by hand.
+- **Approvals:** every PR goes through the normal merge gate (`/sge:pr-review` + CI). The driver never applies `pr-reviewed`, never arms auto-merge, never merges by hand; `hooks/git-policy-guard.sh` (SPEC-132) denies `gh pr merge` on a PR without `pr-reviewed`.
 
 ## Pre-flight (MANDATORY)
 
@@ -106,7 +107,7 @@ The rule is mechanical, so it needs no judgement:
 
 There is no `stopReason` for "waiting", by design. Three concrete corollaries:
 
-- **Nested skill calls are synchronous.** `/sge:available-issues`, `/sge:reconcile-worklist`, `/sge:build-ready-audit`, `/sge:decompose-issue` (steps 1–2) run to completion **inside the current turn**. Announcing that one is outstanding and yielding is the same violation.
+- **Nested skill calls are synchronous.** `/sge:available-issues`, `scripts/reconcile-worklist.mjs`, `/sge:build-ready-audit`, `/sge:decompose-issue` (steps 1–2) run to completion **inside the current turn**. Announcing that one is outstanding and yielding is the same violation.
 - **A dispatched sub-agent is waited on, not handed off.** Step 3's `sge-implement` agent is blocked on until it completes ([loops §B](../loops/SKILL.md#b-wait-for-condition-loop) — a `Monitor` until-condition on its completion, or the harness's own task-completion signal). The driver never ends a turn with an implementation agent still running.
 - **A single point-in-time status check is not a wait.** One `gh pr view` / `gh pr checks` (no poll, no `--watch`) followed by returning control is precisely the violated pattern — it reads the condition instead of blocking on it.
 
@@ -139,11 +140,13 @@ If every remaining ready issue is excluded, the queue is drained **for this run*
 ### 2. Reconcile + gate
 
 ```bash
-/sge:reconcile-worklist --issues <N> --repo <owner/repo> --json
+node "${SGE_ROOT:?resolve SGE_ROOT first}/scripts/reconcile-worklist.mjs" --issues <N> --repo <owner/repo> --json
+bash "${SGE_ROOT:?resolve SGE_ROOT first}/scripts/intake-check.sh" <N>   # SPEC-126: exit 0 or never dispatch
 /sge:build-ready-audit <N>
 ```
 
 - Reconcile **drops** the pick (already closed, or a merged PR closes it) → record and return to step 1.
+- **Intake gate (MANDATORY, #2793):** `intake-check.sh` non-zero → do **not** dispatch. Record `awaiting-intake: <its FAIL reason>` in the ledger, add the issue to the within-run exclusion set, return to step 1 — a human records the decision with `/sge:issue-intake <N>`. Same gate as team-pipeline's ([intake gate](../team-pipeline/references/mechanisms.md#intake-gate)); the dispatched `sge-implement` re-checks it at Phase −1.
 - `READY` → step 3.
 - `NOT_READY` → record the blocker in the ledger **and add the issue to the within-run exclusion set** (the deterministic pick would otherwise return it every cycle), return to step 1. The issue is not labelled — it may become ready later, and a fresh run re-audits it; `build-ready-audit` owns telling the author why.
 - `TOO_LARGE` → `/sge:decompose-issue <N>`, record the parent as decomposed (and add it to the exclusion set if it stays open as a tracking epic), return to step 1 — the children enter the pool and are picked in dependency order on subsequent cycles. Never dispatch an un-split epic.
@@ -156,7 +159,7 @@ Dispatch **full `/sge:sge-implement <N>`** as a **fresh, named, stoppable Task s
 - **Fresh context per issue** — one issue's context dies with its agent; the driver survives a 20-issue drain precisely because it never absorbs implementation context. The driver performs no implementation work inline, ever.
 - The sub-agent runs the complete `sge-implement` pipeline: preflight, TDD, forked pre-PR review, `/sge:commit`, PR, and its own `/sge:pr-review` fix loop through to the `pr-reviewed` gate and armed auto-merge.
 
-**Claim before dispatch** — apply the durable cross-agent mutex `available-issues`' claim gate already honours, so a concurrent `/sge:team-pipeline`, `/sge:issue-swarm`, or second `issue-loop` never double-picks the issue, and a crash before the sub-agent pushes a branch still leaves a durable trail:
+**Claim before dispatch** — apply the durable cross-agent mutex `available-issues`' claim gate already honours, so a concurrent `/sge:team-pipeline` or second `issue-loop` never double-picks the issue, and a crash before the sub-agent pushes a branch still leaves a durable trail:
 
 ```bash
 gh issue edit <N> --add-label agent-lock
@@ -248,44 +251,13 @@ Always state the stop reason — a drain that quietly stopped early must never r
 
 ### Machine-readable exit report
 
-Alongside that human-readable summary, emit **one** shared [exit report](../exit-report/SKILL.md) as a fenced ```exit-report``` block so a parent orchestrator (or a `/loop` re-invocation) can act on the run without re-parsing the ledger prose — one `outcomes[]` entry per issue this run acted on (`item: "issue:<N>"`, `status`: `success` merged · `skipped` `loop-skip`/not-ready/reconciled-away · `thrashing` retried-twice · `failed` otherwise; carry the PR number in `pr`), and decomposed parents recorded as `skipped` with the split noted in `detail`. Map issue-loop's stop vocabulary onto the schema's `stopReason` enum:
-
-| issue-loop stop | schema `stopReason` |
-|---|---|
-| `queue-exhausted` | `queue-empty` |
-| `max-issues` | `bound-hit` |
-| `duration` | `bound-hit` |
-| `systemic` (3 different-issue failures) | `error` |
-| `user` | `user-stop` |
-
-```exit-report
-{
-  "skill": "issue-loop",
-  "runId": "issue-loop-<repo>-<ISO start>",
-  "itemsProcessed": 4,
-  "outcomes": [
-    { "item": "issue:806", "status": "success", "issue": 806, "pr": 812, "detail": "merged, reviewed" },
-    { "item": "issue:830", "status": "skipped", "issue": 830, "detail": "loop-skip after 2 failures" }
-  ],
-  "stopReason": "queue-empty"
-}
-```
+Emit one shared [exit report](../exit-report/SKILL.md) block with an issue-loop → schema `stopReason` mapping; shape and example: [`references/exit-report.md`](references/exit-report.md).
 
 ## Durability / idempotent re-entry
 
-Interrupted mid-run (container reclaim, crash, user stop)? Re-invoking `/sge:issue-loop` resumes correctly with **no state file**:
-
-- Merged issue A is closed → `available-issues` never re-picks it.
-- Mid-flight issue B left a durable trail — a pushed branch, an open PR, an `agent-lock` label — so the claim gate treats it as in-flight/claimed rather than double-claiming; reconcile or finish it via `/sge:pr-monitor` / `/sge:pr-fix`, or release the stale claim and let the loop re-pick it.
-- Skips persist as `loop-skip` labels; nothing lives only in `/tmp`.
+Re-invoking `/sge:issue-loop` after an interruption resumes with no state file; how: [`references/durability.md`](references/durability.md).
 
 ## Related commands
 
-- [`loops/SKILL.md`](../loops/SKILL.md) — the anatomy gate and loop patterns this skill declares against
-- `/sge:available-issues` — the pick step (`--mode autonomous-next` is this loop's queue)
-- `/sge:reconcile-worklist`, `/sge:build-ready-audit`, `/sge:decompose-issue` — the pre-dispatch filters
-- `/sge:sge-implement` — the full per-issue pipeline this loop dispatches
-- `/sge:pr-review` — the independent merge gate (confirmed by the driver, owned by the pipeline)
-- `/sge:pr-monitor`, `/sge:pr-fix` — PR shepherding for `--no-merge-wait` and recovery paths
-- `/sge:env-health` — the preflight Governor gate before every dispatch
-- `/sge:issue-swarm` — the duration-bounded **parallel** sibling; use it for time-boxed fan-out, this loop for a serial drain to empty
+The pick, filter, implement, review, shepherding and Governor skills this loop composes: [`references/related-commands.md`](references/related-commands.md).
+
