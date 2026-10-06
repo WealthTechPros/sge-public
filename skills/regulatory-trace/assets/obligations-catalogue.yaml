@@ -63,7 +63,7 @@ fca_obligations:
       data (incl. synthetic), and third-party OSS / ML libraries as reportable ICT
       third-party arrangements. In-scope clients register WTP and demand DD evidence
       with TRIPARTITE (firm + auditor + regulator) access. Specs mapped here populate
-      that registration + the trust-fabric auditor evidence room.
+      that registration + the trust portal's auditor evidence room.
     must_be_covered: true
   - id: PRIN.2A
     name: Consumer Duty

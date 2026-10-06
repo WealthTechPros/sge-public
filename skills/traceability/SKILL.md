@@ -1,5 +1,5 @@
 ---
-description: Use when installing the SGE Traceability Module (SPEC-054) into the current repo — copies the traceability data builder and interactive chart page, wires the docs Pages workflow, and opens a draft install PR. Run from inside a cloned SGE-governed repo checkout when the user asks to "install the traceability chart/module". For the web-UI install use the SGE Modules tab instead; this skill does not build or audit traceability data itself.
+description: Use when installing the SGE Traceability Module (SPEC-054) in a repo — "install the traceability chart/module". Copies the data builder and chart page, wires the docs Pages workflow and opens a draft install PR. Does not build or audit traceability data itself.
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash(mkdir:*), Bash(cp:*), Bash(node:*), Bash(git status:*), Bash(git checkout:*), Bash(git add:*), Bash(git commit:*), Bash(git push:*), Bash(gh repo view:*), Bash(gh auth token:*), Bash(gh pr create:*)
 ---
 
@@ -44,7 +44,7 @@ No arguments. The skill reads the local repo to auto-detect the docs workflow.
 > **Target repo.** This installer writes into the **current working
 > directory**'s checkout — every step below (`mkdir`, `cp`, `git checkout
 > -b`, `git push`, `gh pr create`) resolves against it. When dispatched from a
-> hub/control checkout (e.g. `wtp-org`) to install into a *different* target
+> hub/control checkout (e.g. an org hub repo) to install into a *different* target
 > repo, apply the shared repo-targeting convention —
 > [`gh-repo`](../gh-repo/SKILL.md) — first: resolve + `cd` via the shared
 > helper — `cd "$(${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/with-repo-cwd.sh resolve

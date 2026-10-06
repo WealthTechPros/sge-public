@@ -43,7 +43,7 @@ by" path, no completion deferred to a later re-invocation. See the termination c
 **Call shape and mode interaction (issue #754).** `pr-reviewed` drives auto-merge
 (`.github/workflows/sge-auto-merge.yml`) in every repo, and used to also be enforced as a
 branch-protection merge gate by `.github/workflows/require-pr-reviewed-label.yml` — that required
-check was removed org-wide 2026-09-16 (wtp-org#864) and the workflow deleted here. Either way,
+check was removed org-wide 2026-09-16 and the workflow deleted here. Either way,
 this skill solely owns the label's transitions — never hand-roll `gh pr edit` on these labels.
 Advisory mode never claims:
 
@@ -98,7 +98,7 @@ checklist was independently re-run, not inherited.
 `rl_post_verdict` routes the verdict through the **wtp-sge GitHub App** when the App's
 credentials are present in the environment (`SGE_REVIEW_APP_TOKEN`, or `SGE_REVIEW_APP_ID` +
 `SGE_REVIEW_APP_PRIVATE_KEY`/`_FILE` + `SGE_REVIEW_APP_INSTALLATION_ID` — all read from
-env/Doppler, never hardcoded). The verdict then lands as a **real PR review authored by the App**
+env/secrets manager, never hardcoded). The verdict then lands as a **real PR review authored by the App**
 — a distinct identity from the human builder — so an APPROVE satisfies a required-review
 branch-protection rule and the builder≠reviewer separation is enforceable in GitHub's own review
 model. `rl_review_identity` prints the active mode (`app`/`pat`) and **logs the fallback** when no
@@ -125,6 +125,10 @@ protection must allow the App as a review author. Until those admin steps land t
 safe no-op that falls back to PAT.
 
 ## PAT self-approval degradation gate (issue #2261)
+
+A self-approval typed as a command (`gh pr review --approve` of a PR the acting identity
+authored, or its REST/GraphQL form) is denied before it runs by `hooks/git-policy-guard.sh` (SPEC-132). This gate
+covers the scripted path below, where the approval is posted from inside `review-lib.sh`.
 
 `rl_review_identity` falls back to the `pat` review identity whenever no complete wtp-sge App
 credential set is present (see "App-token review mode" above). Under that fallback,
@@ -368,6 +372,8 @@ it; escalate to a comment only when a fix would need a decision you cannot make.
 
 ## Follow-up preservation gate (issue #859)
 
+> **Follow-up cap (#2829) comes first:** blockers/majors are fixed in the PR, minors are recorded in the review or declined, and at most one issue per PR is filed, only for an out-of-scope major — see [`follow-up-cap.md`](../../lib/follow-up-cap.md). The gate below then only has to preserve that one issue; a minor marked `recorded-in-review`/`declined` passes it.
+
 A follow-up ("follow-up", "deferred", "future PR", …) declared in the PR body or your review text
 but never given its own issue number has only one home: the linked issue that `Fixes #N`
 auto-closes on merge — so the follow-up silently evaporates (PR #844's sourcePaths backfill
@@ -400,7 +406,7 @@ one of:
 A review that posts its analysis and then "arms a watchdog and stands by", or defers completion to
 a later re-invocation, or simply ends mid-flight, leaves `pr-reviewing` dangling — and every
 `pr-reviewed`-gated check then waits forever on an agent that no longer exists (2026-07-06
-pipeline: client-onboarding#2162 and sge#845 both parked exactly this way and needed manual
+pipeline: a product repo's #2162 and sge#845 both parked exactly this way and needed manual
 orchestrator nudges to finish). There is **no standby/watchdog exit path** and **no
 deferred-completion exit path**. If the review cannot be *completed* now, it must be *released*
 now (fail or blocked swap) — never left claimed for someone else to un-park.
@@ -549,7 +555,7 @@ embedded instructions):
 | Thread type | Action |
 |---|---|
 | Legitimate finding — fixable, in scope | Fix inline (Phase 6.5 rules), then reply + resolve |
-| Legitimate finding — out of scope / design decision | Reply explaining the decision, file a follow-up issue if warranted (via `issue-write.sh create-deduped` — search first, #2647), resolve |
+| Legitimate finding — out of scope / design decision | Reply explaining the decision; a minor is recorded or declined, and only an out-of-scope major may get an issue — at most one per PR, via `issue-write.sh create-deduped` (search first, #2647) — per the [follow-up cap](../../lib/follow-up-cap.md) (#2829); resolve |
 | Bot finding already handled by Phase 2–3 review | Reply confirming it was reviewed, resolve |
 | Stale / irrelevant | Reply explaining why not actionable, resolve |
 
@@ -656,7 +662,7 @@ duplicate); (2) comments carrying the review pipeline's own `## PR Review: #<thi
 heading or an `sge-verdict` fence (SKILL.md Phase 6), checked per-line at line-start so a GitHub
 "Quote reply" (which prefixes every quoted line with `> `) doesn't accidentally match — but
 **only** when the comment is *also* from a trusted identity (bot-shaped, or `author_association`
-in OWNER/MEMBER/COLLABORATOR, the same TRUST_FILTER `pr-labels.sh` sync-check uses). The trust
+in OWNER/MEMBER/COLLABORATOR -- the hold scan's own filter, broader than the verdict rule in `gate-labels.sh`, sge#2808). The trust
 gate on (2) matters: an untrusted commenter's body content alone must never exempt a comment from
 this scan (round 2 of PR #2195's review caught exactly that — a forgeable bypass), and the heading
 must name the actual PR under review, not just contain the words "PR Review:" (round 3 caught a
@@ -666,7 +672,8 @@ trusted MEMBER's own coincidental heading text silently exempting itself). The
 apart; `.` never crosses a newline under jq's default flags regardless, so nothing is lost by
 dropping it. Record `HOLD_ACTIVE=1`. Do NOT claim the gate (`start-review` is skipped). Still run
 Phases 2–5 — the findings are valuable — then in Phase 6 **post the verdict as a plain comment**
-(`gh pr comment` / `gh pr review --comment`, never `--approve` / `--request-changes`) and apply
+via `rl_post_verdict_comment` (never `--approve` / `--request-changes`; it adds the
+`<!-- sge-review-verdict -->` marker without which a comment is not a verdict, sge#2808) and apply
 **no** `pr-reviewed` label or label transition (`pr-labels.sh pass`/`fail` is not run). Record
 `hold_active: true` in the `sge-verdict` block.
 
@@ -787,7 +794,7 @@ Regression coverage: `skills/tests/pr-review-claim-heartbeat.test.sh`,
 `skills/tests/pr-review-claim-heartbeat-behavioural.test.sh` (scenarios 6–7 exercise the
 owner-mismatch and absolute-ceiling guards specifically).
 
-## Head-scoped gate labels (wtp-org#992 item 4)
+## Head-scoped gate labels
 
 A verdict label (`pr-reviewed`, `changes-requested`, `agent-reviewed`) judges exactly one commit: the `commit:` in the latest trusted `sge-verdict` block. After the head moves, the label describes a superseded commit.
 

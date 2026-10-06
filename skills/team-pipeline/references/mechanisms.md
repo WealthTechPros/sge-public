@@ -151,7 +151,10 @@ printf '%s' "$report" \
 # writes directly. See references/alm-routing.md ("Mutating tracker writes").
 IR="${CLAUDE_PLUGIN_ROOT:-.}/scripts/issue-read.sh"
 IW="${CLAUDE_PLUGIN_ROOT:-.}/scripts/issue-write.sh"
-QUEUE=$("$IR" list --state open --limit 50 \
+# Dispatch label (#2793): the same port /available-issues uses. Empty = the repo
+# declares none; a malformed value fails loud — never fall back to unfiltered.
+DISPATCH_LABEL="$("$IR" dispatch-label)" || { echo "dispatch-label misconfigured — aborting"; exit 1; }
+QUEUE=$("$IR" list --state open --limit 50 ${DISPATCH_LABEL:+--label "$DISPATCH_LABEL"} \
   | jq -r '[.[] | select(
     (.assignees | length == 0) and
     ([.labels[].name] | contains(["agent-lock"]) | not)
@@ -222,8 +225,26 @@ RECONCILED=$(node "${CLAUDE_PLUGIN_ROOT:-.}/scripts/reconcile-worklist.mjs" \
 
 echo "$RECONCILED" | \
   jq -r '.dropped[] | "[Reconcile] dropped #\(.item) — \(.reason)"'
+# Partly built (a merged `Part of #N` PR, #2793): kept, but the intake gate
+# below drops it unless its intake was approved after the newest such PR
+# merged (intake-check.sh rule 9, #2796) — a fresh intake covers the remainder.
+echo "$RECONCILED" | \
+  jq -r '.partial[]? | "[Reconcile] partial #\(.item) — merged Part-of PR(s) \(.prs | map("#\(.)") | join(", "))"'
 
 QUEUE=$(echo "$RECONCILED" | jq -r '.keep[] | select(type == "number")')
+
+# In flight already (an open PR references it): drop it — shepherd that PR,
+# never open a second lane. The one shared linked-PR check (#2915); exit 2 (gh
+# failed) is unknown, so the issue is dropped too, never queued blind.
+LP="${CLAUDE_PLUGIN_ROOT:-.}/scripts/linked-prs.sh"
+QUEUE=$(for n in $QUEUE; do
+  bash "$LP" "$n" --state open --repo "$REPO" >/dev/null
+  case $? in
+    1) echo "$n" ;;
+    0) echo "[Reconcile] dropped #$n — open linked PR (in flight)" >&2 ;;
+    *) echo "[Reconcile] dropped #$n — linked-PR check failed" >&2 ;;
+  esac
+done)
 ```
 
 The `|| { … exit 1; }` guard enforces the abort-on-failure contract: if the
@@ -233,66 +254,47 @@ result as an ordered array in `/tmp/team-pipeline-queue.json`.
 
 ---
 
-## Phase 1.5 — Batch pre-classification
+## Phase 1.5 — Intake gate
 
-> Only run when `QUEUE` contains ≥ 2 issues. Single-issue runs skip this step.
+### Intake gate
 
-Build the comma-separated issue list and call `/sge:build-ready-audit` once for
-the whole wave:
+**MANDATORY, every queue build and every re-fill (SPEC-126, #2793).** Keep only
+issues whose `scripts/intake-check.sh` passes: a fresh, unedited `## SGE intake`
+record by an allow-listed human deciding Build or Re-scope. Everything else is
+dropped before any claim, lock or worktree and reported as awaiting intake (a
+human runs `/sge:issue-intake`). This replaces the old batch governance
+pre-classification: the governance verdict now travels in the intake record, and
+each lane adopts it from there (dispatch-prompts Step 3).
+`SGE_GOVTRACE_VERDICT` is never injected or adopted — its provenance cannot be checked.
 
-```bash
-# Build comma-separated list from the reconciled queue
-ISSUE_LIST=$(cat /tmp/team-pipeline-queue.json \
-  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).join(",")))')
-
-# Batch governance-classify the whole wave in one hop (--skip-governance opt-out)
-BATCH_RESULT=$(/sge:build-ready-audit "$ISSUE_LIST")
-
-# Extract the govtraceMap keyed by issue number (string keys)
-GOVTRACE_MAP=$(printf '%s' "$BATCH_RESULT" \
-  | node -e '
-      let s="";
-      process.stdin.on("data",d=>s+=d).on("end",()=>{
-        const results = JSON.parse(s).results || [];
-        const map = {};
-        for (const r of results) {
-          if (r.governance) {
-            map[String(r.issue)] = Object.assign({}, r.governance);
-          }
-        }
-        process.stdout.write(JSON.stringify(map));
-      })')
-
-# Merge govtraceMap into the Phase 0 state file
-node -e "
-  const fs = require('fs');
-  const f = '/tmp/team-pipeline-state.json';
-  const st = JSON.parse(fs.readFileSync(f,'utf8'));
-  st.govtraceMap = $(printf '%s' "$GOVTRACE_MAP");
-  fs.writeFileSync(f, JSON.stringify(st, null, 2));
-"
-
-echo "[Phase 1.5] Batch-classified $(echo "$GOVTRACE_MAP" | node -e \
-  'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(Object.keys(JSON.parse(s)).length))') issues"
-```
-
-**Inject per-issue verdict at dispatch time (Phase 3c).** When spawning `impl-<N>`,
-read the map and format the verdict for the lane prompt:
+Resolve `SGE_ROOT` first, as `/sge:sge-implement` does
+(`scripts/resolve-sge-root.sh`). The check is never looked up relative to the
+checkout's cwd: with `SGE_ROOT` unset the block stops instead.
 
 ```bash
-# Look up verdict for issue N from state
-GOVTRACE_VERDICT=$(node -e "
-  const st = require('/tmp/team-pipeline-state.json');
-  const g = (st.govtraceMap || {})['$N'];
-  if (g) process.stdout.write(JSON.stringify(Object.assign({issue: $N}, g)));
-")
-# GOVTRACE_VERDICT is empty string when not in map — the lane falls through to its own fork.
+IC="${SGE_ROOT:?SGE_ROOT unset - resolve it with scripts/resolve-sge-root.sh first}/scripts/intake-check.sh"
+INTAKE_OK=""
+while IFS= read -r n; do   # one entry per line: never word-split or glob-expanded
+  if ! [[ "$n" =~ ^[0-9]+$ ]]; then echo "[Intake] skip #$n — not an issue number"; continue; fi
+  if why="$(bash "$IC" "$n" 2>&1 >/dev/null)"; then
+    INTAKE_OK="$INTAKE_OK
+$n"
+  else
+    echo "[Intake] skip #$n — ${why#intake-check: }"
+  fi
+done < <(printf '%s\n' "$QUEUE" | tr -s ' \t' '\n\n' | awk 'NF && !seen[$0]++')   # dedupe, keep order
+QUEUE="$(printf '%s\n' "$INTAKE_OK" | awk 'NF')"
 ```
+
+Run it on the reconciled queue **before** it is stored to
+`/tmp/team-pipeline-queue.json`. Record each skipped issue in `failedIssues`
+with reason `awaiting-intake`. Run the check from the **tracking** repo's
+checkout (the issue and its intake comment live there, SPEC-057). The lane re-runs the same check before writing code, so a
+record that goes stale between queueing and spawning still blocks.
 
 ### Per-lane model tier (#2488)
 
-**Same Phase 1.5 pass, after the governance batch above** (or before it —
-order doesn't matter, the two are independent): resolve each queued issue's
+**Same Phase 1.5 pass, after the intake gate above:** resolve each queued issue's
 model tier and merge it into the same state file, so the map exists before
 Phase 3c dispatches any lane:
 
@@ -316,40 +318,20 @@ node -e "
 echo "[Phase 1.5] Resolved model tier for $(printf '%s' "$TIER_MAP" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(Object.keys(JSON.parse(s)).length))') issues"
 ```
 
-**Look up at dispatch time (Phase 3c), alongside `GOVTRACE_VERDICT` above:**
+**Look up at dispatch time (Phase 3c):**
 
 ```bash
 TIER=$(node -e "
   const st = require('/tmp/team-pipeline-state.json');
   process.stdout.write((st.tierMap || {})['$N'] || 'sonnet');
 ")
-# TIER defaults to "sonnet" when Phase 1.5 didn't cover this issue (e.g. a
-# single-issue run that skipped the >= 2-issue batch gate above) — never
+# TIER defaults to "sonnet" when Phase 1.5 didn't cover this issue (e.g. the
+# resolver failed for it) — never
 # leave the Agent() dispatch call's model parameter unset.
 ```
 
 Pass `$TIER` as the `model` argument on the lane's `Agent(name: "impl-<N>",
 model: $TIER)` dispatch (SKILL.md Phase 3c / [dispatch-prompts](dispatch-prompts.md)).
-
-Include `GOVTRACE_VERDICT` in the lane Task prompt as:
-
-```
-SGE_GOVTRACE_VERDICT: ${GOVTRACE_VERDICT}
-```
-
-(Leave it blank/absent when the batch did not classify this issue — the lane falls
-through to a per-lane fork, which is the correct fallback behaviour.)
-
-**Two invariants the orchestrator MUST honour when injecting:**
-
-1. **Issue-identity guard (cross-issue contamination).** The injected JSON MUST
-   include `"issue":<N>` — the identity the lane validates against. A lane rejects a
-   verdict whose issue number does not match its own and falls back to forking, so a
-   verdict batched for one issue can never be silently adopted by another lane.
-2. **Blocking verdicts inject as-is, never filtered.** `MATCHES_EXISTING_MODIFIED`,
-   `NOT_SGE_SCOPE`, and any `matchConfidence: "low"` verdict are passed through
-   unchanged; the lane surfaces them (or writes `outcome:"blocked"` headless) before
-   writing any code. Only the fork is front-loaded away — the gate is never skipped.
 
 ---
 
@@ -700,25 +682,9 @@ ${PHASE6_REPORT}
 > created every run. P10 `search` (S4) adds the backend-neutral free-text title
 > search this needs, so the rolling log is now genuinely rolling on every backend.
 
-**When `SGE_BACKEND_URL` is set:** additionally POST the report via the same
-snapshot mechanism `/sge:roi-report` Step 6 uses (reuse its `curl`/auth
-pattern), tagging the payload so the backend can tell a pipeline-run snapshot
-apart from an ROI snapshot:
-
-```bash
-if [ -n "${SGE_BACKEND_URL:-}" ] && [ -n "${SGE_API_TOKEN:-}" ]; then
-  curl -s -X POST \
-    "${SGE_BACKEND_URL}/api/organizations/${ORG_ID}/token-cost/snapshot" \
-    -H "Authorization: Bearer ${SGE_API_TOKEN}" -H "Content-Type: application/json" \
-    -d "$(jq -n --arg runId "$RUN_ID" --arg report "$PHASE6_REPORT" \
-          '{reportType:"pipeline-run", runId:$runId, report:$report}')" \
-    || echo "[Report] snapshot POST failed — the issue-comment copy above is still posted"
-fi
-```
-
-On failure, do NOT abort — the issue-comment copy is the primary durable record
-(mirrors `/sge:roi-report`'s "local report is primary" graceful-degradation
-rule).
+The issue comment is the only durable copy. The former snapshot POST to the hosted SGE
+backend was retired with the platform decommission (#2899, #2916); there is no
+backend to post to.
 
 ---
 
@@ -727,22 +693,25 @@ rule).
 Primary steps (core SKILL.md summarises the decision rule): (1) **Discover** via
 `/sge:available-issues --parallel --count <pool_size>`; (2) **Reconcile**
 (MANDATORY — the Phase 1 reconcile pre-flight, on the candidates); (3) **Gate**
-each candidate through `/sge:build-ready-audit <issue>` **before any claim** —
-READY → queue, NOT_READY → drop (record the blocker in `failedIssues`; never
-lock/spawn), TOO_LARGE → decompose; (4) **Decompose** TOO_LARGE via
-`/sge:decompose-issue`, re-gate each child, merge READY children into the queue
+each candidate through the [intake gate](#intake-gate) (MANDATORY — no passing
+intake → drop as `awaiting-intake`) and `/sge:build-ready-audit <issue>`
+**before any claim** — READY → queue, NOT_READY → drop (record the blocker in
+`failedIssues`; never lock/spawn), TOO_LARGE → decompose; (4) **Decompose**
+TOO_LARGE via `/sge:decompose-issue`, re-gate each child (a new child has no
+intake record, so it waits for `/sge:issue-intake`), merge READY children into the queue
 (record the parent in `decomposed`; never claim it; dedupe by issue number so a
 relaunch never re-decomposes). **Re-fill** when the queue runs low, but only if
 `time_remaining >= MIN_AGENT_RUNWAY`.
 
 When the gated front-end tools are unavailable, each step degrades safely:
 
-1. **Discover** — fallback: the raw Phase 1 `gh issue list` discovery above.
+1. **Discover** — fallback: the raw Phase 1 discovery above (dispatch label applied).
 2. **Reconcile** — unchanged; the Phase 1 reconcile pre-flight always runs on
    the candidates.
-3. **Gate** (`/sge:build-ready-audit`) — fallback when unavailable: treat
-   candidates as READY (the lane's governance-trace gate still runs) and use a
-   size heuristic (body length / AC count) to flag TOO_LARGE.
+3. **Gate** — the intake gate has no fallback: it always runs, and an issue
+   without a passing intake is never queued. When `/sge:build-ready-audit` is
+   unavailable, queue only intake-passing issues and use a size heuristic
+   (body length / AC count) to flag TOO_LARGE.
 4. **Decompose** (`/sge:decompose-issue`) — fallback when unavailable: skip the
    oversized issue, comment that it needs manual decomposition, add to
    `failedIssues` with reason `too-large-no-decomposer` — never let a lane
@@ -780,7 +749,7 @@ rules that would have resolved the ambiguity at tier (a). See
 When unattended (`SGE_UNATTENDED=1` or `--unattended`), Phase 6 appends two
 sections to `$PHASE6_REPORT` **and** to the machine-readable exit block. Full
 schema, table format and exact JSON shapes are in the canonical
-[`run-report/decision-journal.md`](../../run-report/decision-journal.md); the
+`run-report/decision-journal.md` (SGE source repo: `skills/run-report/decision-journal.md`); the
 wiring is:
 
 - **BLOCKED report** — only when the run hit a tier (c) exit (missing credential,
@@ -815,7 +784,7 @@ SPEC-093 tier-b decisions across all lanes (unattended only; target → 0).
 /sge:team-pipeline complete
 ----------------------------------------------
 Completed : <N> issues -> PRs open
-Reviewed  : <N> PRs approved + undrafted
+Reviewed  : <N> PRs approved
 Changes   : <N> PRs flagged (needs human review)
 Failed    : <N>
 Stale-killed: <N> lanes (no PR within time-box — re-scope required)

@@ -23,12 +23,12 @@ Execute the inner Red/Green/Refactor loop — write one failing test, write mini
 
 The canonical Red/Green/Refactor reference for this plugin — this skill **is**
 [loop pattern A, the inner loop](../loops/SKILL.md#a-inner-loop-redgreenrefactor).
-Implementation workflows (`/sge:sge-implement`, `/sge:implement-issue`,
+Implementation workflows (`/sge:sge-implement`,
 `/sge:refactor`, `/sge:pr-fix`) link here instead of restating the cycle — when
 one of them says "implement via TDD", this file is the full protocol.
 
 > **Disambiguation:** this is the SGE-integrated TDD loop; the superpowers
-> plugin ships a generic TDD skill — in WTP repos this one governs.
+> plugin ships a generic TDD skill — in SGE-governed repos this one governs.
 
 This is an **agent-executed** loop: the agent writes the test, runs it,
 reads the output, and acts on what it sees. Never stop to ask the user to
@@ -147,7 +147,7 @@ distinction that gate is blind to, and the narrow case where existence is not
 enough. It governs the **test-fidelity gate** (`require-test-fidelity.yml`,
 SPEC-070) — but the discipline applies whether or not the mechanical gate runs.
 
-**Motivating incident — the 13-day corrupted dashboard (`client-onboarding`).**
+**Motivating incident — the 13-day corrupted dashboard (a product repo).**
 A T-SQL→Postgres driver port (PR #1776) *did* update its test in the same
 commit — this was **not** a "no tests" gap, and the existence gate passed it
 green. But the suite **mocked the DB connection** (`getDwPool`), and the mock

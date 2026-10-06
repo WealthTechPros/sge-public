@@ -83,7 +83,7 @@ work; anything ambiguous or dangerous forks as it did before.
 
 **Also risk-map-gated (proportional-governance proposal).** Before accepting an inline
 verdict, additionally run `resolve-governance-tier.mjs`'s risk map (PII, `docs/compliance/**`,
-trust-fabric evidence, regulatory-trace — a superset of `resolve-context-depth.mjs`'s
+trust-portal evidence, regulatory-trace — a superset of `resolve-context-depth.mjs`'s
 CRITICAL_RE) over the same predicted paths. A risk-map hit forks unconditionally even when
 `resolve-context-depth.mjs` alone would have said `trivial` — closes the gap where a
 `docs/compliance/ai-policy.md` edit, `trivial` by extension alone, previously qualified for
@@ -134,7 +134,7 @@ has already posted the before/after (its Step 6 always comments for this
 verdict). Do not proceed silently:
 
 - **Standalone (interactive):** AskUserQuestion — "This issue changes SPEC-NNN's requirement: <clause>. Current: '<current>'. Proposed: '<proposed>'. Proceed?" — Option A: "Yes, update the spec as part of this change" (continue to Phase 1; the clause text is rewritten in Phase 8.1, not just its status); Option B: "No — re-scope the issue instead" (stop, comment asking for re-scope); Option C: "Cancel".
-- **Dispatched (headless — team-pipeline, issue-swarm):** do **not** guess. Park the issue by writing the completion file with `outcome: "blocked"` and a one-line `note`, then terminate. A human picks it up from the comment govtrace posted and re-invokes `/sge:sge-implement <n>` interactively.
+- **Dispatched (headless — team-pipeline):** do **not** guess. Park the issue by writing the completion file with `outcome: "blocked"` and a one-line `note`, then terminate. A human picks it up from the comment govtrace posted and re-invokes `/sge:sge-implement <n>` interactively.
 
 ## `NEEDS_NEW_SPEC`
 
@@ -144,7 +144,7 @@ is `new`) carries the model row that must land alongside it — never approve th
 spec stub without its accompanying model edit, or you create an orphan spec.
 
 - **Standalone (interactive):** AskUserQuestion — "This issue needs a new spec: <stub title>. <one-line body summary>.<if suggestedCapabilityModelEdit non-null: ' This also needs a new capability-model entry: <description>.'> How do you want to proceed?" — Option A: "Approve as drafted" (write the spec file **and** the capability-model edit, when present, in the **same** commit with a `Spec: SPEC-NNN` trailer, then continue to **Phase 1** as the just-created spec); Option B: "Edit first" (show the full drafted markdown for both, take edits, then proceed as Option A); Option C: "Cancel".
-- **Dispatched (headless — team-pipeline, issue-swarm):** treat as a requirement change — write the completion file with `outcome: "blocked"`; a human approves the stub + model edit later.
+- **Dispatched (headless — team-pipeline):** treat as a requirement change — write the completion file with `outcome: "blocked"`; a human approves the stub + model edit later.
 
 ## `NO_SPEC_WARRANTED`
 
@@ -167,3 +167,20 @@ in this product's model. `governance-trace` has already posted `nonGoalConflict`
 This repo has no SGE governance artefacts yet. Continue to **0B: No-spec lane**
 exactly as `NO_SPEC_WARRANTED` (nothing to trace against), but mention once in
 your final summary that `/sge:sge-init` would close this gap for future issues.
+
+## Verdict branch table (moved from SKILL.md)
+
+Moved verbatim from `SKILL.md` (issue #2917, 24 KB size budget).
+
+| Verdict | Default | Standalone (AskUserQuestion) | Dispatched (headless) |
+|---|---|---|---|
+| **`MATCHES_EXISTING`** | proceed | — | — → set `specId = matchedSpec`, continue to **Phase 1**. |
+| **`MATCHES_EXISTING_MODIFIED`** (govtrace posted) | **block** | A: update the spec as part of this change (→ Phase 1; clause text rewritten in Phase 8.1, not just status); B: re-scope (stop, comment); C: Cancel | `blocked` + note; human re-invokes interactively |
+| **`NEEDS_NEW_SPEC`** | **block** | A: approve as drafted — write the spec **and** its `suggestedCapabilityModelEdit` (when present) in the **same** commit with a `Spec: SPEC-NNN` trailer, → Phase 1; B: edit first, then as A; C: Cancel | `blocked`; human approves stub + model edit later |
+| **`NO_SPEC_WARRANTED`** | proceed | — | — → continue directly to **0B: No-spec lane** |
+| **`NOT_SGE_SCOPE`** (govtrace posted `nonGoalConflict`) | **block** | A: re-scope (stop); B: override (reason ≥10 chars — see override mechanics); C: Cancel/close | **never auto-override** — `blocked` |
+| **`NOT_ONBOARDED`** | proceed | — | — → **0B** as `NO_SPEC_WARRANTED`; note `/sge:sge-init` would close the gap |
+
+**`NEEDS_NEW_SPEC` control:** never approve the spec stub without its capability-model edit (when `layers.feature`/`.capability` is `new`) — an orphan spec otherwise.
+
+**`NOT_SGE_SCOPE` override mechanics:** an accepted override is loud, not a bypass. Continue to **0B**, pass `/sge:commit` the reason as `SGE-Override: ALL; SCOPE-OVERRIDE: <reason>` (greppable), and post a comment recording who overrode and why.

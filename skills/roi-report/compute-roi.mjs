@@ -2,8 +2,9 @@
 /**
  * compute-roi.mjs — bundled ROI aggregator for the /sge:roi-report skill.
  *
- * Behaviour-preserving port of `computeROI()` from
- * platform/packages/token-governance/src/roi.ts (issue #823, epic #729).
+ * Behaviour-preserving port of `computeROI()` from the hosted platform's
+ * token-governance package (issue #823, epic #729). That package was deleted
+ * with the platform in #2899, so this script is now the canonical copy.
  * The skill previously showed a pseudo-TypeScript import of an internal
  * token-governance package; this script is the real, runnable equivalent —
  * fully self-contained, with no external dependency — so the skill can branch

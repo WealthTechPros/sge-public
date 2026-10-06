@@ -162,7 +162,20 @@ new_records="$(jq -c -n \
 # Nothing new (empty transcript, no assistant usage, or all already emitted).
 [ -n "$new_records" ] || exit 0
 
-mkdir -p "$(dirname "$OUT")" 2>/dev/null || exit 0
+# Symlink refusal (sge#2780): `memory/` lives inside a repo working tree, so
+# a repo-controlled symlink there (or at memory/token-usage.jsonl) could
+# redirect this append to any file the user can write. Refuse to append when
+# either is a link, or when memory/ resolves outside the project dir. Exit
+# before the idempotency counter advances, so a refused run never consumes
+# records. (The per-session state file under $HOME is out of scope here.)
+MEM_DIR="$(dirname "$OUT")"
+[ -L "$MEM_DIR" ] && exit 0
+mkdir -p "$MEM_DIR" 2>/dev/null || exit 0
+[ -L "$MEM_DIR" ] && exit 0
+[ -L "$OUT" ] && exit 0
+root_phys="$(cd "$REPO_ROOT" 2>/dev/null && pwd -P)" || exit 0
+mem_phys="$(cd "$MEM_DIR" 2>/dev/null && pwd -P)" || exit 0
+[ -n "$root_phys" ] && [ "$mem_phys" = "$root_phys/memory" ] || exit 0
 printf '%s\n' "$new_records" >> "$OUT" 2>/dev/null || exit 0
 
 # Advance the idempotency counter by the number of records just emitted.

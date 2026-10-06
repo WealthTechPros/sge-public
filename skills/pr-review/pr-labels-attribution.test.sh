@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Offline unit tests for the label-attribution comment added to
-# add_label/remove_label (wtp-org#774 option 3 — self-declared writes).
+# add_label/remove_label.
 #
 # AC coverage:
 #   AC-1: add_label posts a comment naming SGE_AGENT_ID and the label added

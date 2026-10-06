@@ -1,5 +1,5 @@
 ---
-description: Use when committing work in a WTP/SGE repo — at the end of an implementation slice, before opening a PR, or whenever changes are ready to be recorded with quality gates and SGE traceability trailers. Also use when another skill says "commit via /sge:commit". Not for amending history or interactive rebase.
+description: Use when committing work in a WTP/SGE repo — end of an implementation slice, before opening a PR, or when another skill says "commit via /sge:commit". Runs quality gates and adds SGE traceability trailers. Not for amending history or interactive rebase.
 argument-hint: "[message hint] [--no-push]"
 allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git branch:*), Bash(git rev-parse:*), Bash(git config:*), Bash(git symbolic-ref:*), Bash(git ls-files:*), Bash(git add:*), Bash(git commit:*), Bash(git push:*), Read, Grep, Glob
 ---
@@ -21,7 +21,7 @@ Quality-gated, SGE-traceable commit and push.
 1. The **SGE trailer convention** (`Spec:` / `SGE-Override:` semantics, below).
 2. The **quality-gated commit flow** (gates → secrets scan → commit → guarded push).
 
-Sibling skills (/sge:sge-implement, /sge:pr-fix, /sge:refactor, /sge:implement-issue, /sge:tdd-workflow) do not restate this logic — they say "commit via /sge:commit" and this file must be sufficient on its own.
+Sibling skills (/sge:sge-implement, /sge:pr-fix, /sge:refactor, /sge:tdd-workflow) do not restate this logic — they say "commit via /sge:commit" and this file must be sufficient on its own.
 
 This skill runs **inline** in the main conversation — do not fork it into a subagent; it needs the conversation's context to draft an accurate message, and its safety gates are interactive.
 
@@ -139,7 +139,7 @@ Rules:
 
 When the committing agent has a per-instance identity, add an `Agent-Id:` trailer
 so the commit is traceable back to the exact agent that produced it (Zero-Trust
-**Agent Identity** control — see `agents/agent-registry.md`):
+**Agent Identity** control — see `docs/agent-registry.md`):
 
 ```
 Agent-Id: agent-<ulid>
@@ -243,3 +243,5 @@ git rev-parse --abbrev-ref --symbolic-full-name @{upstream} >/dev/null 2>&1 \
 - Commit secrets, `.env` files, or client data; auto-stage untracked files.
 - Use `git add -A` / `git add .` — stage deliberately (step 1).
 - Invent a `SPEC-NNN` or write a boilerplate `SGE-Override` reason to get past the hook.
+
+`hooks/git-policy-guard.sh` (SPEC-132) enforces the first two rules above: it denies a hook-skipping commit or push, and a force-push to a shared branch, before they run.
