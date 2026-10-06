@@ -39,9 +39,9 @@ Export `GH_REPO` after resolving so the preload's own fallback and any nested di
 
 ### The observed failure (issue #2207)
 
-A `wtp-org` control session dispatched a classification into `WealthTechPros/sge` with `--repo`. The flag was not in `argument-hint`, not in Usage, and the preload passed no repo to `gh issue view` at all — so the run resolved against the session cwd and classified a same-numbered issue in the wrong repo, with the audit-trail comment posted under the operator's own identity. SPEC-057 already carries a regression scenario for this class (`sgd#656 reproduction`), which makes it a regression rather than new behaviour.
+A hub control session dispatched a classification into `WealthTechPros/sge` with `--repo`. The flag was not in `argument-hint`, not in Usage, and the preload passed no repo to `gh issue view` at all — so the run resolved against the session cwd and classified a same-numbered issue in the wrong repo, with the audit-trail comment posted under the operator's own identity. SPEC-057 already carries a regression scenario for this class (`sgd#656 reproduction`), which makes it a regression rather than new behaviour.
 
-Guarded by [`../../tests/governance-trace-repo-flag.test.sh`](../../tests/governance-trace-repo-flag.test.sh).
+Guarded by `../../tests/governance-trace-repo-flag.test.sh` (SGE source repo: `skills/tests/governance-trace-repo-flag.test.sh`).
 
 ### The fork-of-fork case (issue #2597) — a caller-side gap, not this skill's own resolution
 
@@ -51,4 +51,4 @@ It silently breaks one level deeper: a control session in repo A dispatches a su
 
 **The fix is caller-side, every time.** A subagent that forks `/sge:governance-trace` from within its own already-dispatched, already-cross-repo execution must re-thread the *same* repo/worktree value it itself received — never re-derive it from the issue's tracking metadata, and never leave it as a generic template placeholder a model could fill in from the wrong context. See `/sge:team-pipeline`'s impl-lane Step 3 ([`dispatch-prompts.md`](../../team-pipeline/references/dispatch-prompts.md)) for the worked fix: it binds the nested fork's `repo`/`worktree` explicitly to the same `<EXEC_REPO>`/`<EXEC_WT_BASE>` the lane itself was dispatched with, and calls out `<TRACKING_REPO>` by name as the wrong value to reach for.
 
-Guarded by [`../../tests/governance-trace-fork-of-fork-repo.test.sh`](../../tests/governance-trace-fork-of-fork-repo.test.sh).
+Guarded by `../../tests/governance-trace-fork-of-fork-repo.test.sh` (SGE source repo: `skills/tests/governance-trace-fork-of-fork-repo.test.sh`).

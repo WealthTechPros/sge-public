@@ -43,7 +43,7 @@ The preferred discovery path (`/sge:available-issues`) already reads through
 
 ### Config prerequisites (Jira)
 
-A Jira backend needs, in the pipeline's environment (Doppler-injected — never in
+A Jira backend needs, in the pipeline's environment (injected by your secrets manager — never in
 the repo, never logged):
 
 - `SGE_ALM_BACKEND=jira`

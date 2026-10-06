@@ -1,5 +1,5 @@
 ---
-description: Use when installing the design-quality enforcement loop (SPEC-115) into the current repo — extracts a DESIGN.md design contract from 2-3 reference sites (or seeds from brand/ for WTP-branded repos), scaffolds a /design-system route, and adds the .claude/design-review/ gitignore + CLAUDE.md design-contract section. Run from inside a cloned SGE-governed repo checkout when the user asks to "install the design gate" or "enforce design quality". The hooks (ui-edit-tracker.sh, design-gate.sh) and the design-reviewer agent ship with the SGE plugin itself — this skill does not copy them, it only sets up the per-repo taste artefact they gate on.
+description: Use when installing the design-quality gate (SPEC-115) in a repo — "install the design gate", "enforce design quality". Extracts a DESIGN.md contract from reference sites (or brand/), scaffolds a /design-system route, and wires .claude/design-review/ and CLAUDE.md.
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash(mkdir:*), Bash(git status:*), Bash(git checkout:*), Bash(git add:*), Bash(git commit:*), Bash(git push:*), Bash(gh repo view:*), Bash(gh pr create:*), mcp__playwright__browser_navigate, mcp__playwright__browser_resize, mcp__playwright__browser_take_screenshot
 ---
 
@@ -68,7 +68,7 @@ the `brand/` seed path if the repo has one.
 
 > **Target repo.** This installer writes into the **current working
 > directory**'s checkout. When dispatched from a hub/control checkout
-> (e.g. `wtp-org`) to install into a *different* target repo, apply the
+> (e.g. an org hub repo) to install into a *different* target repo, apply the
 > shared repo-targeting convention — [`gh-repo`](../gh-repo/SKILL.md) —
 > first: resolve + `cd` via `cd "$(${CLAUDE_PLUGIN_ROOT}/scripts/with-repo-cwd.sh
 > resolve owner/repo)" || exit 1` before Step 1. Same-repo: nothing to do.

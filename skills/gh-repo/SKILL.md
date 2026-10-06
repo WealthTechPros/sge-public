@@ -18,7 +18,7 @@ Define the single cross-repo / control-session repo-targeting convention (`GH_RE
 The single source of truth for the **"Target repo — cross-repo / control-session
 invocation"** rule, previously copy-pasted into every gh-heavy skill
 (`pr-monitor`, `pr-fix`, `pr-review`, `qa-audit`, `sge-implement`,
-`implement-issue`, …). Those skills link here; the wording below is canonical.
+`sge-implement`, …). Those skills link here; the wording below is canonical.
 
 ---
 
@@ -26,7 +26,7 @@ invocation"** rule, previously copy-pasted into every gh-heavy skill
 
 > SGE skills act on the repo in the **current working directory**. When a
 > skill is dispatched from a directory that is *not* the target repo — a
-> Tier-0 control/orchestrator session (e.g. a hub repo like `wtp-org`), or a
+> Tier-0 control/orchestrator session (e.g. an org hub repo), or a
 > remote/worktree agent that hasn't `cd`-ed yet — every `gh` call, every
 > bundled script, and everything the skill dispatches in the same environment
 > would otherwise resolve against the **wrong repo**. Either `cd` into the

@@ -15,3 +15,9 @@ Then plan briefly: identify affected layers (data model, service/logic, API/inte
 **Trailer**: if the repo follows the SGE change protocol (commit-msg hook or `docs/sge/change-protocol.md`), no-spec commits **MUST** carry `SGE-Override: <STEP>; <reason ≥10 chars>` instead of `Spec: SPEC-NNN` (or the `SCOPE-OVERRIDE:` form for an accepted `NOT_SGE_SCOPE` override). `/sge:commit` owns the mechanics — it derives the trailer mechanically even when untold (its step 5).
 
 The no-spec lane **skips Phase 1** (no spec to gate) and joins at Phase 2.
+
+## SKILL.md summary (moved from SKILL.md)
+
+Moved verbatim from `SKILL.md` (issue #2917, 24 KB size budget).
+
+Reached only via `NO_SPEC_WARRANTED`, `NOT_ONBOARDED`, or an accepted `NOT_SGE_SCOPE` override — never as a default. Derive missing acceptance criteria from What/Why/Scope and get approval before code; plan the affected layers; branch `feature|fix|chore/issue-<N>-…`; commit with an `SGE-Override:` trailer (`/sge:commit` derives it); skip Phase 1 and join at Phase 2. Full detail: [`no-spec-lane.md`](no-spec-lane.md).

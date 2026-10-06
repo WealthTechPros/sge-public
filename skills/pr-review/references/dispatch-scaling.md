@@ -54,7 +54,7 @@ only for a concrete bug/vulnerability claim). `BOT_FINDINGS: []` is normal and b
 ## Test/doc-weighted line count for the `high` leg (issue #984)
 
 Raw `additions + deletions` over-counts review surface on a diff that is mostly new tests, BDD
-fixtures, or spec prose — exactly the shape `client-onboarding`'s own BDD-First Rule and
+fixtures, or spec prose — exactly the shape a product repo's own BDD-First Rule and
 Verify-Before-Done conventions encourage alongside every fix, so a healthy test/doc-to-code
 ratio shouldn't itself trip full specialist dispatch. Only the `> ~400 changed lines` leg of
 `high` uses the weighted count; the security-glob match and the bot-major/blocker leg are
@@ -105,12 +105,12 @@ matches the denylist.
 | `**/CLAUDE.md`, `**/AGENTS.md` | repo instructions that steer every agent in that subtree |
 
 **Segment anchoring, not root anchoring.** A repo can host more than one Claude
-Code root, and this one does: `platform/` carries its own
-`platform/.claude/agents/*.md`, `platform/.claude/skills/*/SKILL.md` (59 tracked
-files) and `platform/AGENTS.md`. A root-anchored `^\.claude/` matched only the
-top-level copies, so a PR editing `platform/.claude/agents/security-auditor.md`
-— the security reviewer's own instructions — classified as prose and would have
-merged unreviewed. `(^|/)` still refuses false positives: `myskills/x.md` and
+Code root. This one did until #2899 deleted its hosted-app subtree, which carried
+its own `.claude/agents/*.md`, `.claude/skills/*/SKILL.md` (59 tracked files) and
+`AGENTS.md`. A root-anchored `^\.claude/` matched only the top-level copies, so a
+PR editing `<subdir>/.claude/agents/security-auditor.md` — the security
+reviewer's own instructions — classified as prose and would have merged
+unreviewed. Consumer repos with nested roots still need the segment match. `(^|/)` still refuses false positives: `myskills/x.md` and
 `docs/specs-old/x.md` need a separator immediately before the segment.
 
 **Case-insensitive on the deny side only.** On a case-insensitive filesystem
@@ -182,7 +182,7 @@ falls back to normal `low`-tier scaling:
 1. **Whitespace-only diff:** `git diff -w -b` between the PR's base and head, scoped to the PR's
    own changed files, leaves nothing. This is git's own whitespace-aware diff algorithm, not a
    text heuristic — it never fires on a diff that pairs a comment with a real logic change (e.g.
-   the `#973`-referenced client-onboarding#2207: a 10-line SQL logic fix with an explanatory
+   the `#973`-referenced PR (a product repo's #2207): a 10-line SQL logic fix with an explanatory
    comment is correctly **not** trivial, because the logic hunk survives `-w -b`). A diff that
    is genuinely all reformatting/whitespace is the only thing that clears this bar.
 2. **Single-file dependency-lockfile change with a passing check:** exactly one changed file, its
@@ -206,7 +206,7 @@ diff classification at all).
 `GENERATED=$(rl_diff_generated "$PR")`. A companion to `trivial`: it downgrades not
 *non-semantic* diffs but *mechanically-reproducible* ones. A generated artefact — the tracked
 output of a tracked generator — is verified far more cheaply and reliably by **regenerating it
-and byte-diffing** than by line-by-line code review. The measured case (wtp-org#535): a 569-line
+and byte-diffing** than by line-by-line code review. The measured case: a 569-line
 generated `field-explorer.html` classified `high` on line count drew ~140k subagent tokens, and
 the single check that actually established correctness was re-running the generator and byte-
 diffing (exact match, zero drift). This is **not** "review generated files less" — the security
@@ -248,7 +248,7 @@ security-sensitive diff.
    diff **falls back to the full normal-tier review** (drift means the committed output no longer
    matches its generator — a real defect, or an out-of-band hand-edit that must be reviewed as
    source).
-2. **Content-safety is never skipped for published artefacts (non-negotiable — wtp-org#535).**
+2. **Content-safety is never skipped for published artefacts (non-negotiable).**
    When any changed artefact carries `published=1` (client-facing / published output), the
    content-safety lane — `/security-review` + `@security-auditor` scoped to the artefact content
    (redaction / PII / secrets / de-redaction / exfiltration) — **runs regardless** of the

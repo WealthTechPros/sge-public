@@ -4,7 +4,7 @@ Full mechanism for Step 4.5, referenced from `SKILL.md`. Read this before runnin
 
 Read the per-agent-instance IDs off the branch's commits so the sweep can report
 which agents produced the work under audit — the Zero-Trust **Agent Identity**
-control (`docs-site/governance/zero-trust-ai-agents.md`, `agents/agent-registry.md`).
+control (`docs-site/governance/zero-trust-ai-agents.md`, `docs/agent-registry.md`).
 
 Collect the `Agent-Id:` trailers from the commits on this branch (those not on the
 default branch):
@@ -19,7 +19,7 @@ git log "origin/${DEFAULT}..HEAD" --format='%H%x09%(trailers:key=Agent-Id,valueo
 ```
 
 Report the distinct agent IDs and their commit counts. When the per-run record in
-`agents/agent-registry.md` (or an orchestrator's run log) maps an ID to its
+`docs/agent-registry.md` (or an orchestrator's run log) maps an ID to its
 model / skill / issue, enrich each line with that context:
 
 ```

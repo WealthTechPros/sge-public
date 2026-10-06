@@ -1,6 +1,6 @@
 ---
 name: regulatory-trace
-description: Use when a regulated WTP repo must map its feature specs and capabilities to named FCA / UK-regulatory obligations and frameworks (ISO 27001, ISO 42001, ISO 27701) and export that mapping as audit evidence — preparing for a client's third-party due-diligence pack, an FG26/4 material-arrangement registration, an ISO surveillance audit, or a tripartite (firm + auditor + regulator) evidence request. Also use when a spec in a 'regulated' capability lacks an obligation mapping, or when /sge:sge-align's C12 regulatory-traceability check raises drift. Complements /sge:sge-ai-inventory (which governs AI *use cases*) — this skill governs *spec-level SDLC traceability* across ALL specs, AI or not.
+description: Use when a regulated repo must map specs and capabilities to FCA/UK obligations and ISO 27001/42001/27701 and export that as audit evidence — due-diligence packs, FG26/4 registration, ISO audits — or when /sge:sge-align C12 flags a missing obligation mapping.
 argument-hint: "[add|map|review|export] [SPEC-NNN | CAP-NNN]"
 context: fork
 allowed-tools: Read, Write, Edit, Glob, Grep, AskUserQuestion, Bash(git status:*), Bash(git log:*), Bash(git rev-parse:*), Bash(git ls-files:*), Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/regulatory-trace/assets/check-regulatory-trace.sh:*), Bash(bash scripts/resolve-sge-root.sh:*)
@@ -38,7 +38,7 @@ Map SGE **feature specs and capabilities** to the **named FCA / UK-regulatory ob
 
 1. Read the repo's `CLAUDE.md` for an SGE-artefact path convention, then locate, per `/sge:sge-align` Step 0:
    - **Specs** — `docs/specs/*.md` or `docs/features/*.md` (YAML frontmatter with `id`/`ref`, `capability`, `status`, `success_measure_moved`).
-   - **Capability model** — `.claude/product-context/capability-model.yaml` or `platform/docs/sgd-build/capability-model.yaml`.
+   - **Capability model** — `.claude/product-context/capability-model.yaml` or `docs/sgd-build/capability-model.yaml`.
 2. **Obligation catalogue** — the canonical id list lives at `skills/regulatory-trace/assets/obligations-catalogue.yaml` under the plugin root resolved via `scripts/resolve-sge-root.sh` (the controlled vocabulary; every mapping must reference an id that exists there, and never one flagged `retired: true`).
 3. **Traceability matrix store** — the per-repo mapping register. Place it beside the capability model as `regulatory-trace.yaml` (or under `docs/sge/regulatory-trace.yaml` if that is the repo's SGE-artefact home) and **record the chosen path in `CLAUDE.md`** so `/sge:sge-align` C12 and future runs find it. Seed from `assets/regulatory-trace.template.yaml` if absent.
 
@@ -76,14 +76,14 @@ Run the mechanical drift check and report — this is the same logic `/sge:sge-a
 
 Output a findings table (artefact, check, finding, severity, suggested action) **and** the JSON block (`references/drift-check.md` → C12 shape) so `/sge:sge-align` and the platform can consume it. Advisory only — raise actions, change nothing without approval.
 
-### export — emit the regulatory-traceability matrix + trust-fabric evidence payload
+### export — emit the regulatory-traceability matrix + trust-portal evidence payload
 
 Produce two artefacts from the current mappings at the audited SHA (`git rev-parse HEAD`):
 
 1. **Regulatory-traceability matrix** (human + machine). A table keyed by obligation → the specs/capabilities that contribute evidence → each spec's governance status (status, governing capability, `success_measure_moved`, whether its last change passed CI + carried `pr-reviewed`). This is the artefact a regulated client drops into its **third-party DD / FG26/4 registration** pack. Emit as Markdown for the pack and as JSON (`assets/regulatory-trace.template.yaml` → `matrix` shape) for tooling. Scope to `tripartite_evidence: true` rows when `--tripartite` is passed.
-2. **trust-fabric evidence payload.** Transform each mapped, governed spec into one or more `EvidenceFinding` records under `source: "SGE"` and POST-ready for trust-fabric's `POST /api/evidence` (full contract in `references/trust-fabric-bridge.md`). One finding per `(spec, control_id)` pair; `rawStatus = PASS` when the spec is green-CI + `pr-reviewed` + has an obligation mapping, else `FAIL`; `rawHash` = the deterministic digest of the normalised mapping; `artefactUri` = the spec's permalink at the audited SHA. This is WTP's **process-audit evidence stream** — proof the SDLC that built a regulated feature was itself governed.
+2. **trust-portal evidence payload.** Transform each mapped, governed spec into one or more `EvidenceFinding` records under `source: "SGE"` and POST-ready for a trust portal's `POST /api/evidence` (the full contract is a private reference, not part of the public distribution). One finding per `(spec, control_id)` pair; `rawStatus = PASS` when the spec is green-CI + `pr-reviewed` + has an obligation mapping, else `FAIL`; `rawHash` = the deterministic digest of the normalised mapping; `artefactUri` = the spec's permalink at the audited SHA. This is WTP's **process-audit evidence stream** — proof the SDLC that built a regulated feature was itself governed.
 
-**Never fabricate a PASS.** A spec the export cannot positively show as green-CI + reviewed + mapped is emitted `FAIL` (a first-class red finding), never omitted and never laundered into PASS — mirroring trust-fabric's collector contract (`FindingStatus = "PASS" | "FAIL"`, no third "unknown").
+**Never fabricate a PASS.** A spec the export cannot positively show as green-CI + reviewed + mapped is emitted `FAIL` (a first-class red finding), never omitted and never laundered into PASS — mirroring the trust portal's collector contract (`FindingStatus = "PASS" | "FAIL"`, no third "unknown").
 
 ## Regulatory grounding
 
@@ -94,18 +94,18 @@ Read `references/regulatory-trace-map.md` for which regime each catalogue id sat
 - `/sge:sge-ai-inventory` governs **AI use cases** → `/sge:regulatory-trace` governs **every spec's regulatory traceability** (and links to the AI register where they overlap).
 - `/sge:sge-align` consumes this skill's `review` output as **check C12** (`references/drift-check.md`) — drift becomes a tracked GitHub issue, exactly like C1–C11.
 - `/sge:commit` carries the `Spec:` trailer so each mapping change is itself in the audit chain.
-- **trust-fabric** ingests the `export` payload as `source='SGE'` process evidence — closing the loop from spec → obligation → trust-portal evidence room (`kind ∈ client|auditor`).
+- **A trust portal** ingests the `export` payload as `source='SGE'` process evidence — closing the loop from spec → obligation → trust-portal evidence room (`kind ∈ client|auditor`).
 
 ## Degradation
 
 - **Non-regulated repo:** the skill still works as a generic obligation-traceability index; with no `regulated: true` capabilities, C12 has nothing to fail and `review` reports "no regulated capabilities — C12 N/A".
-- **No trust-fabric reachable:** `export` still writes the matrix + the payload JSON to disk for manual upload; the bridge degrades to a file, never a hard dependency.
+- **No trust portal reachable:** `export` still writes the matrix + the payload JSON to disk for manual upload; the bridge degrades to a file, never a hard dependency.
 - **No SGE artefacts / no GitHub:** degrades to plain file edits the user commits themselves; SGE integration (CLAUDE.md path registration, `/sge:commit`, C12) is additive, not required.
 
 ## Hard rules
 
 - Never fabricate or pre-assert that a spec *satisfies* an obligation — record only that it *contributes evidence*, confirmed by a human. `unknown` is a finding, not a gap to fill creatively.
 - Never map to a catalogue id that is absent or `retired: true`. The catalogue is the controlled vocabulary; free-text obligation ids are rejected.
-- Never emit a trust-fabric `PASS` for a spec you cannot show is green-CI + `pr-reviewed` + mapped. No third status — unobservable governance is `FAIL`, not omitted.
+- Never emit a trust-portal `PASS` for a spec you cannot show is green-CI + `pr-reviewed` + mapped. No third status — unobservable governance is `FAIL`, not omitted.
 - Never duplicate the AI use-case register — link to `AI-NNN`, do not re-state SS1/23 / Annex III fields here.
 - Never commit without showing the diff and getting approval (via `/sge:commit`).

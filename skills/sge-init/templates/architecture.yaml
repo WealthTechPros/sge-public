@@ -1,0 +1,20 @@
+# Architecture (SPEC-131). Seeded by /sge:sge-init; lives at docs/sgd-build/architecture.yaml.
+#
+# One entry per component. Each one says which capabilities it realises (ids
+# from the capability model) and where its code lives (repo-relative paths
+# that exist; no globs). dependsOn is optional and names other components here.
+# build-sge-dag adds the components to the DAG, sge-dashboard draws them, and
+# /sge:sge-align check C41 warns on unmapped components and missing paths.
+#
+# Replace the example below with the repo's real components.
+version: 1
+components:
+  - id: COMP-APP
+    name: Application
+    realises: [CAP-ONBOARD-CONNECT]
+    paths: [src/]
+    dependsOn: [COMP-DATA]
+  - id: COMP-DATA
+    name: Data access
+    realises: [CAP-ONBOARD-CONNECT]
+    paths: [src/data/]

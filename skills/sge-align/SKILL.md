@@ -1,5 +1,5 @@
 ---
-description: Use when checking a repo — or a whole fleet of repos — for SGE governance drift; when a built feature has no spec, a spec has no Gherkin, or code has no governing artefact; when open GitHub issues may no longer match current scope after a Vision, capability, or spec change; when a repo-level or org-wide Audit Score (governance-coherence) scorecard is needed; or before a governance review or client audit. Also use for Zero-Trust agent-security scoring via --dimension agent-security, FCA/UK regulatory-traceability scoring via --dimension regulatory, or skill-quality scoring via --dimension skill-quality (delegates to /sge:sge-skill-audit).
+description: Use when checking a repo or fleet for SGE governance drift — features without specs, specs without Gherkin, ungoverned code, issues out of scope after a change — or for an Audit Score scorecard before a review. --dimension adds agent-security, regulatory or skill-quality scoring.
 argument-hint: "[--dry-run] [--apply] [--fleet <repos…>|<org>/*] [--check C1..C14,C19] [--dimension agent-security|regulatory|skill-quality] [--label <label>] [--max <n>]"
 allowed-tools: Read, Glob, Grep, Agent, Bash(git status:*), Bash(git log:*), Bash(git rev-parse:*), Bash(git ls-files:*), Bash(git diff:*), Bash(gh issue list:*), Bash(gh issue view:*), Bash(gh pr list:*), Bash(gh repo list:*), Bash(gh repo clone:*), Bash(gh search:*), Bash(gh api:*)
 context: fork
@@ -57,7 +57,7 @@ Every broken link is a **drift gap** — intent that never became a capability, 
 > reads resolve against the **current working directory**, so that directory
 > must be provably correct before anything else runs. Under `context: fork`
 > this skill is normally invoked *as* a forked subagent that inherits its cwd
-> from whatever dispatched it — a hub/control checkout (e.g. `wtp-org`)
+> from whatever dispatched it — a hub/control checkout (e.g. an org hub repo)
 > sweeping a *different* target repo included. **Do not try to detect
 > "am I dispatched from a hub?" and only resolve then** — that judgement call
 > is exactly what silently failed before (issue #1041): resolve+cd via the
@@ -104,9 +104,7 @@ gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null \
   | jq 'length' 2>/dev/null || echo "n/a"                                   # Open drift issues at start
 ```
 
-`IR` (`scripts/issue-read.sh`) routes issue list/view calls through `scripts/forgejo-adapter.sh` when the repo host is Forgejo/Gitea, and delegates to `gh` unchanged for GitHub. Re-define `IR` at the top of every subsequent Bash call (same SPEC-057 shell-state rule as `WRC`).
-
-**Self-hosted Forgejo/Gitea:** the host is classified by hostname substring (`*forgejo*`/`*gitea*`); a self-hosted instance on a vanity domain (e.g. `git.example.com`) needs `SGE_FORGEJO_HOSTS` (`;`-separated bare hosts) declared before sweeping it — otherwise `IR` fails loud naming the unrecognised host (ADR-0010).
+Re-define `IR` at the top of every subsequent Bash call (SPEC-057 shell-state rule, as for `WRC`). Forgejo/Gitea routing and `SGE_FORGEJO_HOSTS`: [`references/forgejo-routing.md`](references/forgejo-routing.md).
 
 ## Sweep scope (governance layers L0–L8)
 
@@ -118,32 +116,20 @@ L0 Vision, L1 Capability Model, L2 Design System, L3 Feature Specs, L4 ADRs, L5 
 
 Layer artefacts live in different places per repo. **Read the repo's `CLAUDE.md` and `docs/sge/`** to locate each before checking:
 
-| Layer | Typical home (confirm in `CLAUDE.md`) |
-|---|---|
-| L0 Vision | `docs/vision.md` |
-| L1 Capability model | `.claude/product-context/capability-model.yaml` |
-| L2 Design System | probed via `/sge:atomic-audit` (C10), not a file lookup |
-| L3 Feature specs | `docs/features/*.md` — front-matter `ref`, `capability`, `status`, `success_measure_moved`, `questions[]` |
-| Acceptance criteria | Gherkin `Given/When/Then` inside each spec (or `*.feature`) |
-| L4 ADRs | `docs/decisions/*.md` — front-matter `vision_element_protected` |
-| Tests / Code (spine) | `tests/**` / `src/**` keyed to a capability/spec |
-| Stakeholder questions | the `QD-NN` registry referenced by specs |
-| Fleet manifest (C9 / fleet mode) | `docs/sge/fleet.yaml` — `repos: [{name: <org>/<repo>, contracts: [<paths>]}]` |
-
-Note the capability model's *internal* L1→L2→L3 taxonomy is distinct from the governance layer numbers above — a "capability" is an L1 artefact regardless of its depth in that tree. A missing layer is the cascade's first gap — report it **once** ("layer absent") and move on; never crash on a missing layer.
+Typical layer homes, L1→L2→L3 note: [`references/layer-homes.md`](references/layer-homes.md).
 
 **Digest freshness (story #785).** When `docs/sge-digest.md` exists, verify it with `node scripts/build-sge-digest.mjs --check` (exits non-zero on drift) — a low-severity drift note, not a `gaps[]` entry (the digest generator and `sge-digest-check.yml` own the gate; this sweep only surfaces staleness).
 
 ## Step 1 — Run the cascade checks (left → right)
 
-**Execution doctrine (fork-safe by default).** This skill declares `context: fork` — normally invoked *as* a forked subagent, which cannot itself spawn further subagents. So the default is **inline-sequential**: work through C1–C14, C19, C20, C21 (unified C34), C35, C36, C37, C39 one at a time (group by shared read set, e.g. C1+C2+C7; C21/C34, C35, C36, and C37 group together since all four consume the same `packages/sge-checks` applicability seam (`packages/sge-checks/lib/applicability/runtime.mjs`) — same evidence pass, four checks; C39 groups with C7/C26 since it re-reads the same ADRs). **Fan-out is available only when sge-align runs as the top-level (non-fork) agent** — then dispatch one read-only subagent per check group concurrently (this applies to C10's, C12's, and C13's subagent dispatches too; under `context: fork`, run each inline instead — C10/C12: call the script/logic directly; C13: judge specs one at a time).
+**Execution doctrine (fork-safe by default).** This skill declares `context: fork` — normally invoked *as* a forked subagent, which cannot itself spawn further subagents. So the default is **inline-sequential**: work through C1–C14, C19, C20, C21 (unified C34), C35, C36, C37, C39, C41, C42 one at a time (group by shared read set, e.g. C1+C2+C7; C21/C34, C35, C36, and C37 group together since all four consume the same `packages/sge-checks` applicability seam (`packages/sge-checks/lib/applicability/runtime.mjs`) — same evidence pass, four checks; C39 groups with C7/C26 since it re-reads the same ADRs). **Fan-out is available only when sge-align runs as the top-level (non-fork) agent** — then dispatch one read-only subagent per check group concurrently (this applies to C10's, C12's, and C13's subagent dispatches too; under `context: fork`, run each inline instead — C10/C12: call the script/logic directly; C13: judge specs one at a time).
 
 Each check returns a **schema-validated `gaps[]` list**, one record per gap:
 
 ```json
-{ "check": "C3", "layer": "L1→L3", "key": "C3:CAP-CLIENT-ONBOARDING-ACCEPT",
-  "artefact": "CAP-CLIENT-ONBOARDING-ACCEPT (.claude/product-context/capability-model.yaml)",
-  "expected": "an active feature spec carrying capability: CAP-CLIENT-ONBOARDING-ACCEPT",
+{ "check": "C3", "layer": "L1→L3", "key": "C3:CAP-ORDER-CHECKOUT",
+  "artefact": "CAP-ORDER-CHECKOUT (.claude/product-context/capability-model.yaml)",
+  "expected": "an active feature spec carrying capability: CAP-ORDER-CHECKOUT",
   "found": "no docs/features/*.md references it", "severity": "high",
   "proposedIssue": { "title": "[SGE drift] C3 Capability→Spec: …", "body": "…" } }
 ```
@@ -173,18 +159,18 @@ A subagent returning malformed records gets one retry, then its check is reporte
 | **C36** | Contract-testing coherence (SPEC-086) | a spec declaring a `contract:` cross-service boundary with no passing Pact consumer/provider verification against its committed pact(s) — **advisory, warn-only** — mechanism: `references/check-mechanisms.md` |
 | **C37** | Performance-budgets coherence (SPEC-087) | a spec declaring a `## Performance` budget section with no measurement satisfying its stated budget — **advisory, warn-only** — mechanism: `references/check-mechanisms.md` |
 | **C39** | Dual-authority precedence (SPEC-101) | a spec'd capability with **two authorities for one fact** (e.g. a persisted column *and* a live engine both deriving one value) and **no ADR recording precedence** between them — **advisory, warn-only** — mechanism: `references/check-mechanisms.md` |
+| **C41** | Architecture drift (SPEC-131) | a component in `docs/sgd-build/architecture.yaml` realises no capability, names one the model doesn't declare, or points at a code path that doesn't exist — **advisory, warn-only**; N/A with no artefact — mechanism: `references/check-mechanisms.md` |
+| **C42** | Artefact schema conformance (SPEC-133) | a vision, capability model, feature spec, ADR or architecture file that violates its JSON Schema (`docs/schemas/` in the SGE plugin), reported by file and field — **advisory, warn-only**; N/A with no SGE artefacts — mechanism: `references/check-mechanisms.md` |
 
-> **Canonical ids — the check ids in this table (C1–C14, C19, C20, C21) are the *legacy plugin-family* ids; checks added *after* the #835 renumbering (C35, C36, C37, C39) carry their *unified* catalogue id directly.** Their meanings are all defined once in the unified catalogue [`packages/sge-checks`](../../packages/sge-checks/) (issue #835), which renumbers both the plugin and platform families onto one continuous `C1..C37` line with no collisions (C38 = SPEC-091 DAG-coverage and C39 = SPEC-101 dual-authority are the next two ids, catalogued together in a later finalization step so the line stays contiguous). This skill keeps its own cascade *logic*, but the catalogue is the single source of truth for "what does Cn mean". The legacy→unified mapping (e.g. plugin C12 → unified **C30**, plugin C13 → unified **C10**, plugin C21 → unified **C34**) is in [`docs/coherence-catalogue-supersession-map.md`](../../docs/coherence-catalogue-supersession-map.md). Skip any check whose layer doesn't exist. Severity: missing spec/test on a `built` capability is **high**; a missing citation is **low**.
+> **Canonical ids — the check ids in this table (C1–C14, C19, C20, C21) are the *legacy plugin-family* ids; checks added *after* the #835 renumbering (C35, C36, C37, C39) carry their *unified* catalogue id directly.** Their meanings are all defined once in the unified catalogue `packages/sge-checks` (SGE source repo) (issue #835), which renumbers both the plugin and platform families onto one continuous `C1..C37` line with no collisions (C38 = SPEC-091 DAG-coverage and C39 = SPEC-101 dual-authority are the next two ids, catalogued together in a later finalization step so the line stays contiguous). This skill keeps its own cascade *logic*, but the catalogue is the single source of truth for "what does Cn mean". The legacy→unified mapping (e.g. plugin C12 → unified **C30**, plugin C13 → unified **C10**, plugin C21 → unified **C34**) is in `docs/coherence-catalogue-supersession-map.md` (SGE source repo). Skip any check whose layer doesn't exist. Severity: missing spec/test on a `built` capability is **high**; a missing citation is **low**.
 
-**Composite coherence (0–100) and per-check weights** (C3/C4/C6 ×3, C1/C5/C13 ×2, rest ×1): `references/check-mechanisms.md`. This composite is the repo's **Audit Score (AS)** sample (`audit_score`) — an operational fleet-audit rollup of per-check pass-rates. **It is NOT SM-2.** The single canonical SM-2 is the platform's 7-weighted-metric `coherence_score` composite (`platform/app/backend/src/services/drift-metrics/coherence-score.ts`, governed by SGD-032-S8 / #883; see `platform/docs/sgd-build/vision.md`). Per C16 / SGD-051 no surface other than that platform composite may call itself SM-2 — this rollup carries the distinct Audit Score name (decision #834).
+**Composite coherence (0–100) and per-check weights** (C3/C4/C6 ×3, C1/C5/C13 ×2, rest ×1): `references/check-mechanisms.md`. This composite is the repo's **Audit Score (AS)** sample (`audit_score`), a rollup of per-check pass-rates. **It is SM-2**, the canonical coherence measure in `docs/sgd-build/vision.md`, since ADR-0018 (#2916) re-pointed SM-2 here when the hosted platform's `coherence_score` (SGD-032-S8) was decommissioned in #2899. That reverses decision #834's "the Audit Score is not SM-2". Per C16 / SGD-051 (one measure, one definition) no other surface may call itself SM-2.
 
-> **Auxiliary (advisory, unscored): plugin-skill shadowing (issue #1066).** A repo-local `.claude/commands/<name>.md` whose basename matches a bundled SGE skill silently shadows `/sge:<name>` (a bare `/<name>` resolves to the stale local copy). Run `scripts/detect-shadowed-commands.sh <target-repo>` (from a plugin checkout, or `--skills-dir <plugin>/skills`) to list collisions; reconcile each by deleting the stale command or converting it to a thin `/sge:<name>` wrapper. This is a hygiene warning, not a scored cascade gap.
->
-> **Auxiliary (advisory, unscored): optimistic closures (issue #2221).** An issue closed as `COMPLETED` whose acceptance criteria remain visibly unmet is the same "artefact asserting a state that is not true" failure this whole sweep exists to catch — it happened twice in one seeded repo, once with a PR body that said outright the issue should stay open. Sweep recently-closed issues (`gh issue list --state closed --search "reason:completed" --limit 100`, or the ALM-neutral `$IR` equivalent) for a parseable `- [ ]`/`- [x]` acceptance-criteria checklist with any box still unchecked; for each, check the closing PR's body for closing-keyword + stay-open contradiction language too (same two checks as `.github/scripts/check-issue-closure-integrity.sh`, sge#2221 — reuse its detection logic rather than re-deriving it). Report as a drift finding (not a scored gap — no repo has fully agreed a weight for this yet) with the closing PR link and the unmet rows, so a human can decide whether to reopen. This is intentionally lighter than a full weighted `Cn` catalogue check: unlike C1–C39's structural artefact-graph gaps, "was this issue actually done" needs the same judgement call `/sge:pr-review` 4.1.1 already makes at merge time, and a fully scored/weighted C-check for it is future work, not this sweep's scope.
+Auxiliary advisory, unscored checks (plugin-skill shadowing #1066; optimistic closures #2221): [`references/auxiliary-checks.md`](references/auxiliary-checks.md).
 
 ## Step 2 — Reconcile with existing issues (idempotent — do this BEFORE creating anything)
 
-Every issue this command files carries a hidden stable key: `<!-- sge-drift-key: C3:CAP-CLIENT-ONBOARDING-ACCEPT -->`.
+Every issue this command files carries a hidden stable key: `<!-- sge-drift-key: C3:CAP-ORDER-CHECKOUT -->`.
 
 ```bash
 "$IR" list --label "$LABEL" --state open --limit 1000
@@ -203,16 +189,7 @@ Render each gap's `proposedIssue` via `"$IW" create-deduped <title> <body> --sea
 
 ## Step 4 — Reverse alignment: reconcile open issues with current scope
 
-Now go **right→left**: list **all** open issues (same pagination guard — use `"$IR" list --state open --limit 1000`; `IR` re-defined at the top of this Bash call) and classify each against current scope:
-
-| Issue vs. current scope | Action |
-|---|---|
-| **Orphaned** — capability/spec removed/renamed | relabel to successor, or close if truly gone |
-| **Out-of-scope** — contradicts a Vision Non-goal | close, citing the non-goal |
-| **Superseded** — spec `deprecated` / has `supersededBy` | update (link successor) or close |
-| **Already delivered** — spec `implemented`, code+tests exist | close ("delivered in `<spec/PR>`") |
-| **Stale scope** — acceptance criteria changed materially | comment/update to re-align |
-| **Aligned** | leave it |
+Classify every open issue (Orphaned, Out-of-scope, Superseded, Already delivered, Stale scope, Aligned) per the action table in [`references/reverse-alignment.md`](references/reverse-alignment.md).
 
 **Authorization gate — never auto-mutate human issues.** Default is **propose-only**: print the plan and stop. Mutate only when `--apply` was passed, or the human confirms this session. Comment the rationale (citing the artefact that moved) **before** closing. Never close/alter an issue with an assignee, active discussion, or a human triage label without per-issue confirmation, even under `--apply`. Prefer update over close when scope merely shifted. The command's own `sge-drift` issues are exempt from this gate. Worked example: `references/issue-lifecycle-examples.md`.
 
@@ -224,7 +201,7 @@ Read the branch's commits' `Agent-Id:` trailers and report which agents produced
 
 **Output discipline — focus over overwhelm.** The scorecard stays complete (every check + summary lines), but the **"what to do next" closing section names 1–2 highest-leverage actions**, not a backlog dump. Pick the actions by: (a) highest-severity open gap, then (b) the gap that unblocks the most downstream checks. If you find yourself listing more than 2 next-step actions, stop and rank — the rest are already tracked as drift issues.
 
-Print a ten-second-readable scorecard (all checks + Agent Security / Regulatory / TDD-evidence / coverage / docs-coverage / gate-coverage summary lines, drift-issue and reconciliation counts, agent attribution, Cortex maintenance line), **followed by the machine-readable JSON block** the platform and fleet mode consume — never emit one without the other. Full scorecard text, JSON schema (`checks[]`, `agentSecurity`, `regulatoryTraceability`, `gateCoverage`, `agentAttribution`), and the `gateCoverage` mechanism (`references/check-gate-coverage.sh`, not part of the composite Audit Score): `references/scorecard-and-trend.md`.
+Print a ten-second-readable scorecard (all checks + Agent Security / Regulatory / TDD-evidence / coverage / docs-coverage / gate-coverage summary lines, drift-issue and reconciliation counts, agent attribution, Cortex maintenance line), **followed by the machine-readable JSON block** the platform and fleet mode consume — never emit one without the other. Full scorecard text, JSON schema (`checks[]`, `agentSecurity`, `regulatoryTraceability`, `gateCoverage`, `agentAttribution`), and the `gateCoverage` mechanism (`references/check-gate-coverage.sh`, not part of the composite Audit Score): `references/scorecard-and-trend.md`. Enforced-profile required-check verification (SPEC-128; read-only, operator/App credentials, 403/404 = unknown): `assets/check-enforcement-required-checks.sh`, see `references/enforcement-required-checks.md`.
 
 **Trend persistence.** By default, every full sweep appends its Step 5 JSON as one line to `docs/sge/drift-trend.jsonl` (create `docs/sge/` if missing) and prints the Audit Score delta against the previous row — the single durable Audit Score record `/sge:drift-hillclimb` diffs. Commit this file (via `/sge:commit`) each sweep. **Skipped** in standalone `--dimension` modes (their JSON has no `audit_score`/`checks[]`). Mechanism and commands: `references/scorecard-and-trend.md`.
 
@@ -234,15 +211,7 @@ At the end of every full sweep (default and `--apply`), and inside each fleet pe
 
 ## Fleet mode — org-wide sweep
 
-```
-/sge:sge-align --fleet wtp/sge wtp/client-x   # explicit repos
-/sge:sge-align --fleet wtp/*                  # org glob
-/sge:sge-align --fleet                        # repos from docs/sge/fleet.yaml
-```
-
-Orchestrate as a **Workflow**: one **read-only audit agent per repo** (cap concurrency ~8), each of which gets the repo locally (existing checkout, else `gh repo clone --depth 1`), runs Steps 0–2 in **dry-run** (fleet agents never file/close issues) then Step 6, and returns a schema-validated Step 5 JSON (malformed → one retry, then `error` in the roll-up). The orchestrator aggregates a **fleet Audit Score scorecard** (per-repo rows worst-first, org Audit Score = mean of per-repo `audit_score`, per-check fleet pass rates) — this aggregate is the fleet **Audit Score** rollup, an operational audit signal. It is **not** the canonical SM-2: the SGE Vision tracks SM-2 as the platform's `coherence_score` composite (SGD-032-S8 / #883), which this plugin does not compute. Issue mutations happen only under `--apply`, sequentially, post-audit.
-
-**Recurring cadence.** The Audit Score is a trend, not a snapshot — wrap `--fleet` in `/loop <interval> /sge:sge-align --fleet …` (weekly) and commit `docs/sge/drift-trend.jsonl` each run so the next sweep has something to diff against.
+Fleet-mode invocations, per-repo audit-agent orchestration, aggregation and the recurring cadence: [`references/fleet-mode.md`](references/fleet-mode.md).
 
 ## Safety
 

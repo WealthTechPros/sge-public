@@ -1,5 +1,5 @@
 ---
-description: Use before committing to a build approach for an architecture bet — a new extraction approach, pipeline, or adapter/integration layer that could plausibly be built two different ways and whose right shape is genuinely unknown up front. Time-boxes a throwaway, ungoverned exploration with a mandatory keep/kill checkpoint before the winning approach is industrialised through the normal SGE pipeline. A judgment prompt, not a hard gate — nothing enforces this mechanically.
+description: Use when an architecture bet (a new extraction approach, pipeline, or adapter/integration layer) could be built two ways and the right shape is unknown. Time-boxes a throwaway exploration with a keep/kill checkpoint before the winner goes through the normal SGE pipeline.
 argument-hint: "[issue-number or one-line description of the bet]"
 ---
 
@@ -36,4 +36,4 @@ Observed in a real engagement: roughly 9 days and ~150 PRs went into industriali
 - `/sge:sge-implement` — where the *kept* approach is built for real, governed, reviewed, and merged
 - `/sge:deep-dive` — for investigating an unclear issue or weighing known alternatives with a recorded decision (no code); use `/spike` instead when the only way to know which approach works is to build a small throwaway version of each
 - `/sge:decompose-issue` — for splitting an oversized but already-understood issue; not for an unresolved architecture bet
-- `/sge:team-pipeline`, `/sge:issue-swarm`, `/sge:fleet-dispatch` — their default lane cap exists for the same reason this skill does: an unproven approach should not be scaled out to many parallel agents before it is validated
+- `/sge:team-pipeline`, `/sge:fleet-dispatch` — their default lane cap exists for the same reason this skill does: an unproven approach should not be scaled out to many parallel agents before it is validated

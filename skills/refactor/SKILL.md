@@ -173,7 +173,7 @@ Work through the approved increments **in plan order**. For each:
 1. **Validate improvements** — run the full quality suite a final time and compare against baseline: duplication before/after, coverage before/after, lines of code before/after (if meaningful). Behaviour-preserving means the test outcomes match the baseline exactly (minus any known-reds you were explicitly asked to leave).
 2. **Review the final diff** with the bundled `code-reviewer` agent before opening the PR; address or explicitly defer its findings.
 3. **Finish line — push + PR.** Final commit via `/sge:commit` (pushes), then open a PR per the repo's convention, summarising: increments executed, increments reverted/skipped (and why), before/after metrics, and the L6 IMPACT results if Phase 4 ran. A refactor that stops at "done locally" is not done.
-4. **Emit SkillRunRecord.** Before finishing, append one `SkillRunRecord` (schema, `platform/packages/token-governance` — #727) to `memory/skill-runs.jsonl`:
+4. **Emit SkillRunRecord.** Before finishing, append one `SkillRunRecord` (schema: the field contract in `skills/sge-implement/references/skill-run-record.md` (#727)) to `memory/skill-runs.jsonl`:
    ```bash
    jq -nc \
      --arg skill "refactor" \

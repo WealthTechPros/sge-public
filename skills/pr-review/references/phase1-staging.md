@@ -93,3 +93,9 @@ classification section.
 > **When in doubt, keep it sequential.** Only calls proven independent above share a stage; this
 > staging must not weaken any gate or introduce a read-after-write race. A new discovery call with
 > an unclear read/write set goes in its own stage until proven safe.
+
+## Rescued/resumed worktree (issue #951)
+
+Moved from `SKILL.md` Phase 1 (issue #2825):
+
+**Rescued/resumed worktree (#951):** rescue markers in the body → `RESCUED_ENV=1`, Phase 3 gates mandatory, `"$SGE_ROOT/skills/worktrees/rescue-guard.sh" assess "$WORKTREE_PATH" origin/main` on P6.5 worktrees, `rescued_env: true`.
