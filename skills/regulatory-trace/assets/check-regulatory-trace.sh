@@ -10,7 +10,7 @@
 #
 # Bash (see shebang) + grep/sed/awk so it runs in CI with no extra toolchain. It is deliberately
 # conservative: when it cannot positively parse an artefact it reports `convention-unknown`
-# (a finding to investigate) rather than a false PASS — mirroring trust-fabric's collector
+# (a finding to investigate) rather than a false PASS — mirroring the trust portal's collector
 # contract (no fabricated status).
 #
 # Usage: check-regulatory-trace.sh [obligations-catalogue.yaml]

@@ -14,6 +14,14 @@
 # extractor (no yq/python required):
 #   - one scalar `mode:` line (advisory | blocking — always start advisory,
 #     per SGE doctrine: prove the signal is clean before making it a gate)
+#       mode: advisory  — the gate reports a production change with no test
+#                         change as a warning; the PR can still merge. This
+#                         is the only mode sge-init seeds while the repo's
+#                         .sge/posture.yaml profile is onboarding (default).
+#       mode: blocking  — the gate fails the PR. Required once the repo
+#                         declares `enforcement: enforced` in
+#                         .sge/posture.yaml (SPEC-128); sge-init scaffolds
+#                         this value for an already-enforced repo.
 #   - three top-level list keys (production_paths / test_paths / exempt_paths)
 #   - each list item on its own `  - 'glob'` line — no nesting, no flow style
 # Globs use bash globstar syntax (`**` matches zero or more directories).

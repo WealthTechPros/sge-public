@@ -44,7 +44,7 @@ see Step 8.
 > calls below **and** the spec/code reads (`Read`/`Grep`/`Glob`) resolve
 > against the *same* repo — the repo whose branch is under review. When
 > `/sge:sge-implement` Phase 5 dispatches this as a forked subagent from a
-> hub/control checkout (e.g. `wtp-org`), apply the shared repo-targeting
+> hub/control checkout (e.g. an org hub repo), apply the shared repo-targeting
 > convention — [`gh-repo`](../gh-repo/SKILL.md) — first: resolve + `cd` via
 > the shared helper — `cd "$(${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/with-repo-cwd.sh
 > resolve owner/repo)" || exit 1` (fail-loud, never falls through to the
@@ -81,8 +81,15 @@ CHANGED_FILES=$(git diff --name-only "$DEFAULT"...HEAD)
 Classify as **lightweight** only when **all** of the following hold:
 
 - Total lines changed (additions + deletions, excluding diff header lines) ≤ 150
-- No file matches security-sensitive paths: `**/auth/**`, `**/middleware/**`,
-  `**/*token*`, `**/*secret*`, `**/config/**`, `**/*crypto*`, DB migrations
+- No file matches the security-sensitive path list — the one canonical
+  `rl_security_glob_regex` in `skills/pr-review/review-lib.sh`, matched
+  case-insensitively (`auth` anywhere, `middleware/`, `token`, `secret`,
+  `config/`, `crypto`, migrations, `security/`, `login`, `session`, `jwt`,
+  `password`, `credential`, `permission`, `rbac`, `acl` (incl. camelCase
+  `AclService`), `cookie`, `csrf`, `cors`, `oidc`, `saml`, `sso`,
+  `encrypt`/`cipher`, `cert`/`tls`, `webhook`, `.env`, `.github/workflows/`,
+  and the gate's own enforcement files: `hooks/`, `hooks.json`,
+  `intake-check`, `review-lib.sh`)
 - No changes to exported types, public API contracts, or shared-utility interfaces
   (a change used only within a single component is not a public contract change)
 - No changes to payment, billing, permission, or data-isolation logic
@@ -325,7 +332,7 @@ the dispatcher parses it:
   disproportionate to the diff size. Count from the start of Step 0 through the
   end of Step 8; the human-readable report in this step does not count.
 
-Before returning the JSON above, append one `SkillRunRecord` (schema, `platform/packages/token-governance` — #727) to `memory/skill-runs.jsonl` — the join key `sessionId` is what lets a later `/sge:roi-report`/`/sge:cost-guard` run tell "this session's spend produced a passed review" from "this session's spend produced a failed one":
+Before returning the JSON above, append one `SkillRunRecord` (schema: the field contract in `skills/sge-implement/references/skill-run-record.md` (#727)) to `memory/skill-runs.jsonl` — the join key `sessionId` is what lets a later `/sge:roi-report`/`/sge:cost-guard` run tell "this session's spend produced a passed review" from "this session's spend produced a failed one":
 
 ```bash
 jq -nc \

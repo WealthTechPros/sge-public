@@ -38,7 +38,7 @@ Sources researched 2026-06; regimes move — verify before citing to a regulator
   designated investment firms) **register WTP** and demand DD evidence with
   **tripartite** (firm + auditor + regulator) access. Specs flagged
   `tripartite_evidence: true` land in the `export --tripartite` bundle and the
-  trust-fabric **auditor** evidence room.
+  trust portal **auditor** evidence room.
 - **PRIN.2A — Consumer Duty.** Specs whose output reaches or informs a retail-customer
   outcome carry `consumer_duty: true` and contribute good-outcomes/monitoring evidence.
   Human review before delivery is a *control*, not grounds for `false` — same rule as

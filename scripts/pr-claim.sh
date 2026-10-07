@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pr-claim.sh — the shared PR claim protocol for ANY agent (wtp-org#992 item 5).
+# pr-claim.sh — the shared PR claim protocol for ANY agent.
 #
 # Orchestrator sessions, their subagents and the review daemon (PR Warden) must
 # never work the same PR at once. They share ONE claim: the lane label
@@ -29,6 +29,7 @@
 # refuses any live claim it does not own, so export
 # SGE_REVIEW_CLAIM_HANDOFF_OWNER=<your owner id> in that subagent's env (the same
 # structural handoff the review daemon uses), or release the work claim first.
+# `pr-claim.sh take --lane review` honours the same variable (sge#2777).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -84,8 +85,19 @@ case "$CMD" in
         ST=$(bash "$PR_LABELS" claim-status "$PR")
         RC=$?
         set -e
+        # Review handoff (sge#2777): a live claim held by the exported
+        # SGE_REVIEW_CLAIM_HANDOFF_OWNER is the dispatcher's own, which
+        # start-review takes over -- so honour it here too. Re-read the claim
+        # state AS that owner: it reads free/mine only when no OTHER owner holds
+        # a live claim in any lane.
+        if [[ "$RC" -eq 3 && "$LANE" == "review" && -n "${SGE_REVIEW_CLAIM_HANDOFF_OWNER:-}" ]]; then
+          set +e
+          ST=$(SGE_AGENT_ID="$SGE_REVIEW_CLAIM_HANDOFF_OWNER" bash "$PR_LABELS" claim-status "$PR")
+          RC=$?
+          set -e
+        fi
         if [[ "$RC" -eq 3 ]]; then
-          echo "refusing: PR $TARGET has a live claim ($ST) — back off (wtp-org#992)" >&2
+          echo "refusing: PR $TARGET has a live claim ($ST) — back off" >&2
           exit 3
         fi
         [[ "$RC" -eq 0 ]] || exit "$RC"

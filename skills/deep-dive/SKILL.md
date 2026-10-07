@@ -1,5 +1,5 @@
 ---
-description: Use when a GitHub issue needs in-depth investigation and a recorded decision rather than immediate implementation — an unclear bug root cause, a feature whose blast radius and alternatives need weighing, a suspected duplicate or stale issue, or a drift issue raised by /sge:sge-align that needs triage. Not for building; for SGE spec issues use /sge:sge-preflight then /sge:sge-implement.
+description: Use when an issue needs investigation and a recorded decision rather than an immediate build — an unclear root cause, blast radius or alternatives to weigh, a suspected duplicate or stale issue, or a /sge:sge-align drift issue to triage. Not for building.
 argument-hint: "<issue-number> [--quick|--code-only|--no-code] [--no-comment]"
 ---
 
@@ -9,7 +9,7 @@ argument-hint: "<issue-number> [--quick|--code-only|--no-code] [--no-comment]"
 Thoroughly investigate a GitHub issue, surface root cause and options, and record a structured decision — without building anything.
 
 ## Out of scope
-- Implementing the chosen option (hands off to `/sge:implement-issue` or `/sge:sge-implement`)
+- Implementing the chosen option (hands off to `/sge:sge-implement`)
 - Running in a forked/headless context when interactive phases (6–7) are required
 
 **Thoroughly investigate a GitHub issue, review the related code, and have a structured discussion about what (if anything) should be done.**
@@ -29,7 +29,7 @@ It runs **inline** in the main conversation — do not fork it into a subagent. 
 > **Target repo.** This investigation is only correct when the `gh issue
 > view`/`gh issue list`/`gh pr list` calls below **and** the code reads
 > (`Read`/`Grep`/`Glob`, `git log`) resolve against the *same* repo — the
-> issue's repo. When dispatched from a hub/control checkout (e.g. `wtp-org`)
+> issue's repo. When dispatched from a hub/control checkout (e.g. an org hub repo)
 > or by `/sge:sge-align` triaging a drift issue, apply the shared
 > repo-targeting convention — [`gh-repo`](../gh-repo/SKILL.md) — first:
 > resolve + `cd` via the shared helper — `cd
@@ -278,7 +278,7 @@ After presenting the findings report in chat, capture the decision via **AskUser
 
 If the user picks "dig deeper", loop back to whichever phase they direct. Once an option is picked, proceed straight to Phase 7.
 
-**Do not start implementation without explicit instruction.** After recording, the build hand-off is `/sge:implement-issue <n>` for general issues (it routes to the right pipeline) or `/sge:sge-implement <n>` when a SPEC-NNN governs the work.
+**Do not start implementation without explicit instruction.** After recording, the build hand-off is `/sge:sge-implement <n>` — it takes the spec lane when a SPEC-NNN governs the work and the no-spec lane otherwise.
 
 ---
 
@@ -305,7 +305,7 @@ or when `--no-comment` is passed.
   non-goal check), when the repo has SGE artefacts
 - **Decision** — which option was chosen, and the one-line rationale the user
   gave (or, if they didn't give one, your read of why they chose it)
-- **Next step** — what happens next: `/sge:implement-issue <N>`, close as won't
+- **Next step** — what happens next: `/sge:sge-implement <N>`, close as won't
   fix, needs spec first, etc.
 
 Keep it tight. The goal is a scannable audit trail, not a wall of text —
@@ -323,7 +323,7 @@ gh issue comment $ISSUE --body "$(cat <<'EOF'
 
 **Why:** <user's rationale, or your best read of it>
 
-**Next step:** <e.g. `/sge:implement-issue 4600`, close as won't fix, draft spec>
+**Next step:** <e.g. `/sge:sge-implement 4600`, close as won't fix, draft spec>
 
 ---
 
@@ -418,7 +418,7 @@ When invoked **without an interactive user** — e.g. by `/sge:sge-align` triagi
 
 - `/sge:governance-trace <n>` — The shared classifier this skill's Phase 4 dispatches to; run it directly for a quick "does this need a spec, and would it change one?" check without a full deep dive
 - `/sge:sge-preflight <SPEC-NNN>` — Pre-implementation checklist for an SGE spec issue
-- `/sge:implement-issue <n>` — Build a general (non-SGE) issue once you've decided to proceed (a thin router into the implementation pipeline — pointing at it is correct)
+- `/sge:sge-implement <n>` — Build the issue once you've decided to proceed (spec or no-spec lane)
 - `/sge:sge-implement <n>` — Build an SGE spec issue end-to-end
 - `/sge:sge-align` — The drift sweep that may invoke this skill headlessly to triage a gap issue
 - `/sge:pr-review` — Review an in-flight PR

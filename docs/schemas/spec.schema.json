@@ -1,0 +1,69 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/WealthTechPros/sge/docs/schemas/spec.schema.json",
+  "title": "SGE feature spec frontmatter (L3)",
+  "description": "The frontmatter of an SGE feature spec (SPEC-NNN, or legacy SGD-NNN / SGE-NNN). Two forms are accepted: a yaml code block that opens the file and holds a top-level spec: mapping (this schema validates that mapping), or YAML between --- lines at the top of the file (this schema validates the whole mapping). Every spec also carries acceptance criteria, per x-sge-sections. SPEC-133.",
+  "type": "object",
+  "required": ["status"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^(SPEC|SGD|SGE)-\\d+(-to-\\d+)?$",
+      "description": "The spec id. It must match the id that starts the file name (x-sge-idMatchesFilename)."
+    },
+    "ref": {
+      "type": "string",
+      "pattern": "^(SPEC|SGD|SGE)-\\d+(-to-\\d+)?$",
+      "description": "Legacy alias of id, used by the --- form. It must match the file name too."
+    },
+    "title": { "type": "string", "minLength": 1 },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft", "proposed", "approved", "accepted", "ratified", "planned", "design",
+        "building", "in-progress",
+        "built", "implemented", "done", "active", "decided",
+        "superseded", "decommissioned", "retired", "withdrawn", "deprecated"
+      ],
+      "description": "Lifecycle status: the vocabulary scripts/build-sge-dag.mjs maps to a delivery phase (pre-build, building, built, retired)."
+    },
+    "capability": {
+      "type": "string",
+      "pattern": "^CAP-[A-Z0-9][A-Z0-9-]*$",
+      "description": "The capability id (from the capability model) this spec belongs to."
+    },
+    "feature": {
+      "type": "string",
+      "pattern": "^F-[A-Z0-9][A-Z0-9-]*$",
+      "description": "The feature id (from the capability model) this spec specifies."
+    },
+    "success_measure_moved": {
+      "type": "string",
+      "pattern": "^SM-\\d+",
+      "description": "The Vision success measure (SM-N) this spec moves."
+    },
+    "tracking_issue": {
+      "type": ["integer", "string", "null"],
+      "description": "The issue that tracks the work."
+    },
+    "owner": { "type": "string", "minLength": 1 },
+    "reviewers": { "type": "array", "items": { "type": "string" } },
+    "gherkin_exempt": {
+      "type": "boolean",
+      "description": "true for a spec that is not a behavioural contract, such as a decision protocol. It is exempt from the acceptance-criteria section."
+    }
+  },
+  "additionalProperties": true,
+  "x-sge-idMatchesFilename": true,
+  "x-sge-sections": [
+    {
+      "name": "acceptance criteria",
+      "description": "A heading naming acceptance criteria, Gherkin or scenarios; or a Gherkin 'Scenario:' line; or an acceptance_criteria: key in the frontmatter block.",
+      "headings": ["acceptance criteria", "gherkin", "scenarios"],
+      "scenarioLines": true,
+      "frontmatterKey": "acceptance_criteria",
+      "exemptFlag": "gherkin_exempt",
+      "exemptStatuses": ["draft", "superseded", "decommissioned", "retired", "withdrawn", "deprecated"]
+    }
+  ]
+}

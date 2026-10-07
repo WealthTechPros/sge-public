@@ -9,18 +9,18 @@ Render each gap record's `proposedIssue` through the search-before-file seam (#2
 ```bash
 IW="${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/issue-write.sh"
 N=$("$IW" create-deduped \
-  "[SGE drift] C3 Capability→Spec: CAP-CLIENT-ONBOARDING-ACCEPT has no spec" \
+  "[SGE drift] C3 Capability→Spec: CAP-ORDER-CHECKOUT has no spec" \
   "$(cat <<'EOF'
 **Broken link:** Capability → Feature Spec (`spec_coverage`)
-**Artefact:** `CAP-CLIENT-ONBOARDING-ACCEPT` (status: built) — `.claude/product-context/capability-model.yaml`
-**Expected:** a `docs/features/*.md` spec carrying `capability: CAP-CLIENT-ONBOARDING-ACCEPT`
+**Artefact:** `CAP-ORDER-CHECKOUT` (status: built) — `.claude/product-context/capability-model.yaml`
+**Expected:** a `docs/features/*.md` spec carrying `capability: CAP-ORDER-CHECKOUT`
 **Found:** none at audited SHA `<sha>`
 **Why it matters:** a built capability with no governing spec gives AI agents and reviewers no acceptance criteria to check against — the next change drifts freely.
 **Suggested fix:** write a feature spec (or run `/sge:sge-init`) with Gherkin acceptance criteria; or mark the capability `design` if it isn't built yet.
 
-<!-- sge-drift-key: C3:CAP-CLIENT-ONBOARDING-ACCEPT -->
+<!-- sge-drift-key: C3:CAP-ORDER-CHECKOUT -->
 EOF
-)" --search "CAP-CLIENT-ONBOARDING-ACCEPT")
+)" --search "CAP-ORDER-CHECKOUT")
 gh issue edit "$N" --add-label "$LABEL"   # create-deduped takes no --label
 ```
 

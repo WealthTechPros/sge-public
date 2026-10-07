@@ -6,17 +6,59 @@ from `SKILL.md` under the 35 KB skills-ci size budget (the #1353/#1469
 progressive-disclosure pattern); content unchanged.
 
 Both decide **which** review this run performs (`full` / `delta` /
-`phase5-passthrough`); neither changes severity, label, or auto-merge
-behaviour.
+`phase5-passthrough`); neither changes severity or label behaviour.
+Auto-merge authority differs by mode (SPEC-090 §2.6 rule 5; see the quick
+re-review section below).
 
 ### Re-review delta mode
 
-`gh pr review` (Phase 6) **ALWAYS creates a PR REVIEW object** at `/pulls/$PR/reviews` (never a plain issue comment) — query it for the last `sge-verdict` body: `LAST_VERDICT=$(gh api "repos/$REPO/pulls/$PR/reviews" --jq '[.[].body // "" | select(contains("sge-verdict"))] | last')` (and `HEAD_SHA=$(rl_head_sha "$PR")`). Extract `commit:` (`LAST_SHA`) and `mode:` (`LAST_MODE`), pick a mode:
+`gh pr review` (Phase 6) **ALWAYS creates a PR REVIEW object** at `/pulls/$PR/reviews` (never a plain issue comment) — query it for the last `sge-verdict` body **posted by the review identity** (sge#2980: anyone can post a review whose body holds an `sge-verdict` fence, and a delta must never let a PR author choose its base or which findings it re-checks): `LAST_VERDICT=$(gh api "repos/$REPO/pulls/$PR/reviews" --paginate | jq -s --arg me "${SGE_REVIEW_BOT_LOGIN:-wtp-sge[bot]}" 'add // [] | [.[] | select(.user.login == $me)]' | jq -r '[.[].body // "" | select(contains("sge-verdict"))] | last // ""')` (the login is `dp_review_login`'s; no verdict from it means a full review) (and `HEAD_SHA=$(rl_head_sha "$PR")`). Extract `commit:` (`LAST_SHA`) and `mode:` (`LAST_MODE`), pick a mode:
 
 - **`LAST_MODE` contains `shadow`** → treat as **no prior verdict** (fall through to the next rule), regardless of `LAST_SHA`/`HEAD_SHA`. A shadow verdict is deliberately untrusted for gate purposes (issue #2651 ADR-0021 — "structurally, not just conventionally"); reasserting it via plain `pass` would promote `pr-reviewed`/auto-merge off review work no dispatch was ever allowed to label. This is the ONLY case where a same-SHA prior verdict does not short-circuit into a reassert (issue #2653 gap, found in review). **Exception:** a caller itself running `--shadow` may still reassert the SAME shadow verdict via `pr-labels.sh shadow-pass` (never `pass`) when `LAST_SHA == HEAD_SHA` — this never applies `pr-reviewed` either way, so it carries none of the risk above.
 - **No prior verdict** → check the Phase 5 pass-through below, else **full review**.
 - **`LAST_SHA == HEAD_SHA`** → nothing new. Re-assert the prior label state pinned to head: `pr-labels.sh pass $PR $AUTOMERGE_FLAG --expect-head "$HEAD_SHA"` (or `fail`); `$AUTOMERGE_FLAG` per Phase 6.
-- **New commits** → **delta mode**: `git fetch origin "$HEAD_REF"`, scope to `git diff --name-only "$LAST_SHA..$HEAD_SHA"`, re-check each prior Blocker/Major. Record `mode: delta`; severity/labels/auto-merge behave as a full review; set `REVIEWED_HEAD="$HEAD_SHA"`.
+- **New commits** → **delta mode** only when `LAST_SHA` is an ancestor of the head (`git fetch origin "$HEAD_REF"` then `git merge-base --is-ancestor "$LAST_SHA" "$HEAD_SHA"`); otherwise (a rebase or force-push) **full review**. In delta mode, scope to `git diff "$LAST_SHA..$HEAD_SHA"` and verify each prior finding is addressed. Record `mode: delta`; severity/labels behave as a full review; set `REVIEWED_HEAD="$HEAD_SHA"`. A PR Warden dispatch states the same choice in its system prompt (sge#2867). Delta mode is the **quick re-review** below.
+
+### Quick re-review after a fix (sge#2980)
+
+A delta re-review checks **only the earlier findings plus the new commits, at
+`light` depth** — one inline pass, no fan-out — unless the fix adds a full-tier
+path the earlier review never saw:
+
+```bash
+DT=$("$SGE_ROOT/skills/pr-review/review-tier.sh" delta "$PR" "$LAST_SHA")
+DELTA_TIER=${DT%%$'\t'*}; DELTA_TIER_REASON=${DT#*$'\t'}
+CONTROL_BEARING=$(rl_diff_control_bearing "$PR" --since "$LAST_SHA")
+SEC=0; [ -n "$(rl_security_files "$PR" --since "$LAST_SHA")" ] && SEC=1
+PLAN=$("$SGE_ROOT/skills/pr-review/review-tier.sh" depth "$DELTA_TIER" \
+  --control-bearing "$CONTROL_BEARING" --security "$SEC" --mode delta)
+```
+
+- `DELTA_TIER` is `light` unless the commits since `LAST_SHA` touch a
+  full-tier path that was **not** in the PR's diff at `LAST_SHA`; then `full`
+  and the re-review runs at full depth. It fails closed to `full` (a non-ancestor
+  `LAST_SHA`, an unreadable or truncated compare, an unreadable repo config).
+  `REVIEW_TIER` (whole PR) is still computed and recorded; it no longer sets the
+  delta's depth.
+- `CONTROL_BEARING` / `SEC` count only the new commits (both fall back to the
+  whole PR when the delta cannot be read): adversarial QA re-runs only when the
+  fix itself changes an existing gate script, the security auditor only when it
+  touches a security path.
+- **Every earlier finding stays in force until this pass shows it resolved.**
+  Read the earlier verdict's findings (its review body and inline comments), check
+  each against the head, and carry any that are not resolved into this verdict's
+  findings at their original severity: an unresolved earlier Blocker/Major keeps
+  the verdict `fail`, however clean the delta is.
+- Record in the verdict block: `delta_from: <LAST_SHA, full>`,
+  `prior_findings_open: <count of earlier findings still open>`, and
+  `delta_escalation: none | <DELTA_TIER_REASON>` (`none` only when `DELTA_TIER`
+  is `light`).
+- **Auto-merge (SPEC-090 §2.6 rule 5):** a `mode: delta` pass is merge
+  authority only when an earlier trusted non-shadow `mode: full` review of this PR
+  exists in its `delta_from` chain, `prior_findings_open: 0` and
+  `delta_escalation: none`. The review daemon checks exactly these fields
+  (`approval_carry.verdict_chain_reason`); any other delta pass leaves the merge
+  to a human or a later full review.
 
 For a read-only pre-check of this same question — is the PR still covered, and how big is the intervening delta — without claiming the gate or mutating labels, `pr-labels.sh review-coverage $PR` (issue #2294) reports `covered=true|false|shadow-only|unknown` (`shadow-only` — issue #2655 — means the only verdict at head is a PR Warden `mode: shadow` one, which is **not** coverage: a real review is still needed), a `scope=delta|substantial` classification (bounded post-review delta vs. a change large enough that the prior review no longer applies at all), and lists the intervening commits by SHA + message. `/sge:pr-monitor` calls this on every open PR each tick (the re-review step, issue #2644) and dispatches `/sge:pr-review` when it reports `covered=false`.
 
@@ -68,7 +110,7 @@ prefixes each `pr-labels.sh` call. Residual: a Stage 0 hold/pod-gate *forced* ad
 re-derivable from `$ARGUMENTS`; `pass` still refuses on a `hold` label (exit 8), and the agent must
 carry `REVIEW_MODE=advisory` into Phase 6.
 
-**`--shadow` (issue #2651, wtp-org ADR-0021 — PR Warden) is structurally, not just
+**`--shadow` (issue #2651 — PR Warden) is structurally, not just
 conventionally, enforced:** Phase 6/8 routes it to `pr-labels.sh shadow-pass` — a
 subcommand distinct from `pass`, which is the only place `pr-reviewed` is applied and
 auto-merge is armed — so a shadow dispatch cannot reach either even if a future
@@ -100,7 +142,7 @@ equivalent to `--advisory`. On a clean verdict this skill's own pass path applie
 instruction telling the dispatched agent to skip that does not change what the skill's
 own code does when it reaches `pass`.
 
-Proven live on `trust-fabric#328`: a review agent was dispatched with an explicit brief
+Proven live on a product repo's #328: a review agent was dispatched with an explicit brief
 not to apply `pr-reviewed` and not to merge. It applied `pr-reviewed` anyway, arming
 auto-merge for 16 seconds before the dispatching lane caught it, removed the label, and
 applied `hold`. Contained only because a human/lane was watching in real time.

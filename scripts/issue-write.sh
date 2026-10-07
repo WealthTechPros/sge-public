@@ -7,7 +7,7 @@
 # has nothing to write to.
 #
 # The ALM (issue-tracker) backend is resolved FIRST, via scripts/with-repo-cwd.sh
-# alm (SGD_ALM_BACKEND) — a repo may be GitHub-HOSTED yet track its work in Jira,
+# alm (SGE_ALM_BACKEND) — a repo may be GitHub-HOSTED yet track its work in Jira,
 # so the tracker is orthogonal to the git host:
 #
 #   github (unset/empty)  delegate to `gh` — byte-identical to before this seam
@@ -21,6 +21,13 @@
 #                         set JIRA_ADAPTER_ALLOW_CREATE — that scope gate (DP3)
 #                         stays the caller's/environment's explicit decision, so
 #                         the common-case dispatch token cannot create items.
+#   azdo                  route P5 comment-item / P6 create-item / P8
+#                         link-close-on-merge through scripts/azdo-adapter.sh
+#                         (SPEC-110 S3). Same opt-in split as Jira: this seam
+#                         sets AZDO_ADAPTER_ALLOW_WRITE=1, never
+#                         AZDO_ADAPTER_ALLOW_CREATE (DP3). `create` prints the
+#                         integer work-item id; `close-link` takes the Azure
+#                         Repos PR URL and records a native ArtifactLink (DR6).
 #   unrecognised          FAIL LOUD naming the value (DR1); issue NO gh call and
 #                         NO Jira REST call — never a silent GitHub write against
 #                         the wrong tracker.
@@ -33,11 +40,26 @@
 #   issue-write.sh comment <issueRef> <body>
 #       Append a comment (claim notice, triage, exit report). P5 on Jira.
 #   issue-write.sh create <title> <body>
-#       Open a new work item. On Jira (P6) the project is SGD_JIRA_PROJECT and
+#       Open a new work item. On Jira (P6) the project is SGE_JIRA_PROJECT and
 #       the caller MUST have set JIRA_ADAPTER_ALLOW_CREATE=1 (DP3 scope gate).
 #       Prints the new item's BARE REF on stdout — an integer issue number on
 #       GitHub, an issueKey (PROJ-123) on Jira — so it can be piped straight
 #       into `comment`/`close-link`. Treat it as opaque; never parse as an int.
+#   issue-write.sh create-deduped <title> <body> [--search <text>]...
+#       Search-before-file (#2647): the ONE seam every follow-up / child /
+#       tracking-issue filing routes through. Searches OPEN items via
+#       issue-read.sh search (title-scoped, ALM-aware) for <title> and each
+#       --search phrase (a distinctive title phrase, a key symbol or path),
+#       then:
+#         - an open item whose title equals <title> (case/whitespace-
+#           insensitive) → NO create; prints that item's bare ref and notes
+#           the reuse on stderr (link it instead of filing a duplicate);
+#         - any other open match → creates, with the body prefixed
+#           "Possible duplicate of #N" (all candidates, max 5);
+#         - no match → creates exactly like `create`.
+#       A failed search FAILS OPEN (warns, creates un-prefixed): dedup is
+#       advisory, a follow-up must never be lost. Same stdout contract and
+#       Jira DP3 opt-in as `create`.
 #   issue-write.sh close-link <issueRef> <change-url>
 #       Express "merging this change closes item N". On GitHub close-on-merge is
 #       DECLARATIVE — this prints the `Closes #N` token for the caller to embed
@@ -51,9 +73,9 @@
 # / issue-read.sh. This script classifies the host and ALM backend from the
 # current cwd's `origin` remote; a wrong cwd means the wrong tracker.
 #
-# ALM / Jira config is the jira-adapter's (SGD_ALM_BACKEND, SGD_JIRA_BASE_URL,
-# SGD_JIRA_HOSTS, SGD_JIRA_BEARER or SGD_JIRA_EMAIL + SGD_JIRA_API_TOKEN,
-# SGD_JIRA_PROJECT, SGD_JIRA_CLOSE_TRANSITION_ID, JIRA_ADAPTER_ALLOW_CREATE) —
+# ALM / Jira config is the jira-adapter's (SGE_ALM_BACKEND, SGE_JIRA_BASE_URL,
+# SGE_JIRA_HOSTS, SGE_JIRA_BEARER or SGE_JIRA_EMAIL + SGE_JIRA_API_TOKEN,
+# SGE_JIRA_PROJECT, SGE_JIRA_CLOSE_TRANSITION_ID, JIRA_ADAPTER_ALLOW_CREATE) —
 # see scripts/jira-adapter.sh. A missing credential or unlisted host fails loud
 # before any network call.
 
@@ -61,6 +83,8 @@ set -euo pipefail
 
 _IW_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _JA="${_IW_SCRIPT_DIR}/jira-adapter.sh"
+_AA="${_IW_SCRIPT_DIR}/azdo-adapter.sh"
+_IR="${_IW_SCRIPT_DIR}/issue-read.sh"
 _WRC="${_IW_SCRIPT_DIR}/with-repo-cwd.sh"
 
 _iw_err() { printf 'issue-write: error: %s\n' "$*" >&2; }
@@ -84,6 +108,15 @@ _iw_require_github_ref() { # <ref>
 # write. Never a silent GitHub fallback.
 _iw_alm() { "$_WRC" alm | tr -d '\n'; }
 
+# Second line of DR1 behind the resolver: any token other than github/jira/azdo
+# fails loud here instead of falling through to a gh write (issue #2985).
+_iw_require_known_alm() {
+  case "$1" in
+    github|jira|azdo) return 0 ;;
+    *) _iw_err "ALM backend '$1' has no issue-write route — refusing rather than writing to GitHub (SPEC-105 DR1)"; return 1 ;;
+  esac
+}
+
 # Classify the current checkout's git host: github | forgejo | unknown.
 _iw_host() { "$_WRC" host 2>/dev/null | tr -d '\n' || printf 'unknown'; }
 
@@ -101,6 +134,29 @@ _iw_github_host_only() {
       ;;
   esac
 }
+
+# Search-before-file scan for `create-deduped` (#2647). Runs issue-read.sh
+# search (open items only) for each term and prints one `<kind>\t<ref>` line per
+# unique hit: kind `exact` when the hit's title equals <title> after
+# case/whitespace normalisation, else `candidate`. Returns non-zero when ANY
+# search failed or jq is missing — the caller fails open on that.
+_iw_dedup_scan() { # <title> <term>...
+  local title="$1" term hits rc=0
+  shift
+  command -v jq >/dev/null 2>&1 || { _iw_err "create-deduped: jq not found — cannot search for duplicates"; return 1; }
+  for term in "$@"; do
+    hits="$(bash "$_IR" search "$term" --state open --limit 10)" || { rc=1; continue; }
+    printf '%s' "$hits" | jq -r --arg t "$title" '
+      def norm: ascii_downcase | gsub("\\s+"; " ") | sub("^ "; "") | sub(" $"; "");
+      .[]? | select(.number != null)
+      | (if (.title // "" | norm) == ($t | norm) then "exact" else "candidate" end)
+        + "\t" + (.number | tostring)' || rc=1
+  done
+  return "$rc"
+}
+
+# `#N` on GitHub (integer ref), the bare issueKey on Jira (PROJ-123).
+_iw_ref_label() { case "$1" in ''|*[!0-9]*) printf '%s' "$1" ;; *) printf '#%s' "$1" ;; esac; }
 
 _iw_usage() {
   # `if`, not `[ -n … ] && …`: the short-circuit form returns non-zero when the
@@ -123,8 +179,11 @@ _iw_main() {
       { [ -n "$ref" ] && [ "$#" -ge 3 ]; } || _iw_usage 'comment needs <issueRef> <body>'
       local alm
       alm="$(_iw_alm)" || exit 1
+      _iw_require_known_alm "$alm" || exit 1
       if [ "$alm" = "jira" ]; then
         JIRA_ADAPTER_ALLOW_WRITE=1 bash "$_JA" comment-item "$ref" "$body"
+      elif [ "$alm" = "azdo" ]; then
+        AZDO_ADAPTER_ALLOW_WRITE=1 bash "$_AA" comment-item "$ref" "$body"
       else
         _iw_github_host_only || exit 1
         _iw_require_github_ref "$ref" || exit 1
@@ -145,10 +204,17 @@ _iw_main() {
       # knowing the backend. The raw forms differ (Jira returns a REST body,
       # `gh` returns a URL), so each is normalised here rather than at every
       # call site.
+      _iw_require_known_alm "$alm" || exit 1
       local _created _ref
-      if [ "$alm" = "jira" ]; then
-        local project="${SGD_JIRA_PROJECT:-}"
-        [ -n "$project" ] || { _iw_err "no Jira project key — set SGD_JIRA_PROJECT (the project create-item opens into)"; exit 1; }
+      if [ "$alm" = "azdo" ]; then
+        _created="$(AZDO_ADAPTER_ALLOW_WRITE=1 bash "$_AA" create-item "$title" "$body")" || exit 1
+        command -v jq >/dev/null 2>&1 || { _iw_err "jq not found — required to read the created work item's id"; exit 1; }
+        _ref="$(printf '%s' "$_created" | jq -er '.id' 2>/dev/null | tr -d '\r')" || {
+          _iw_err "create: Azure Boards response carried no .id — the item may or may not exist"; exit 1; }
+        case "$_ref" in ''|*[!0-9]*) _iw_err "create: non-numeric work-item id '$_ref'"; exit 1 ;; esac
+      elif [ "$alm" = "jira" ]; then
+        local project="${SGE_JIRA_PROJECT:-}"
+        [ -n "$project" ] || { _iw_err "no Jira project key — set SGE_JIRA_PROJECT (the project create-item opens into)"; exit 1; }
         _created="$(JIRA_ADAPTER_ALLOW_WRITE=1 bash "$_JA" create-item "$project" "$title" "$body")" || exit 1
         command -v jq >/dev/null 2>&1 || { _iw_err "jq not found — required to read the created item's key from the Jira response"; exit 1; }
         _ref="$(printf '%s' "$_created" | jq -er '.key' 2>/dev/null)" || {
@@ -171,6 +237,45 @@ _iw_main() {
       fi
       printf '%s\n' "$_ref"
       ;;
+    create-deduped)
+      # Search-before-file (#2647) — see Usage. Composes the read seam ($IR
+      # search) with `create`; never bypasses `create`'s own backend routing.
+      local title="${2:-}" body="${3:-}"
+      { [ -n "$title" ] && [ "$#" -ge 3 ]; } || _iw_usage 'create-deduped needs <title> <body> [--search <text>]...'
+      shift 3
+      local -a terms=()
+      while [ "$#" -gt 0 ]; do
+        case "$1" in
+          --search)
+            [ -n "${2:-}" ] || _iw_usage 'create-deduped: --search needs <text>'
+            terms+=("$2"); shift 2 ;;
+          *) _iw_usage "create-deduped: unknown flag '$1'" ;;
+        esac
+      done
+      terms+=("$title")
+      local scan exact cands
+      if ! scan="$(_iw_dedup_scan "$title" "${terms[@]}")"; then
+        _iw_err "create-deduped: duplicate search failed or incomplete — failing open (a follow-up must never be lost); filing un-prefixed"
+        scan=""
+      fi
+      exact="$(printf '%s\n' "$scan" | awk -F'\t' '$1=="exact" && !f {print $2; f=1}')"
+      if [ -n "$exact" ]; then
+        _iw_err "create-deduped: open item $(_iw_ref_label "$exact") already has this title — not filing a duplicate; link it instead"
+        printf '%s\n' "$exact"
+        exit 0
+      fi
+      cands="$(printf '%s\n' "$scan" | awk -F'\t' '$1=="candidate" && !seen[$2]++ && n < 5 {print $2; n++}')"
+      if [ -n "$cands" ]; then
+        local c line=""
+        while IFS= read -r c; do
+          [ -n "$c" ] || continue
+          line="${line:+$line, }$(_iw_ref_label "$c")"
+        done <<< "$cands"
+        _iw_err "create-deduped: possible duplicate(s) $line — filing with a 'Possible duplicate of' header"
+        body="$(printf 'Possible duplicate of %s\n\n%s' "$line" "$body")"
+      fi
+      _iw_main create "$title" "$body"
+      ;;
     close-link)
       # P8 — express close-on-merge. GitHub is DECLARATIVE (`Closes #N` in the PR
       # body); Jira has no native PR link, so the adapter records a remote link.
@@ -178,8 +283,11 @@ _iw_main() {
       { [ -n "$ref" ] && [ -n "$url" ]; } || _iw_usage 'close-link needs <issueRef> <change-url>'
       local alm
       alm="$(_iw_alm)" || exit 1
+      _iw_require_known_alm "$alm" || exit 1
       if [ "$alm" = "jira" ]; then
         JIRA_ADAPTER_ALLOW_WRITE=1 bash "$_JA" link-close-on-merge "$ref" "$url"
+      elif [ "$alm" = "azdo" ]; then
+        AZDO_ADAPTER_ALLOW_WRITE=1 bash "$_AA" link-close-on-merge "$ref" "$url"
       else
         _iw_github_host_only || exit 1
         _iw_require_github_ref "$ref" || exit 1
