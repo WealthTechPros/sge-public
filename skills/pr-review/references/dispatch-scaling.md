@@ -282,10 +282,22 @@ own.
 A PR Warden review has a mandatory wall-clock cap: **600 s for `light`/`standard`, 900 s
 for `full`** (the whole-PR review tier the daemon classified). The daemon's system prompt
 names the deadline (UTC) and a soft deadline 150 s before it; the daemon kills the run at the
-cap. At the soft deadline, stop waiting on any lane still running and post the verdict from
-the lanes that finished:
+cap.
 
-- List every unfinished lane in the verdict block as `not_completed: <lane>, <lane>` (lanes:
+**Start every required lane at once (sge#2987).** At the start of the review, dispatch every
+lane this review requires (`security_auditor` on a security path, `adversarial_qa` on a
+control-bearing diff, the Phase 3 quality gates, and the specialist fan-out on `full`) in the
+background and in parallel, then wait for them. Never skip or defer a lane because the cap
+"might" be reached: the cap is a deadline to stop waiting, not a reason to start less. Before
+recording a time-cap outcome, read the clock (`date -u +%FT%TZ`) and compare it to the soft
+deadline. Only when it is at or past the soft deadline, stop waiting on any lane still running
+and post the verdict from the lanes that finished. A lane that was never dispatched is not
+"timed out"; dispatch it. The daemon rejects a verdict that claims a time-cap
+`not_completed` lane before the soft deadline as malformed and re-dispatches the review once
+(on #2986 a review claimed the 900 s cap at 251 s, and failed the PR on lanes it never
+started).
+
+- List every lane still running at the soft deadline in the verdict block as `not_completed: <lane>, <lane>` (lanes:
   `code_review`, `security_auditor`, `adversarial_qa`, `quality_gates`, or a specialist's
   name), and in the summary as **not completed (timed out)**. `not_completed: none` when all
   finished.

@@ -111,7 +111,9 @@ such a workflow out of `rl_diff_control_bearing`.
 **Whole PR for the tier.** The recorded tier is always the whole PR's. A delta
 re-review's depth comes from `review-tier.sh delta <pr> <reviewed-sha>`, which
 binds the delta to GitHub's compare of `<reviewed-sha>...<head>` (`ahead`
-proves ancestry) and the reviewed diff to `<base>...<reviewed-sha>`; any
+proves ancestry) and the reviewed diff to `<base>...<reviewed-sha>`. Only paths
+also in the PR's own diff (`<base>...<head>`) can escalate, so a full-tier file
+that came in through a merge from the base branch does not (sge#2987); any
 unreadable or truncated (300-file) compare is `full`. The verdict POST is still
 pinned to the head it judged (`rl_post_verdict` sends the block's `commit:` as
 `commit_id`).

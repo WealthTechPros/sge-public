@@ -123,9 +123,9 @@ Before claiming the gate, pick the mode (same-head re-assert · **delta** on new
 
 ### Budget (issues #688, #888)
 
-Per-tier **wall-clock / token / tool-call budgets**; on exhaustion → report **partial**, record `budget_exceeded`. PR Warden **hard cap** 600 s light/standard, 900 s full: unfinished lanes → `not_completed`, never a pass; a required one → FAIL `timed out` (sge#2980): [`dispatch-scaling.md`](references/dispatch-scaling.md).
+Per-tier **wall-clock/token/tool-call budgets**; on exhaustion report **partial**, set `budget_exceeded`. PR Warden **hard cap** 600 s light/standard, 900 s full: start required lanes at once, in parallel, backgrounded; `not_completed` only if running at the soft deadline (never a pass; required → FAIL `timed out`, #2987): [`dispatch-scaling.md`](references/dispatch-scaling.md).
 
-**Investigation depth & pragmatism (issue #888, #2456).** Sets the investigation-depth tier up front: `high` → `max`/`ultra`; `low`/`medium` → **fewer, high-confidence findings scoped to the diff**, trusting the PR's own tests; deep verification reserved for `high` (never a full-suite re-run). Guardrails (MSYS_NO_PATHCONV=1): [`dispatch-scaling.md`](references/dispatch-scaling.md).
+**Investigation depth & pragmatism (#888, #2456).** Sets the investigation-depth tier up front: `high` → `max`/`ultra`; `low`/`medium` → **fewer, high-confidence findings scoped to the diff**, trusting the PR's own tests; deep verification reserved for `high` (never a full-suite re-run). Guardrails (MSYS_NO_PATHCONV=1): [`dispatch-scaling.md`](references/dispatch-scaling.md).
 
 ### Claim the review (label gate)
 
