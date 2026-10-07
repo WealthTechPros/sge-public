@@ -457,13 +457,15 @@ rt_ci_test_only() {
 # rt_delta <pr> <reviewed-sha> -- the DEPTH tier of a quick re-review after a
 # fix push (sge#2980). `light` unless the commits since <reviewed-sha> touch a
 # full-tier path that was not already in the PR's diff at <reviewed-sha> (the
-# earlier, full-depth review saw those); then `full`. Fails closed to `full`:
+# earlier, full-depth review saw those); then `full`. Only paths in the PR's
+# own diff against its base count, so content merged in from the base branch
+# never escalates (sge#2987). Fails closed to `full`:
 # <reviewed-sha> not a full SHA or not an ancestor of the head (rebase /
-# force-push), either compare unreadable or at GitHub's 300-file compare cap,
+# force-push), any compare unreadable or at GitHub's 300-file compare cap,
 # an unreadable repo config. The whole-PR tier (`pr`) is still what the
 # verdict records; this only decides how deep the re-review goes.
 rt_delta() {
-  local pr="${1:-}" since="${2:-}" repo meta head base new old cfg n i rec t
+  local pr="${1:-}" since="${2:-}" repo meta head base new old cur cfg n i rec t
   repo="${GH_REPO:-$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)}"
   since=$(printf '%s' "$since" | tr 'A-F' 'a-f')
   [[ "$pr" =~ ^[0-9]+$ ]] || { printf 'full\tdelta: no PR number -- fail closed to full\n'; return 0; }
@@ -487,6 +489,14 @@ rt_delta() {
                  then [.files[] | .previous_filename, .filename | select(type == "string" and . != "")] else null end' 2>/dev/null)
   [ -n "$old" ] && [ "$old" != "null" ] \
     || { printf 'full\tdelta: the reviewed diff is unreadable or truncated -- fail closed to full\n'; return 0; }
+  # The PR's own diff against its base now (sge#2987): a file the delta touches
+  # but this diff does not came in through a merge from the base branch, was
+  # reviewed on its own PR, and must not escalate this re-review.
+  cur=$(gh api "repos/$repo/compare/$base...$head" 2>/dev/null \
+        | jq -c 'if type == "object" and (.files | type) == "array" and (.files | length) < 300
+                 then [.files[] | .previous_filename, .filename | select(type == "string" and . != "")] else null end' 2>/dev/null)
+  [ -n "$cur" ] && [ "$cur" != "null" ] \
+    || { printf 'full\tdelta: the PR diff against base is unreadable or truncated -- fail closed to full\n'; return 0; }
   if ! rt__read_config "$repo"; then printf 'full\tdelta: %s\n' "$RT_CFG_ERR"; return 0; fi
   cfg="$RT_CFG"
   local -a fresh=()
@@ -497,9 +507,11 @@ rt_delta() {
     t=$(printf '%s' "$rec" | rt_classify --config-text "$cfg" | cut -f1)
     [ "$t" = full ] || continue
     # A full-tier record: each of its names already in the reviewed diff was
-    # reviewed at full depth; any other name is new.
+    # reviewed at full depth, and a name outside the PR's own diff came from
+    # the base branch; any other name is new.
     while IFS= read -r p; do
       [ -n "$p" ] || continue
+      printf '%s' "$cur" | jq -e --arg p "$p" 'any(.[]; . == $p)' >/dev/null 2>&1 || continue
       printf '%s' "$old" | jq -e --arg p "$p" 'any(.[]; . == $p)' >/dev/null 2>&1 || fresh+=("$p")
     done < <(printf '%s' "$rec" | jq -r '.[0] | .previous_filename, .filename | select(type == "string" and . != "")' 2>/dev/null | tr -d '\r')
   done
