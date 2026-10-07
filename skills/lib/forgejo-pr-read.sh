@@ -20,33 +20,41 @@
 #
 # Usage (source, then call wrappers):
 #   source "${CLAUDE_PLUGIN_ROOT}/skills/lib/forgejo-pr-read.sh"
-#   HOST_KIND="$(fpr_host_kind)"   # "github" | "forgejo" | "unknown"
+#   HOST_KIND="$(fpr_host_kind)"   # "github" | "forgejo" | "azdo" | "unknown"
 #
 #   # List open PRs — JSON array output:
 #   #   GitHub path  → gh pr list --state open --json number,title,...
 #   #   Forgejo path → forgejo-adapter.sh list-prs <origin-url>
+#   #   Azure DevOps → azdo-adapter.sh list-prs <origin-url> (issue #2946):
+#   #                  [{number, headRefName}] only, fail-closed on truncation
 #   fpr_list [--json <fields>]
 #
 #   # View a single PR — JSON object output:
 #   #   GitHub path  → gh pr view <N> --json <fields>
 #   #   Forgejo path → forgejo-adapter.sh get-pr <origin-url> <N>
+#   #   Azure DevOps → azdo-adapter.sh get-pr, gh-shaped, --json/--jq honoured
 #   fpr_view <pr-index> [--json <fields>]
 #
 #   # Get PR diff — unified diff on stdout:
 #   #   GitHub path  → gh pr diff <N>
 #   #   Forgejo path → forgejo-adapter.sh pr-diff <origin-url> <N>
-#   fpr_diff <pr-index>
+#   #   Azure DevOps → azdo-adapter.sh pr-diff (git base...head, head-pinned),
+#   #                  or pr-files with --name-only (#2985)
+#   fpr_diff <pr-index> [--name-only]
 #
 #   # Get PR checks / commit statuses — JSON array output:
 #   #   GitHub path  → gh pr checks <N> --json ...
 #   #   Forgejo path → forgejo-adapter.sh pr-statuses <origin-url> <sha>
 #   #                  (sha resolved from `fpr_view` .head.sha)
+#   #   Azure DevOps → azdo-adapter.sh pr-ci: the SPEC-110 DP5 reduction; the
+#   #                  last row `sge/ci-gate` is FAILURE unless green (DR8)
 #   fpr_checks <pr-index>
 #
 #   # Open-PR head branches, FAIL-CLOSED (for destructive callers, e.g.
 #   # tidy-worktrees' "open-PR branches are always preserved" rule):
 #   #   GitHub path  → gh pr list --state open --limit N --json number,headRefName
 #   #   Forgejo path → forgejo-adapter.sh list-prs <origin-url>
+#   #   Azure DevOps → azdo-adapter.sh list-prs <origin-url> (issue #2946)
 #   # Prints "<number><TAB><head-branch>" per open PR. Exits non-zero when the
 #   # list cannot be obtained OR may be truncated — the caller MUST then refuse
 #   # to delete anything (an empty/partial list reads every branch as "not open").
@@ -58,6 +66,9 @@
 #   GITEA_TOKEN           — required for Forgejo paths (see forgejo-adapter.sh).
 #   SGE_FORGEJO_HOSTS /
 #   SGE_FORGEJO_DEFAULT_HOST — host allow-list (see forgejo-adapter.sh / ADR-0010).
+#   SGE_AZDO_TOKEN        — required for Azure DevOps paths; SGE_AZDO_ORG
+#                           (optional, must match the origin's org) and the
+#                           SGE_AZDO_HOSTS allow-list — see azdo-adapter.sh.
 #   GH_REPO               — optional; overrides the origin-derived repo slug for
 #                           GitHub paths (standard SGE convention, #662).
 #
@@ -69,6 +80,8 @@ set -euo pipefail
 _FPR_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _FPR_ADAPTER="${CLAUDE_PLUGIN_ROOT:-$_FPR_SCRIPT_DIR/../..}/scripts/forgejo-adapter.sh"
 _FPR_WRC="${CLAUDE_PLUGIN_ROOT:-$_FPR_SCRIPT_DIR/../..}/scripts/with-repo-cwd.sh"
+_FPR_AZDO_ADAPTER="${CLAUDE_PLUGIN_ROOT:-$_FPR_SCRIPT_DIR/../..}/scripts/azdo-adapter.sh"
+_FPR_AZDO_SHIM="$_FPR_SCRIPT_DIR/azdo-gh-pr.sh"
 
 _fpr_err()  { printf 'forgejo-pr-read: error: %s\n' "$*" >&2; }
 
@@ -77,7 +90,7 @@ _fpr_err()  { printf 'forgejo-pr-read: error: %s\n' "$*" >&2; }
 _FPR_HOST_KIND=""
 
 # fpr_host_kind — print the host kind for the current repo's origin:
-#   "github" | "forgejo" | "unknown"
+#   "github" | "forgejo" | "azdo" | "unknown"
 # Uses with-repo-cwd.sh's canonical classifier (the single source of truth for
 # the SGE_FORGEJO_HOSTS / SGE_GITHUB_HOSTS allow-list).
 fpr_host_kind() {
@@ -112,6 +125,11 @@ fpr_list() {
       [ -f "$_FPR_ADAPTER" ] || { _fpr_err "forgejo-adapter.sh not found at $_FPR_ADAPTER"; return 1; }
       bash "$_FPR_ADAPTER" list-prs "$origin"
       ;;
+    azdo)
+      local origin; origin="$(_fpr_origin_url)"
+      [ -f "$_FPR_AZDO_ADAPTER" ] || { _fpr_err "azdo-adapter.sh not found at $_FPR_AZDO_ADAPTER"; return 1; }
+      bash "$_FPR_AZDO_ADAPTER" list-prs "$origin"
+      ;;
     *)
       _fpr_err "unknown host kind '$host' — cannot list PRs (add host to SGE_FORGEJO_HOSTS or SGE_GITHUB_HOSTS)"
       return 1
@@ -138,6 +156,10 @@ fpr_view() {
       [ -f "$_FPR_ADAPTER" ] || { _fpr_err "forgejo-adapter.sh not found at $_FPR_ADAPTER"; return 1; }
       bash "$_FPR_ADAPTER" get-pr "$origin" "$pr"
       ;;
+    azdo)
+      # gh-shaped object; --json/--jq projected exactly as gh does (#2985).
+      ( . "$_FPR_AZDO_SHIM" && _sge_ghpr_azdo view "$pr" "$@" )
+      ;;
     *)
       _fpr_err "unknown host kind '$host' — cannot view PR $pr"
       return 1
@@ -161,6 +183,11 @@ fpr_diff() {
       local origin; origin="$(_fpr_origin_url)"
       [ -f "$_FPR_ADAPTER" ] || { _fpr_err "forgejo-adapter.sh not found at $_FPR_ADAPTER"; return 1; }
       bash "$_FPR_ADAPTER" pr-diff "$origin" "$pr"
+      ;;
+    azdo)
+      # Unified diff (base...head, head pinned to the PR) or, with
+      # --name-only, the latest iteration's changed paths (#2985).
+      ( . "$_FPR_AZDO_SHIM" && _sge_ghpr_azdo diff "$pr" "${@:2}" )
       ;;
     *)
       _fpr_err "unknown host kind '$host' — cannot fetch diff for PR $pr"
@@ -276,6 +303,17 @@ fpr_checks() {
       bash "$_FPR_ADAPTER" pr-statuses "$origin" "$sha" \
         | jq "[.[] | ${_FPR_STATUS_NORMALISE}]"
       ;;
+    azdo)
+      # SPEC-110 DP5: builds x policy evaluations x votes reduced to one
+      # tri-state; the rows end with `sge/ci-gate`, FAILURE for BOTH
+      # not-green states, so fpr_check_is_failing and every FAILURE-counting
+      # consumer read indeterminate as failing, never as green (DR8).
+      command -v jq >/dev/null 2>&1 || { _fpr_err "jq is required for fpr_checks on Azure DevOps"; return 1; }
+      local origin ci; origin="$(_fpr_origin_url)"
+      [ -f "$_FPR_AZDO_ADAPTER" ] || { _fpr_err "azdo-adapter.sh not found at $_FPR_AZDO_ADAPTER"; return 1; }
+      ci="$(bash "$_FPR_AZDO_ADAPTER" pr-ci "$origin" "$pr")" || { _fpr_err "could not read CI state for PR $pr (Azure DevOps)"; return 1; }
+      printf '%s' "$ci" | jq '.checks'
+      ;;
     *)
       _fpr_err "unknown host kind '$host' — cannot fetch checks for PR $pr"
       return 1
@@ -332,7 +370,7 @@ fpr_check_is_failing() {
 # to decide which branches are "in flight" and therefore never deleted. A
 # silently empty or truncated list would classify a live PR's branch as safe to
 # remove, so every uncertainty is an error, never an empty success:
-#   - unknown host (not GitHub, not an allow-listed Forgejo)   → exit 1
+#   - unknown host (not GitHub/Azure DevOps/allow-listed Forgejo) → exit 1
 #   - gh / adapter call fails                                   → exit 1
 #   - payload is not a JSON array                               → exit 1
 #   - payload length reaches the page cap (possible truncation) → exit 1
@@ -341,6 +379,8 @@ fpr_check_is_failing() {
 # Page caps: GitHub asks for SGE_OPEN_PR_LIMIT (default 1000) — `gh pr list`'s
 # own default of 30 silently truncated busy repos. Forgejo's adapter list-prs
 # returns at most 50 (page=1&limit=50); a full page is treated as truncated.
+# Azure DevOps' adapter list-prs paginates itself and exits non-zero when its
+# own page cap may have truncated the list (issue #2946), so no cap here.
 fpr_open_pr_heads() {
   command -v jq >/dev/null 2>&1 || { _fpr_err "jq is required for fpr_open_pr_heads"; return 1; }
   local host raw cap jqf n origin
@@ -361,6 +401,14 @@ fpr_open_pr_heads() {
         || { _fpr_err "forgejo-adapter.sh list-prs failed — open-PR set unknown"; return 1; }
       jqf='.[] | "\(.number)\t\(.head.ref)"'
       ;;
+    azdo)
+      cap=""
+      origin="$(_fpr_origin_url)" || return 1
+      [ -f "$_FPR_AZDO_ADAPTER" ] || { _fpr_err "azdo-adapter.sh not found at $_FPR_AZDO_ADAPTER"; return 1; }
+      raw="$(bash "$_FPR_AZDO_ADAPTER" list-prs "$origin")" \
+        || { _fpr_err "azdo-adapter.sh list-prs failed or may be truncated — open-PR set unknown"; return 1; }
+      jqf='.[] | "\(.number)\t\(.headRefName)"'
+      ;;
     *)
       _fpr_err "unknown host kind '$host' — open-PR set unknown (add host to SGE_FORGEJO_HOSTS or SGE_GITHUB_HOSTS)"
       return 1
@@ -368,7 +416,8 @@ fpr_open_pr_heads() {
   esac
   n="$(printf '%s' "$raw" | jq -e 'if type == "array" then length else error("not an array") end' 2>/dev/null)" \
     || { _fpr_err "open-PR payload is not a JSON array — open-PR set unknown"; return 1; }
-  if [ "$n" -ge "$cap" ]; then
+  n="${n%$'\r'}"
+  if [ -n "$cap" ] && [ "$n" -ge "$cap" ]; then
     _fpr_err "open-PR list hit the page cap ($n >= $cap) — may be truncated; open-PR set unknown"
     return 1
   fi

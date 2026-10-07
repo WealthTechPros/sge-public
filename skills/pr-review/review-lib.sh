@@ -130,6 +130,10 @@
 #                                   COMMENT) as a REAL App-authored review when in
 #                                   app mode, else the PAT path with the
 #                                   self-authored --comment fallback (#862).
+#   rl_post_verdict_comment <pr> [body]
+#                                   post the verdict as an ISSUE COMMENT carrying
+#                                   the review-verdict marker -- the advisory,
+#                                   draft and hold route (sge#2808).
 #                                   Refuses (exit 6) a verdict declaring
 #                                   findings whose findings_comment is not
 #                                   `inline` or a verified URL (#1858)
@@ -220,8 +224,28 @@
 
 # Canonical security-sensitive path list — the ONE place it lives (SKILL.md
 # refers here; issue #820 deduped the twice-listed globs). Glob form:
-#   **/auth/**, **/middleware/**, **/*token*, **/*secret*, **/config/**,
-#   **/crypto*, any DB migration, **/security/**, **/secrets/**
+#   **/*auth*, **/middleware/**, **/*token*, **/*secret*, **/config/**,
+#   **/crypto*, any DB migration, **/security/**, **/secrets/**, **/*login*,
+#   **/*session*, **/*jwt*, **/*password*, **/*passwd*, **/*credential*,
+#   **/*permission*, **/*rbac*, and `acl` as a path segment or word
+#   (acl/, acls/, user_acl.rb, acl.ts — not oracle/ or miracle.ts), plus
+#   camelCase Acl (AclService.ts, UserAcl.ts, UserAclService.ts — not
+#   dataclasses.py; a leading-segment acl*, a trailing *acl/*acls, or acl
+#   followed by a known suffix like Service/Manager/Policy).
+#   issue #2928 adds: **/*cookie*, **/*csrf*, cors (segment-start: cors.ts,
+#   CorsPolicy — not corset), **/*oidc*, **/*saml*, sso (segment-start, not
+#   lesson/associate/ssot), **/*encrypt*, **/*decrypt*, **/*cipher*, cert as
+#   a word/segment or certif* (not concert/uncertain), tls/mtls at a segment
+#   start, **/*webhook*, dotenv files ([.]env, [.]env.*), and .github/workflows/.
+#   Plus the gate's own enforcement files, so a change that narrows this
+#   regex or guts a guard always gets a security review (#2921): **/hooks/**,
+#   hooks.json, *intake-check*, *intake-marker-guard*, review-lib.sh.
+#
+# Match it CASE-INSENSITIVELY (grep -iE) — every consumer does (issue #2913:
+# `Auth/`, `OAuthCallback`, `SECURITY/` were missed by a case-sensitive grep).
+# `auth` matches anywhere in the path (oauth, Auth/, authz), which also catches
+# e.g. `author` — a false positive only costs a security pass, a false negative
+# skips one.
 #
 # issue #1991: `secret` was relied on as a literal-substring proxy for a
 # `security/` directory, but "security" does not contain "secret" as a
@@ -230,11 +254,25 @@
 # security-sensitive. Added explicit (^|/)security/ and (^|/)secrets/
 # alternatives rather than relying on substring luck.
 rl_security_glob_regex() {
-  printf '%s\n' '(^|/)auth/|(^|/)middleware/|token|secret|(^|/)config/|(^|/)crypto|migrat|(^|/)security/|(^|/)secrets/'
+  printf '%s\n' 'auth|(^|/)middleware/|token|secret|(^|/)config/|(^|/)crypto|migrat|(^|/)security/|(^|/)secrets/|login|session|jwt|passw(or)?d|credential|permission|rbac|(^|[^[:alnum:]])acl|acls?([^[:alnum:]]|$)|acls?(service|manager|polic|rule|entr|list|check|guard|provider|store|repo|config|util|helper|handler|middleware|filter|resolver|validator|evaluator)|cookie|csrf|(^|[^[:alnum:]])cors([^[:alnum:]]|$|config|policy|options|origin|handler|middleware)|oidc|saml|(^|[^[:alnum:]])sso([^[:alnum:]]|$|[a-su-z])|encrypt|decrypt|cipher|(^|[^[:alnum:]])certs?([^[:alnum:]]|$)|certif|(^|[^[:alnum:]])m?tls|webhook|(^|/)[.]env([.]|$)|(^|/)[.]github/workflows/|(^|/)hooks/|hooks[.]json|intake-check|intake-marker-guard|review-lib[.]sh'
 }
+
+# Host dispatch for PR reads (SPEC-110 S4, issue #2985): `sge_gh_pr` runs
+# `gh pr <args>` unchanged on every host except Azure Repos, where it emulates
+# the read over scripts/azdo-adapter.sh. Without the shim (a copied lib), it is
+# plain `gh pr`, exactly the pre-#2985 behaviour.
+# shellcheck source=skills/lib/azdo-gh-pr.sh
+if [ -f "$(dirname "${BASH_SOURCE[0]}")/../lib/azdo-gh-pr.sh" ]; then
+  . "$(dirname "${BASH_SOURCE[0]}")/../lib/azdo-gh-pr.sh"
+else
+  sge_gh_pr() { gh pr "$@"; }
+  sge_pr_host() { printf 'unknown'; }
+fi
 
 # Internal: resolve owner/repo once per call (GH_REPO wins — #662).
 rl__repo() {
+  # Azure Repos (#2985): the origin's org/project/repo; gh cannot name it.
+  if [ "$(sge_pr_host)" = azdo ]; then sge_repo_slug; return; fi
   printf '%s\n' "${GH_REPO:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"
 }
 
@@ -267,11 +305,31 @@ rl_scratch_file() {
 # /security-review trigger) must treat that as unverifiable, never as "no
 # security-sensitive files". The gh call's status is captured before the grep
 # so grep's no-match exit 1 is never conflated with an API failure.
+#
+# `--since <sha>` (a quick re-review, sge#2980): only the files the commits
+# since <sha> touch (renames count both names); when that delta cannot be read
+# (not a full SHA, not an ancestor of the head, unreadable, or at the 300-file
+# compare cap) it falls back to the whole PR, never to "no files".
 rl_security_files() {
-  local pr="$1" repo files
+  local pr="$1" repo files since="" head delta
+  [ "${2:-}" = "--since" ] && since=$(printf '%s' "${3:-}" | tr 'A-F' 'a-f')
   repo=$(rl__repo) || return 1
-  files=$(gh pr diff "$pr" --repo "$repo" --name-only) || return 1
-  printf '%s\n' "$files" | grep -E "$(rl_security_glob_regex)" || true
+  if [[ "$since" =~ ^[0-9a-f]{40}$ ]]; then
+    head=$(sge_gh_pr view "$pr" --repo "$repo" --json headRefOid 2>/dev/null | jq -r '.headRefOid // ""' 2>/dev/null | tr -d '\r' | tr 'A-F' 'a-f')
+    if [[ "$head" =~ ^[0-9a-f]{40}$ ]]; then
+      delta=$(gh api "repos/$repo/compare/$since...$head" 2>/dev/null \
+                | jq -r 'if type == "object" and .status == "ahead" and (.files | type) == "array" and (.files | length) < 300
+                         then (.files[] | .previous_filename, .filename | select(type == "string" and . != "")), "#ok" else empty end' 2>/dev/null \
+                | tr -d '\r')
+      if [ "${delta##*$'\n'}" = "#ok" ] || [ "$delta" = "#ok" ]; then
+        files=$(printf '%s\n' "$delta" | grep -v '^#ok$')
+        printf '%s\n' "$files" | grep -iE "$(rl_security_glob_regex)" || true
+        return 0
+      fi
+    fi
+  fi
+  files=$(sge_gh_pr diff "$pr" --repo "$repo" --name-only) || return 1
+  printf '%s\n' "$files" | grep -iE "$(rl_security_glob_regex)" || true
 }
 
 # Refusal-stub pattern (#884). Copilot sometimes posts a real COMMENTED review
@@ -349,7 +407,7 @@ rl_diff_weighted_lines() {
   repo=$(rl__repo) || return 1
   raw=$(gh api "repos/$repo/pulls/$pr" --jq '.additions + .deletions') || return 1
   re=$(rl_test_doc_glob_regex)
-  testdoc=$(RE="$re" gh pr view "$pr" --repo "$repo" --json files --jq \
+  testdoc=$(RE="$re" sge_gh_pr view "$pr" --repo "$repo" --json files --jq \
     '([.files[] | select(.path | test(env.RE)) | (.additions + .deletions)] | add // 0)' 2>/dev/null)
   case "$testdoc" in
     ''|*[!0-9]*) printf '%s %s\n' "$raw" "$raw"; return 0 ;;
@@ -425,7 +483,7 @@ rl_diff_trivial() {
   head=$(gh api "repos/$repo/pulls/$pr" --jq '.head.sha' 2>/dev/null) || { echo 0; return 0; }
   [ -n "$base" ] && [ -n "$head" ] || { echo 0; return 0; }
 
-  files=$(gh pr diff "$pr" --repo "$repo" --name-only 2>/dev/null) || { echo 0; return 0; }
+  files=$(sge_gh_pr diff "$pr" --repo "$repo" --name-only 2>/dev/null) || { echo 0; return 0; }
   [ -n "$files" ] || { echo 0; return 0; }
 
   # Read the changed-file list into an array so the `git diff` pathspec is
@@ -459,7 +517,7 @@ EOF
   # Test 2: single-file lockfile-only change with a passing check.
   if [ "$(printf '%s\n' "$files" | grep -c .)" = "1" ] \
       && printf '%s' "$files" | grep -qE "$(rl_lockfile_glob_regex)"; then
-    checks=$(gh pr checks "$pr" --repo "$repo" --json state --jq \
+    checks=$(sge_gh_pr checks "$pr" --repo "$repo" --json state --jq \
       '[.[] | select(.state == "SUCCESS")] | length' 2>/dev/null) || checks=""
     if [ -n "$checks" ] && [ "$checks" -gt 0 ]; then
       echo 1
@@ -523,7 +581,7 @@ rl_diff_generated() {
   [ -n "$base_ref" ] && [ -n "$default_branch" ] && [ "$base_ref" = "$default_branch" ] \
     || { echo 0; return 0; }
 
-  files=$(gh pr diff "$pr" --repo "$repo" --name-only 2>/dev/null) || { echo 0; return 0; }
+  files=$(sge_gh_pr diff "$pr" --repo "$repo" --name-only 2>/dev/null) || { echo 0; return 0; }
   [ -n "$files" ] || { echo 0; return 0; }
 
   # HIGH RISK ALWAYS WINS: any security-sensitive path in the diff -> never
@@ -576,10 +634,10 @@ EOF
 #
 # ANCHORING (#2227 review blocker): every directory alternative is anchored
 # `(^|/)`, NOT a bare `^`. A repo can host more than one Claude Code root — this
-# one does: `platform/` carries its own `platform/.claude/agents/*.md`,
-# `platform/.claude/skills/*/SKILL.md` (59 tracked files) and
-# `platform/AGENTS.md`. Root-anchoring matched only the top-level copies, so a
-# PR editing `platform/.claude/agents/security-auditor.md` — the security
+# one did until #2899 deleted its hosted-app subtree, which carried its own
+# `.claude/agents/*.md`, `.claude/skills/*/SKILL.md` (59 tracked files) and
+# `AGENTS.md`. Root-anchoring matched only the top-level copies, so a
+# PR editing `<subdir>/.claude/agents/security-auditor.md` — the security
 # reviewer's own instructions — classified as prose and would have merged with
 # no review at all. `(^|/)` still refuses false positives: `myskills/x.md` and
 # `docs/specs-old/x.md` need a `/` or string start immediately before the
@@ -638,7 +696,7 @@ rl_diff_prose() {
   local pr="$1" repo files prev f sec
   repo=$(rl__repo) || { echo 0; return 0; }
 
-  files=$(gh pr diff "$pr" --repo "$repo" --name-only 2>/dev/null) || { echo 0; return 0; }
+  files=$(sge_gh_pr diff "$pr" --repo "$repo" --name-only 2>/dev/null) || { echo 0; return 0; }
   [ -n "$files" ] || { echo 0; return 0; }
 
   # RENAMES (#2227 review). A name-only diff with rename detection on lists only
@@ -658,7 +716,7 @@ rl_diff_prose() {
   # rate-limited path, and — the actual reason — one consistent snapshot: two
   # fetches straddling a push would decide allow/deny on one file set and the
   # security guard on another.
-  sec=$(printf '%s\n' "$files" | grep -E "$(rl_security_glob_regex)") || sec=""
+  sec=$(printf '%s\n' "$files" | grep -iE "$(rl_security_glob_regex)") || sec=""
   [ -z "$sec" ] || { echo 0; return 0; }
 
   local -a filesarr=()
@@ -716,24 +774,68 @@ rl_control_bearing_glob_regex() {
 # broken gh/network can't reliably run the (expensive) behavioural tier
 # either, so failing to "not detected" and falling back to normal-tier
 # review is the only direction that is actually safe under an error).
-rl_diff_control_bearing() {
-  local pr="$1" repo files prev f
-  repo=$(rl__repo) || { echo 0; return 0; }
+#
+# Narrowed (sge#2980): it fires only on a change to an EXISTING enforcement
+# script -- a modified, removed or renamed one (a rename counts both names;
+# a record with no status counts as existing). It does NOT fire on:
+#   - a NEW file (`added`): a new gate has no prior behaviour to defeat, and
+#     the review of the file itself is the normal code review;
+#   - a test path (rl_control_bearing_test_path_regex): a test of a gate is
+#     not the gate's logic;
+#   - a workflow proven test/lint-only (`review-tier.sh ci-test-only`): a new
+#     or edited test-runner workflow is not an enforcement script.
+# `--since <sha>` (a quick re-review, sge#2980) counts only the commits since
+# <sha>; when that delta cannot be read (not a full SHA, not an ancestor of
+# the head, unreadable, or at the 300-file compare cap) it uses the whole PR.
+rl_control_bearing_test_path_regex() {
+  printf '%s\n' \
+    '(^|/)(tests?|__tests__|__fixtures__|fixtures)/|\.(test|spec)\.[A-Za-z0-9]+$|_test\.(py|go|sh)$|(^|/)test_[^/]*\.py$|\.bats$'
+}
 
-  files=$(gh pr diff "$pr" --repo "$repo" --name-only 2>/dev/null) || { echo 0; return 0; }
-  [ -n "$files" ] || { echo 0; return 0; }
+rl_diff_control_bearing() {
+  local pr="$1" repo json since="" head delta f
+  [ "${2:-}" = "--since" ] && since=$(printf '%s' "${3:-}" | tr 'A-F' 'a-f')
+  repo=$(rl__repo) || { echo 0; return 0; }
+  [ -n "$repo" ] || { echo 0; return 0; }
+
+  json=$(gh api "repos/$repo/pulls/$pr/files?per_page=100" --paginate 2>/dev/null \
+           | jq -cs 'add // [] | if type == "array" and all(.[]; type == "object") then . else error end' 2>/dev/null) \
+    || { echo 0; return 0; }
+  [ -n "$json" ] || { echo 0; return 0; }
+
+  if [[ "$since" =~ ^[0-9a-f]{40}$ ]]; then
+    head=$(sge_gh_pr view "$pr" --repo "$repo" --json headRefOid 2>/dev/null | jq -r '.headRefOid // ""' 2>/dev/null | tr -d '\r' | tr 'A-F' 'a-f')
+    if [[ "$head" =~ ^[0-9a-f]{40}$ ]]; then
+      delta=$(gh api "repos/$repo/compare/$since...$head" 2>/dev/null \
+                | jq -c 'if type == "object" and .status == "ahead" and (.files | type) == "array"
+                           and (.files | length) < 300 and all(.files[]; type == "object")
+                         then .files else null end' 2>/dev/null)
+      [ -n "$delta" ] && [ "$delta" != "null" ] && json="$delta"
+    fi
+  fi
+
+  local ci
+  ci=$(printf '%s' "$json" | bash "$(dirname "${BASH_SOURCE[0]}")/review-tier.sh" ci-test-only 2>/dev/null \
+         | jq -Rsc 'split("\n") | map(select(. != ""))' 2>/dev/null) || ci='[]'
+  [ -n "$ci" ] || ci='[]'
 
   # Renames count as a touch to both paths — same rationale as rl_diff_prose:
   # a control script renamed to something innocuous-looking must not lose its
   # classification.
-  prev=$(gh api "repos/$repo/pulls/$pr/files" --paginate \
-           --jq '.[].previous_filename // empty' 2>/dev/null) || { echo 0; return 0; }
-  [ -z "$prev" ] || files=$(printf '%s\n%s' "$files" "$prev")
+  local files re tre
+  files=$(printf '%s' "$json" | jq -r --argjson ci "$ci" '
+    .[] | . as $r
+    | if ($r.status == "added") and (($r.previous_filename // "") == "") then empty
+      else (($r.previous_filename | select(. != $r.filename)),
+            (if any($ci[]; . == $r.filename) then empty else $r.filename end))
+      end
+    | select(type == "string" and . != "")' 2>/dev/null | tr -d '\r') || { echo 0; return 0; }
 
-  local re
   re=$(rl_control_bearing_glob_regex)
+  tre=$(rl_control_bearing_test_path_regex)
   while IFS= read -r f; do
     [ -n "$f" ] || continue
+    printf '%s' "$f" | grep -qiE "$tre" && continue
     if printf '%s' "$f" | grep -qiE "$re"; then echo 1; return 0; fi
   done <<EOF
 $files
@@ -772,7 +874,7 @@ rl_diff_oracle_bearing() {
   local pr="$1" repo files prev f
   repo=$(rl__repo) || { echo 0; return 0; }
 
-  files=$(gh pr diff "$pr" --repo "$repo" --name-only 2>/dev/null) || { echo 0; return 0; }
+  files=$(sge_gh_pr diff "$pr" --repo "$repo" --name-only 2>/dev/null) || { echo 0; return 0; }
   [ -n "$files" ] || { echo 0; return 0; }
 
   # Renames count — an oracle file renamed to something innocuous must not
@@ -815,7 +917,7 @@ rl__findings_diff_paths() {   # <pr> [repo] -> the PR's changed-file set (incl. 
   # same-repo invocation where cwd IS the target.
   local pr="$1" repo="${2:-}" files prev rc
   [ -n "$repo" ] || repo=$(rl__repo) || return 1
-  files=$(gh pr diff "$pr" --repo "$repo" --name-only 2>/dev/null) || return 1
+  files=$(sge_gh_pr diff "$pr" --repo "$repo" --name-only 2>/dev/null) || return 1
   [ -n "$files" ] || return 1
   # Distinguish "no renames in this PR" from "could not determine renames"
   # (#2228 review): degrading a failed lookup to "renamed nothing" would make a
@@ -1041,6 +1143,10 @@ rl_lane_manifest_active() {
 rl_head_sha() {
   local pr="$1" repo
   repo=$(rl__repo) || return 1
+  if [ "$(sge_pr_host)" = azdo ]; then
+    sge_gh_pr view "$pr" --json headRefOid --jq .headRefOid
+    return
+  fi
   gh api "repos/$repo/pulls/$pr" --jq .head.sha
 }
 
@@ -1099,7 +1205,7 @@ rl_idempotency_check() {
 # One-line PR state for the concurrency/idempotency short-circuit (#699).
 rl_pr_state() {
   local pr="$1"
-  gh pr view "$pr" --json state,isDraft,headRefOid,labels \
+  sge_gh_pr view "$pr" --json state,isDraft,headRefOid,labels \
     --jq '{state, draft: .isDraft, head: .headRefOid, labels: [(.labels // [])[].name]}'
 }
 
@@ -1119,7 +1225,7 @@ rl_pr_state() {
 # Issue #2188: the last-10-comments window repeatedly false-positived on the
 # review bot's OWN old finding prose (a security-Major finding whose BODY TEXT
 # discussed "human sign-off ... pending" as its subject matter, not an actual
-# pending-sign-off marker for this PR) — observed on practice-portal#124 across
+# pending-sign-off marker for this PR) — observed on a product repo's #124 across
 # 3 consecutive runs, forcing REVIEW_MODE=advisory even after the flagged
 # content was independently fixed. Two exclusions applied before the window
 # slice, plus one pattern narrowing (all three iterated across PR #2195 review
@@ -1163,6 +1269,14 @@ rl_pr_state() {
 #       #862). Both exclusions run BEFORE the `.[-10:]` window slice (not
 #       after) so an excluded pipeline comment never consumes a slot a
 #       genuine human hold comment could otherwise occupy.
+#   (d) the `.[-10:]` tail window applies ONLY to untrusted candidates
+#       (sge#2780). Every remaining OWNER/MEMBER/COLLABORATOR comment is
+#       scanned regardless of age, so 10+ later filler comments (trusted or
+#       not) can never push a trusted sign-off-pending note out of the scan,
+#       and trusted comments never consume an untrusted window slot. The
+#       window still bounds untrusted authors. Every fail-closed path is
+#       unchanged: a gh error, or a jq failure on the candidate stream,
+#       returns hold:signoff-check-failed.
 #   (c) the "sign-off ... pending" pattern is word-boundaried only — "pending"
 #       no longer matches "impending"/"spending"/"depending". No proximity
 #       bound: an earlier `.{0,40}` same-line bound was found (PR #2195
@@ -1201,8 +1315,9 @@ rl_hold_check() {
   local bot_re; bot_re=$(rl_bot_login_regex)
   # --paginate (sge#2770 review): the scan gates a policy hold release, so a
   # human's comment past the first page must still be seen. Each page emits
-  # its candidate bodies one JSON string per line; the last 10 across ALL
-  # pages are then tested (a gh failure is still unverifiable: fail closed).
+  # one JSON object per candidate ({t: trusted?, b: body}); every trusted
+  # candidate plus the last 10 untrusted ones across ALL pages are then tested
+  # (sge#2780; a gh or jq failure is still unverifiable: fail closed).
   local cand
   cand=$(BOT_RE="$bot_re" PR_NUM="$pr" gh api --paginate "repos/$repo/issues/$pr/comments" \
     --jq '.[]
@@ -1212,10 +1327,17 @@ rl_hold_check() {
                    and ((.body // "") | split("\n") | any(test("^## *PR Review: *#" + env.PR_NUM + "\\b|^```+sge-verdict"; "i"))))
                | not
              )
-           | (.body // "") | tojson' 2>/dev/null) \
+           | {t: (((.author_association // "") | ascii_upcase) as $a | ($a == "OWNER" or $a == "MEMBER" or $a == "COLLABORATOR")),
+              b: (.body // "")}
+           | tojson' 2>/dev/null) \
     || { echo "hold:signoff-check-failed"; return 0; }
-  sign=$(printf '%s\n' "$cand" | { grep -v '^[[:space:]]*$' || true; } | tail -n 10 | jq -rs '
-          [ .[] | select(type == "string")
+  # sge#2780: every trusted (OWNER/MEMBER/COLLABORATOR) candidate is scanned;
+  # the `.[-10:]` tail window bounds ONLY untrusted candidates, so no volume of
+  # later comments can push a trusted sign-off-pending note out of the scan.
+  sign=$(printf '%s\n' "$cand" | { grep -v '^[[:space:]]*$' || true; } | jq -rs '
+          [ .[] | select(type == "object") ] as $all
+          | ([ $all[] | select(.t == true) ] + ([ $all[] | select(.t != true) ] | .[-10:]))
+          | [ .[] | .b | select(type == "string")
            | select(test("\\bpending\\b.*\\bsign.?off\\b|\\bsign.?off\\b.*\\bpending\\b|\\bapprov\\w*\\b.*\\bpending\\b"; "i"))
           ] | first // ""' 2>/dev/null) \
     || { echo "hold:signoff-check-failed"; return 0; }
@@ -1331,7 +1453,7 @@ rl_changes_requested() {
 rl_failing_checks() {
   local pr="$1" repo
   repo=$(rl__repo) || return 1
-  gh pr checks "$pr" --repo "$repo" --json state \
+  sge_gh_pr checks "$pr" --repo "$repo" --json state \
     --jq '[.[] | select(.state == "FAILURE" or .state == "TIMED_OUT"
                         or .state == "CANCELLED" or .state == "ACTION_REQUIRED"
                         or .state == "STARTUP_FAILURE" or .state == "STALE")] | length' 2>/dev/null
@@ -1345,6 +1467,12 @@ rl_failing_checks() {
 rl_unresolved_threads() {
   local pr="$1" repo unresolved='[]' cursor="" page
   repo=$(rl__repo) || return 1
+  # Azure Repos (#2985): active/pending PR threads in the same node shape,
+  # fail-closed on any read error exactly like the GraphQL walk below.
+  if [ "$(sge_pr_host)" = azdo ]; then
+    bash "$_SGE_GHPR_AA" pr-threads "$(git remote get-url origin 2>/dev/null)" "$pr"
+    return
+  fi
   # Cheap pre-check (issue #973): most PRs carry zero review threads at all.
   # A single `first:1 { totalCount }` query is ~1 API call vs. the full
   # cursor-paginated walk below; when totalCount is exactly 0 there is
@@ -1560,7 +1688,7 @@ rl_attest_pending() {
 # no App credentials are present the helpers fall back automatically (and
 # loudly) to the current PAT/bot path.
 #
-# SECURITY: every credential is read from the environment ONLY (Doppler-style);
+# SECURITY: every credential is read from the environment ONLY (secrets-manager-injected);
 # nothing is hardcoded. Recognised vars (any one route enables App mode):
 #   SGE_REVIEW_APP_TOKEN            a pre-minted installation access token
 #                                   (e.g. from actions/create-github-app-token) --
@@ -1924,6 +2052,14 @@ rl_post_findings_comment() {
     body=$(cat "$src" 2>/dev/null) || return 1
   fi
   [ -n "${body//[$' \t\r\n']/}" ] || return 1
+  # The findings text is LLM-written and posts under the review identity. A
+  # body whose FIRST line is the review-verdict marker would be read as a
+  # verdict node by every gate reader (gate-labels.sh / gate_labels.py), so a
+  # quoted fence at its end could stand in for a verdict -- refuse it; the
+  # caller folds the findings inline instead (PR #2800 skeptic review round 2).
+  case "$(printf '%s\n' "$body" | head -n 1 | tr -d '\r')" in
+    '<!-- sge-review-verdict -->'*) return 1 ;;
+  esac
   resp=$(rl_gh api --method POST "repos/${repo}/issues/${pr}/comments" -f body="$body" 2>/dev/null) || return 1
   cid=$(printf '%s' "$resp" | jq -r '.id // empty' 2>/dev/null)
   [[ "$cid" =~ ^[0-9]+$ ]] || return 1
@@ -2021,6 +2157,70 @@ rl_verdict_fill_session() {
     { print }'
 }
 
+# rl_verdict_field <body> <key> -- the value of the single `<key>:` line in the
+# body's FIRST sge-verdict block ("" when absent or repeated). The key matches
+# case-insensitively (`Commit:` is `commit:`), as the daemon's parsers read it.
+# UNTRUSTED text: printed, never evaluated.
+rl_verdict_field() {
+  printf '%s\n' "$1" | tr -d '\r' | awk -v k="$2" '
+    !done && /^[ \t]*```+sge-verdict[ \t]*$/ { inb = 1; next }
+    inb && /^[ \t]*```+[ \t]*$/ { inb = 0; done = 1; next }
+    inb && tolower($0) ~ "^[ \t]*" tolower(k) "[ \t]*:" { v = $0; sub(/^[^:]*:[ \t]*/, "", v); sub(/[ \t]+$/, "", v); n++ }
+    END { if (n == 1) print v }'
+}
+
+# The review-verdict marker (sge#2808). Only the review identity (the wtp-sge
+# App, or a REVIEW_DAEMON_TRUSTED_VERDICT_AUTHORS login) supplies a verdict, and
+# an ISSUE COMMENT it posts counts as a verdict only when this is the body's
+# FIRST line, where rl_verdict_mark_body writes it (skills/pr-review/gate-labels.sh GL_REVIEW_VERDICT_MARKER,
+# services/review-daemon-poc/gate_labels.py REVIEW_VERDICT_MARKER). Formal PR
+# reviews need no marker. Every other comment the review identity posts --
+# findings, claims, qa-audit reports, fix-lane notes -- carries none, so an
+# sge-verdict fence echoed into one of them is never read as a verdict.
+RL_REVIEW_VERDICT_MARKER='<!-- sge-review-verdict -->'
+
+# rl_verdict_mark_body <body> -- <body> with RL_REVIEW_VERDICT_MARKER as its
+# first line (idempotent: a body already starting with it is unchanged).
+rl_verdict_mark_body() {
+  local body="${1-}"
+  case "$body" in
+    "$RL_REVIEW_VERDICT_MARKER"|"$RL_REVIEW_VERDICT_MARKER"$'\n'*) printf '%s' "$body" ;;
+    *) printf '%s\n%s' "$RL_REVIEW_VERDICT_MARKER" "$body" ;;
+  esac
+}
+
+# rl_post_verdict_comment <pr> [body] -- post the verdict as an ISSUE COMMENT,
+# the route for the advisory, draft and hold cases, which must never approve
+# or request changes (SKILL.md Phase 6; gate-and-termination.md). The body is
+# marked with RL_REVIEW_VERDICT_MARKER so the gate readers can tell this
+# verdict from any other comment the same identity posts (sge#2808). Same
+# pre-post guards as rl_post_verdict (session fill, #1667 PR-mismatch refusal,
+# exit 5); posts through rl_gh, so the App identity is used when it is
+# available. Prints the new comment's numeric id on success; non-zero on any
+# failure (1), never a silent success.
+rl_post_verdict_comment() {
+  local pr="${1:?rl_post_verdict_comment: pr required}" body="${2:-}" repo resp cid
+  repo=$(rl__repo) || return 1
+  [ -n "$body" ] || body="$(cat)"
+  body="$(rl_verdict_fill_session "$body")"
+  if rl_verdict_pr_mismatch "$pr" "$body"; then
+    echo "rl_post_verdict_comment: REFUSING to post — the draft body names PR #$(rl_verdict_body_pr "$body") but the target is PR #${pr} (issue #1667)." >&2
+    return 5
+  fi
+  body="$(rl_verdict_mark_body "$body")"
+  resp=$(rl_gh api --method POST "repos/${repo}/issues/${pr}/comments" -f body="$body" 2>/dev/null) || {
+    echo "rl_post_verdict_comment: could not post the verdict comment on PR #${pr}" >&2
+    return 1
+  }
+  cid=$(printf '%s' "$resp" | jq -r '.id // empty' 2>/dev/null)
+  if [[ "$cid" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$cid"
+    return 0
+  fi
+  echo "rl_post_verdict_comment: POST succeeded but returned no numeric comment id" >&2
+  return 1
+}
+
 # rl_post_verdict <pr> <event> [body] -- post the review verdict.
 #   event: APPROVE | REQUEST_CHANGES | COMMENT
 #   body:  positional arg, or read from stdin when omitted.
@@ -2073,11 +2273,20 @@ rl_post_verdict() {
     echo "rl_post_verdict: REFUSING to post — the verdict declares $(rl_verdict_findings_total "$body") finding(s) but findings_comment is '$(rl_verdict_findings_ref "$body")' and no verified findings comment exists (issue #1858). Post the findings via rl_post_findings_comment first, or fold them into the verdict body and set 'findings_comment: inline'." >&2
     return 6
   fi
+  # Verdict pinned to what it judged (sge#2781). The block's `commit:` goes out
+  # as commit_id on every route: without it GitHub binds the review to whatever
+  # the head is at POST time, so a push landing just before the POST would get
+  # an approval for a commit the review never read (and branch protection's
+  # stale-approval dismissal would key off the wrong commit).
+  local vcommit
+  local -a pin=()
+  vcommit=$(rl_verdict_field "$body" commit)
+  [[ "$vcommit" =~ ^[0-9a-fA-F]{40}$ ]] && pin=(-f "commit_id=${vcommit}")
   mode=$(rl_review_identity)
   if [ "$mode" = "app" ]; then
     if tok=$(rl_app_installation_token); then
       if resp=$(GH_TOKEN="$tok" gh api --method POST "repos/${repo}/pulls/${pr}/reviews" \
-           -f "event=${event}" -f "body=${body}" 2>/dev/null); then
+           -f "event=${event}" -f "body=${body}" ${pin[@]+"${pin[@]}"} 2>/dev/null); then
         rid=$(printf '%s' "$resp" | jq -r '.id // empty' 2>/dev/null)
         echo "rl_post_verdict: posted ${event} review on PR #${pr} as the wtp-sge App -- real approval, builder != reviewer (issue #862)" >&2
         if [[ "$rid" =~ ^[0-9]+$ ]]; then
@@ -2102,7 +2311,7 @@ rl_post_verdict() {
     COMMENT)         flag="COMMENT" ;;
   esac
   if resp=$(gh api --method POST "repos/${repo}/pulls/${pr}/reviews" \
-       -f "event=${flag}" -f "body=${body}" 2>/dev/null); then
+       -f "event=${flag}" -f "body=${body}" ${pin[@]+"${pin[@]}"} 2>/dev/null); then
     rid=$(printf '%s' "$resp" | jq -r '.id // empty' 2>/dev/null)
     echo "rl_post_verdict: posted ${event} review on PR #${pr} via PAT/bot identity" >&2
     if [[ "$rid" =~ ^[0-9]+$ ]]; then
@@ -2123,8 +2332,10 @@ rl_post_verdict() {
     # actually granted (the review-independence gate would then reject it
     # anyway, but only AFTER the label already claimed otherwise).
     echo "rl_post_verdict: ${flag} rejected (self-authored PR?) -- posting as COMMENT with the recommendation stated in-body" >&2
+    # The marker goes after the Recommendation line, so the body still starts
+    # with it (the daemon's own-fallback prefix check) -- sge#2808.
     if resp=$(gh api --method POST "repos/${repo}/pulls/${pr}/reviews" \
-         -f "event=COMMENT" -f "body=Recommendation: ${event}"$'\n\n'"${body}" 2>/dev/null); then
+         -f "event=COMMENT" -f "body=Recommendation: ${event}"$'\n\n'"$(rl_verdict_mark_body "$body")" ${pin[@]+"${pin[@]}"} 2>/dev/null); then
       rid=$(printf '%s' "$resp" | jq -r '.id // empty' 2>/dev/null)
       echo "rl_post_verdict: verdict recorded as COMMENT only (PAT self-approval rejected) -- pr-reviewed must not be applied from this verdict (issue #2261)" >&2
       if [[ "$rid" =~ ^[0-9]+$ ]]; then

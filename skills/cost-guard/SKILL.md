@@ -1,5 +1,5 @@
 ---
-description: Use when you need to check the current session's token consumption against the active spec's BudgetPolicy — mid-session budget spot-checks ("are we within token budget?"), before starting another expensive slice on a metered spec, or whenever SGE_SPEC_ID is set and budget pressure is suspected. Advisory soft gate — reports an ok/alert/deny verdict but never stops the session itself. For cost attribution reporting use /sge:roi-report.
+description: "Use when checking the session's token use against the active spec's BudgetPolicy — \"are we within token budget?\", before another expensive slice, or when SGE_SPEC_ID is set. Advisory: reports ok/alert/deny and never stops the session. For cost reports use /sge:roi-report."
 argument-hint: "[--spec SPEC-NNN] [--session <session-id>]"
 context: fork
 allowed-tools: Read, Grep, Glob, Bash(cat:*), Bash(ls:*), Bash(jq:*), Bash(wc:*), Bash(node:*), mcp__plugin_sge_sge-memory__search_nodes, mcp__plugin_sge_sge-memory__create_entities

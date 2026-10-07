@@ -3,6 +3,7 @@ description: Use when optimising a system whose output is gated by a measurable 
 argument-hint: "<the metric or bottleneck to optimise, e.g. 'grow the eligible class'>"
 context: fork
 allowed-tools: Read, Grep, Glob, Agent, Bash
+disable-model-invocation: true
 ---
 
 # Optimisation Loop — measure → lever → predict → verify
@@ -12,6 +13,19 @@ effort yields a disproportionate, **verified** lift — and you know the size of
 the win before you spend the effort. It is the applied companion to
 **SGD-052 (Claim-Validation Coherence)**: the loop's final step *is* a
 `prediction` claim + its feedback harness.
+
+## Role
+
+Run the measure → lever → predict → verify loop against a measurable bottleneck,
+and hand back a leverage-ranked work-list plus the feedback harness that proves
+predicted == actual.
+
+## Out of scope
+
+- Bug-fixing or feature work — this moves an existing system's numbers, provably.
+- Changing the logic before measuring the input layer (the trap below).
+- Implementing the ranked levers — hand the work-list to `/sge:sge-implement`
+  or `/sge:team-pipeline`.
 
 ## The trap it avoids
 

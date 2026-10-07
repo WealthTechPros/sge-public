@@ -22,8 +22,9 @@
 #      carried the required-context verdicts pre-merge — the merge commit
 #      itself has no check-run history of its own).
 #   3. Collapse to the LATEST conclusion per check name (a check can have
-#      been rerun; only the last run before merge matters) — check-runs are
-#      returned newest-first by the API, so first-seen-per-name wins.
+#      been rerun; only the last run before merge matters). The latest run is
+#      picked by its started_at timestamp, ties broken by the higher check-run
+#      id, never by API response order (#2979).
 #   4. Any required context absent from that set, or present with a
 #      conclusion other than "success", means the PR merged while that gate
 #      was not green — i.e. only an admin override could have merged it.
@@ -45,8 +46,12 @@
 #
 # Repo context: $GH_REPO if set, else `gh repo view` in the cwd clone.
 #
-# Output: one NDJSON line per merged PR examined (bypass or clean) appended
-# to the log, and `bypass=<N> clean=<M>` summary on stdout. Exit 0 always —
+# Output: one NDJSON line per merged PR examined (bypass, clean or unknown)
+# appended to the log, and a `bypass=<N> clean=<M> unknown=<K>` summary on
+# stdout. "unknown" means the base branch's required contexts could not be
+# read (the protection call failed for a reason other than "Branch not
+# protected"): the PR is logged with "bypass":null and an "error", never
+# reported clean (#2979). Exit 0 always —
 # this is detection, not a gate; a merge already happened, there is nothing
 # left to block. A PR flagged bypass=true is the actionable signal.
 set -euo pipefail
@@ -94,19 +99,33 @@ fi
 
 # Required context names for $BASE. Empty list -> nothing to compare against;
 # treat as "no required contexts configured" (skip, not a false positive).
+# An unprotected branch (HTTP 404 "Branch not protected") is also an empty
+# list. Any other failure returns 1 with the gh error on stdout, so the caller
+# reports the PR as unknown rather than clean (#2979).
 required_contexts() {
-  gh api "repos/$REPO/branches/$BASE/protection" \
-    --jq '.required_status_checks.contexts // [] | .[]' 2>/dev/null || true
+  local out errf rc=0
+  errf=$(mktemp)
+  out=$(gh api "repos/$REPO/branches/$BASE/protection" \
+    --jq '.required_status_checks.contexts // [] | .[]' 2>"$errf") || rc=$?
+  if [ "$rc" -ne 0 ] && ! grep -q "Branch not protected" "$errf"; then
+    tr '\n' ' ' <"$errf"; rm -f "$errf"
+    return 1
+  fi
+  rm -f "$errf"
+  [ "$rc" -eq 0 ] && printf '%s' "$out"
+  return 0
 }
 
 # Latest conclusion per named check-run on a sha, one "name<TAB>conclusion"
-# per line. check-runs are returned newest-first, so `!seen[name]++` keeps
-# only the first (latest) occurrence of each name.
+# per line. Runs are sorted newest-first by started_at, then by id (a later
+# run has a higher id), rather than trusting the API's response order; then
+# `!seen[name]++` keeps only the first (latest) occurrence of each name.
 latest_check_conclusions() {
   local sha="$1"
   gh api --paginate "repos/$REPO/commits/$sha/check-runs" \
-    --jq '.check_runs[] | [.name, (.conclusion // "pending")] | @tsv' 2>/dev/null \
-    | awk -F'\t' '!seen[$1]++'
+    --jq '.check_runs[] | [.name, (.conclusion // "pending"), (.started_at // .completed_at // ""), (.id // 0)] | @tsv' 2>/dev/null \
+    | sort -t$'\t' -k3,3r -k4,4nr \
+    | awk -F'\t' '!seen[$1]++ {print $1 "\t" $2}'
 }
 
 # Also fold in legacy commit statuses (some repos use the Statuses API
@@ -124,17 +143,26 @@ latest_commit_statuses() {
 examine_pr() {
   local pr="$1"
   local merged_at head_sha merge_commit_sha
-  read -r merged_at head_sha merge_commit_sha <<<"$(
+  # '|'-separated (read collapses whitespace delimiters) so an empty
+  # merged_at stays empty instead of the head sha shifting into its place.
+  IFS='|' read -r merged_at head_sha merge_commit_sha <<<"$(
     gh api "repos/$REPO/pulls/$pr" \
-      --jq '[.merged_at // "", .head.sha // "", .merge_commit_sha // ""] | join(" ")' \
+      --jq '[.merged_at // "", .head.sha // "", .merge_commit_sha // ""] | join("|")' \
       2>/dev/null
-  )"
+  )" || true
   if [ -z "$merged_at" ] || [ "$merged_at" = "null" ]; then
     return 0   # not merged (or unreadable) — nothing to examine
   fi
 
-  local req_ctx
-  req_ctx=$(required_contexts)
+  local req_ctx ts
+  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  if ! req_ctx=$(required_contexts); then
+    jq -cn --arg ts "$ts" --arg repo "$REPO" --argjson pr "$pr" --arg m "$merged_at" \
+      --arg err "required contexts unreadable: ${req_ctx}" \
+      '{ts:$ts, repo:$repo, pr:$pr, merged_at:$m, bypass:null, error:$err}' >> "$LOG"
+    echo "unknown"
+    return 0
+  fi
   if [ -z "$req_ctx" ]; then
     echo "clean"
     return 0   # no required contexts configured for $BASE — nothing to violate
@@ -160,8 +188,7 @@ examine_pr() {
     esac
   done <<<"$req_ctx"
 
-  local ts marker
-  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  local marker
 
   if [ "${#bad_contexts[@]}" -eq 0 ]; then
     printf '{"ts":"%s","repo":"%s","pr":%s,"merged_at":"%s","bypass":false}\n' \
@@ -194,6 +221,7 @@ examine_pr() {
 
 BYPASS_COUNT=0
 CLEAN_COUNT=0
+UNKNOWN_COUNT=0
 
 if [ "$MODE" = "pr" ]; then
   [ -n "$PR" ] || usage
@@ -201,6 +229,7 @@ if [ "$MODE" = "pr" ]; then
   case "$result" in
     bypass) BYPASS_COUNT=1 ;;
     clean) CLEAN_COUNT=1 ;;
+    unknown) UNKNOWN_COUNT=1 ;;
   esac
 else
   # --scan: newest-first merged PRs, stop once we pass $SINCE.
@@ -222,6 +251,7 @@ else
       case "$result" in
         bypass) BYPASS_COUNT=$((BYPASS_COUNT+1)) ;;
         clean) CLEAN_COUNT=$((CLEAN_COUNT+1)) ;;
+        unknown) UNKNOWN_COUNT=$((UNKNOWN_COUNT+1)) ;;
       esac
     done <<<"$prs"
     [ "$stop" = true ] && break
@@ -229,4 +259,4 @@ else
   done
 fi
 
-echo "bypass=$BYPASS_COUNT clean=$CLEAN_COUNT"
+echo "bypass=$BYPASS_COUNT clean=$CLEAN_COUNT unknown=$UNKNOWN_COUNT"

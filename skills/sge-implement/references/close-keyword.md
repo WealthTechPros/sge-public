@@ -15,7 +15,7 @@ PR-body rule. Issue #2241.
 
 ## The failure this prevents
 
-`WealthTechPros/data-remediation` PR #20 merged at `17:50:08Z` on 13 Aug 2026.
+A product repo's PR #20 merged at `17:50:08Z` on 13 Aug 2026.
 Issue #13 auto-closed two seconds later. A human reopened it 81 seconds after
 that.
 
@@ -72,7 +72,7 @@ esac
 
 ALL_ACS_MET="${ALL_ACS_MET:-no}"   # set to yes ONLY after checking every AC
 
-# Both gates, or `Part of`. data-remediation#13 failed on gate 1 — five
+# Both gates, or `Part of`. A product repo's #13 failed on gate 1 — five
 # acceptance criteria, one landed — and was not labelled at the time, so a
 # gate-2-only check would have emitted `Closes` and reproduced the incident.
 if [ "$UMBRELLA_OK" = yes ] && [ "$ALL_ACS_MET" = yes ]; then
@@ -126,9 +126,9 @@ The distinction that matters: a consumer asserting **linkage** must accept
 |---|---|---|---|
 | `/sge:pr-review` Phase 1 Stage 2 | `review-lib.sh` → `rl_ensure_closing_link` | linkage | **the sharpest one.** It appends `Fixes #N` when it sees no link. Blind to `Part of`, it re-adds the closing keyword one phase after Phase 6 deliberately withheld it — silently undoing the whole convention on every PR |
 | `/sge:pr-monitor` Gate 1 | `monitor-lib.sh` → `pr_ready_for_merge` | linkage | a correct partial PR returned `GATE_FAIL:not_linked` and could never arm auto-merge; the documented remedy was to append `Fixes #N` |
-| `/sge:team-pipeline` Rule 2 | `SKILL.md`, `dispatch-prompts.md`, `mechanisms.md` | writes it | the **parallel** lane `/sge:issue-swarm` runs on. It mandated `Fixes #N` on the first-commit draft, explicitly "even if partial" — including the orphan-branch rescue flush, the case least likely to have met any AC |
+| `/sge:team-pipeline` Rule 2 | `SKILL.md`, `dispatch-prompts.md`, `mechanisms.md` | writes it | the **parallel** lane (Duration Mode included). It mandated `Fixes #N` on the first-commit draft, explicitly "even if partial" — including the orphan-branch rescue flush, the case least likely to have met any AC |
 | `/sge:available-issues` | `in_flight()` | linkage | searched `linked:issue N`, GitHub's linkage index, which only closing keywords populate. Blind to `Part of`, it re-pools a live issue and dispatches a **duplicate** agent |
-| `/sge:implement-issue` Phase 0b | body-reference search | linkage | same duplicate-lane risk; needs a client-side filter because `in:body Part of #N` is free text over two very common words |
+| `/sge:sge-implement` Step 0 (`scripts/linked-prs.sh`) | body-reference search | linkage | same duplicate-lane risk; needs a client-side filter because `in:body Part of #N` is free text over two very common words |
 | `/sge:qa-audit` Step 1 | linked-issue extraction | linkage | falls back to a bare `#N`, so it degrades rather than breaking |
 
 ## Writing *about* a keyword will close the issue — backticks do not save you
@@ -155,13 +155,13 @@ lands on the default branch.
 **When a PR body or commit message discusses a closing keyword — explaining a
 bug, quoting an incident, writing a changelog — never leave the literal
 `<keyword> #N` adjacent.** Say "the closing keyword on #N", or name the issue
-somewhere else in the sentence. This is not pedantry: `data-remediation#13` was
+somewhere else in the sentence. This is not pedantry: a product repo's #13 was
 closed a second time by the very PR that added the gate against it, by a line in
 a commit message describing the first closure.
 
 ## CI backstop
 
-`WealthTechPros/data-remediation` carries a portable gate that fails any PR that
+One product repo carries a portable gate that fails any PR that
 would auto-close a `tracking`-labelled issue (#126, corrected in #133). Worth
 lifting into repos that want enforcement rather than convention.
 

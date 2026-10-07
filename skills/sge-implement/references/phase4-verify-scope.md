@@ -6,7 +6,7 @@ from prior behavior.
 
 ## Why
 
-Observed on `WealthTechPros/data-remediation` (2026-08-23): two independent
+Observed on a product repo (2026-08-23): two independent
 `sge-implement` agents each backgrounded a slow full `pytest -q` run after it
 exceeded a ~10-minute inline limit, then waited on a completion signal that
 never reliably woke their own turn loop. Both produced five-plus consecutive

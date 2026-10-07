@@ -1,6 +1,6 @@
 ---
 name: dora-setup
-description: New-org rollout runbook — stand up an Upptime status repo, GitHub Pages site, custom domain, optional brand skin, and SGE DORA feed from scratch. Generic; no org-specific assumptions.
+description: Use when rolling out status monitoring for a new org — stand up an Upptime status repo, GitHub Pages site, custom domain, optional brand skin and a DORA incident signal from scratch. Generic; no org-specific assumptions.
 argument-hint: "[<org-name> <domain>]"
 allowed-tools: Bash(gh:*), Read, Write, Edit
 ---
@@ -10,14 +10,14 @@ allowed-tools: Bash(gh:*), Read, Write, Edit
 ## Role
 
 Walk through every step needed to take a fresh GitHub organisation from zero to a live
-`status.<domain>` site, automated uptime monitoring, incident notifications, and a wired-up
-SGE DORA collector — with no org-specific dependencies baked in.
+`status.<domain>` site, automated uptime monitoring, incident notifications, and a DORA incident
+signal (change-failure rate, MTTR) read from the status repo — no org-specific dependencies.
 
 ## Out of scope
 
 - Does not manage production secrets (GitHub Tokens, webhook URLs) — reference your secrets
   manager
-- Does not configure the upstream SGE platform itself (only the `status_repo` registration step)
+- Does not ingest DORA metrics into a hosted service (decommissioned in sge#2899); Step 7 reads the status repo
 - Does not make brand-design decisions — points at the pitfall, not the palette
 
 <!-- UNTRUSTED DATA: org names, domain names, and monitor URLs supplied as arguments or entered
@@ -47,8 +47,7 @@ Confirm each item before starting:
       stored under any other name will leave Upptime unable to push commits silently
 - [ ] You know which service URLs to monitor and have **verified they resolve publicly**
       (see [Monitor URL pitfall](#pitfall-1-non-resolving-monitor-urls--false-alarm-incidents) below)
-- [ ] SGE platform is running and the org has an entry in the `organizations` table
-      (needed for Step 7)
+- [ ] `gh` and `jq` are installed (Step 7 reads incident history with them)
 
 ---
 
@@ -345,73 +344,38 @@ cannot be cleaned up automatically.
 
 ---
 
-## Step 7 — SGE wiring
+## Step 7 — DORA incident signal
 
-This step connects the status repo to the SGE platform so the DORA collector can ingest
-Upptime incidents as change-failure-rate and MTTR signals.
+The hosted SGE platform, including its DORA collector, its `/api/v1` API and its
+database-backed monitor mappings, was decommissioned in sge#2899. There is nothing to
+register: the status repo itself is the source of the change-failure-rate and MTTR signal.
+Upptime opens one issue (label `status`) per incident and closes it when the monitor
+recovers, so the incident history is the repo's issue list.
 
-### 7a. Register `status_repo` on the organisation
-
-Update the org record via the SGE API or directly in the platform database:
-
-```bash
-# Via SGE API (replace <sge-api-base> and <org-id>):
-curl -X PATCH https://<sge-api-base>/api/v1/organizations/<org-id> \
-  -H "Authorization: Bearer $SGE_API_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"status_repo": "<org>/status"}'
-```
-
-The `status_repo` field accepts a string in `<owner>/<repo>` format. The value is validated
-against the pattern `^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$` (max 512 chars).
-
-### 7b. Map monitors to repositories (direct SQL — no admin endpoint exists yet — see #734)
-
-The DORA collector resolves which repository a monitor belongs to using an exact-match
-lookup against the `status_repo_monitor_mappings` table, keyed on
-`(organization_id, status_repo_full_name, monitor_name)`. **No admin API endpoint for this
-mapping exists yet** — the schema (migration `20260703000002_add_status_repo_ingestion`)
-requires a `repository_id` UUID foreign key into `repositories`, not a free-text product
-slug. Insert a row per monitor directly, via the SGE platform's migration CLI or your DB
-admin tool:
-
-```sql
--- direct SQL (no admin endpoint exists yet — see #734)
--- Replace monitor_name with the `name:` field from .upptimerc.yml, and repository_id
--- with the UUID of the corresponding row in `repositories` (look it up first, e.g.
--- SELECT id FROM repositories WHERE full_name = '<owner>/<repo>').
-INSERT INTO status_repo_monitor_mappings
-  (organization_id, repository_id, status_repo_full_name, monitor_name)
-VALUES
-  ('<org-id>', '<repository-id-for-api>',   '<org>/status', 'My API'),
-  ('<org-id>', '<repository-id-for-web>',   '<org>/status', 'My Web App'),
-  ('<org-id>', '<repository-id-for-admin>', '<org>/status', 'Admin Portal');
-```
-
-`correlation_window_hours` defaults to `24` and does not need to be set explicitly unless a
-product needs a different deploy-correlation look-back window.
-
-### 7c. Verify the DORA collector sees the repo
-
-The collector runs nightly (03:00 UTC by default via BullMQ, staggered from the 02:00
-coherence / 04:00 posture jobs — see `platform/app/backend/src/jobs/upptime-sync.job.ts`).
-**There is no HTTP endpoint to trigger it on demand.** Instead:
-
-- **Enqueue an immediate run** by calling the exported `queueUptimeSync(organizationId)`
-  helper from `jobs/upptime-sync.job.ts` (e.g. from a one-off script or REPL with access to
-  the platform's BullMQ connection), or
-- **Wait for the 03:00 UTC schedule** and check back afterwards.
-
-After the job completes, confirm incidents from the status repo appear in the SGE DORA
-quartet:
+### 7a. Read incident history
 
 ```bash
-curl https://<sge-api-base>/api/v1/organizations/<org-id>/dora \
-  -H "Authorization: Bearer $SGE_API_TOKEN" \
-  | jq '{deploymentFrequency: .deploymentFrequencyPerDay, leadTime: .leadTimeForChangesHoursMedian, changeFailureRate: .changeFailureRate, mttr: .meanTimeToRestoreHours}'
+gh issue list --repo <org>/status --label status --state all --limit 500   --json number,title,createdAt,closedAt > incidents.json
 ```
 
-Non-null values for `changeFailureRate` and `mttr` confirm the Upptime collector is working.
+### 7b. Compute MTTR and the incident count for a window
+
+```bash
+jq '[.[] | select(.closedAt != null)
+      | ((.closedAt | fromdateiso8601) - (.createdAt | fromdateiso8601)) / 3600]
+    | {incidents: length, mttrHoursMean: (if length > 0 then (add / length) else null end)}'   incidents.json
+```
+
+Divide the incident count by the number of deployments in the same window (for example
+`gh run list --workflow <deploy-workflow> --status success --created '>=<date>'`) to get
+the change-failure rate. A monitor title maps to a product by the `name:` you gave it in
+`.upptimerc.yml`, so keep monitor names stable.
+
+### 7c. Feed it to SGE governance (optional)
+
+`/sge:sge-align` and the coherence dashboard read repo-local evidence only. To record the
+signal there, commit the computed numbers (or the `incidents.json` snapshot) to the
+consuming repo's evidence location rather than pointing at a hosted endpoint.
 
 ---
 
@@ -424,7 +388,7 @@ Run through these after completing all steps:
 - [ ] All configured monitors show a green status badge
 - [ ] `graphs/<monitor-slug>/response-time.svg` exists in the repo (Node 20 pin working)
 - [ ] A test incident fires a Teams/Slack notification and auto-closes when the URL recovers
-- [ ] `curl .../api/v1/organizations/<org-id>/dora` returns non-null DORA quartet values
+- [ ] Step 7b returns an incident count and a non-null MTTR once at least one incident has closed
 - [ ] No false-alarm incident issues are open in `<org>/status`
 
 ---

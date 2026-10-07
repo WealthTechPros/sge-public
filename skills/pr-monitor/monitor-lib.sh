@@ -147,18 +147,30 @@ MERGE_GATE_LABEL="${MERGE_GATE_LABEL:-pr-reviewed}"
 # an entry names one; leave it unset (or an entry's repo empty) to match any repo.
 KNOWN_FLAKES_FILE="${KNOWN_FLAKES_FILE:-.sge/known-flakes.yaml}"
 
+# Host dispatch for PR reads (SPEC-110 S4, issue #2985): `sge_gh_pr` runs
+# `gh pr <args>` unchanged on every host except Azure Repos, where it emulates
+# the read over scripts/azdo-adapter.sh. Without the shim (a copied lib), it is
+# plain `gh pr`, exactly the pre-#2985 behaviour.
+# shellcheck source=skills/lib/azdo-gh-pr.sh
+if [ -f "$(dirname "${BASH_SOURCE[0]}")/../lib/azdo-gh-pr.sh" ]; then
+  . "$(dirname "${BASH_SOURCE[0]}")/../lib/azdo-gh-pr.sh"
+else
+  sge_gh_pr() { gh pr "$@"; }
+  sge_pr_host() { printf 'unknown'; }
+fi
+
 # A PR is spec-only if EVERY changed file matches the repo's spec globs.
 is_spec_pr() {
   local pr=$1
   local non_spec
   # SPEC_GLOB_RE: alternation built from the globs found in the repo's CLAUDE.md
-  non_spec=$(gh pr diff "$pr" --name-only 2>/dev/null \
+  non_spec=$(sge_gh_pr diff "$pr" --name-only 2>/dev/null \
     | grep -vE "$SPEC_GLOB_RE" | grep -v '^$' | wc -l)
   [[ "$non_spec" -eq 0 ]]
 }
 
 fetch_candidate_prs() {
-  gh pr list --state open --json number,createdAt,updatedAt,isDraft,labels \
+  sge_gh_pr list --state open --json number,createdAt,updatedAt,isDraft,labels \
     --jq --arg claim "$CLAIM_LABELS_RE" --arg reviewed 'pr-reviewing|pr-reviewed' \
          --argjson mins "$DRAFT_ORPHAN_MINUTES" '
       sort_by(.createdAt)
@@ -183,7 +195,7 @@ fetch_candidate_prs() {
 # (or by being a normal non-draft PR mid-review), so any claimed PR â€” draft or
 # not â€” is fair game for reclaim_if_stale's own freshness check.
 fetch_claimed_prs() {
-  gh pr list --state open --json number,createdAt,isDraft,labels \
+  sge_gh_pr list --state open --json number,createdAt,isDraft,labels \
     --jq --arg claim "$CLAIM_LABELS_RE" 'sort_by(.createdAt)
           | .[] | select([.labels[].name] | any(test($claim)))
           | .number'
@@ -272,7 +284,7 @@ FAILING_CHECK_JQ='(.state == "FAILURE" or .state == "TIMED_OUT" or .state == "CA
 # stall is legible without spelunking the Actions log (issue #1148).
 named_failing_checks() {
   local pr=$1
-  gh pr checks "$pr" --json name,state \
+  sge_gh_pr checks "$pr" --json name,state \
     --jq ".[] | select($FAILING_CHECK_JQ) | .name" 2>/dev/null
 }
 
@@ -367,7 +379,7 @@ classify_failing_check() { # $1=check name  [$2=today YYYY-MM-DD]  [$3=registry 
 held_review_stall() {
   local pr=$1 claimed failing
   # Must currently carry a claim label â€” else there is no held review to stall.
-  claimed=$(gh pr view "$pr" --json labels \
+  claimed=$(sge_gh_pr view "$pr" --json labels \
     --jq --arg claim "$CLAIM_LABELS_RE" '[.labels[].name] | any(test($claim))' 2>/dev/null)
   [ "$claimed" = "true" ] || return 1
   # A DEAD claim is the stale-claim takeover's job, not this one â€” only a FRESH
@@ -375,7 +387,7 @@ held_review_stall() {
   if is_stale_claim "$pr"; then
     return 1
   fi
-  failing=$(gh pr checks "$pr" --json state \
+  failing=$(sge_gh_pr checks "$pr" --json state \
     --jq "[.[] | select($FAILING_CHECK_JQ)] | length" 2>/dev/null)
   # Fail closed on any non-numeric jq/gh output (a transient API error must not
   # throw here or be read as a stall) â€” issue #1206.
@@ -392,7 +404,7 @@ post_stall_comment() {
   local pr=$1 head names marker existing
   names=$(named_failing_checks "$pr")
   [ -n "$names" ] || return 0
-  head=$(gh pr view "$pr" --json headRefOid --jq '.headRefOid' 2>/dev/null)
+  head=$(sge_gh_pr view "$pr" --json headRefOid --jq '.headRefOid' 2>/dev/null)
   marker="<!-- sge:held-review-stall ${head} -->"
   # Paginate the marker lookup over ALL comments â€” `gh pr view --json comments`
   # returns only the default (first) page, so on a busy PR the per-head marker
@@ -427,12 +439,12 @@ post_stall_comment() {
 # (return 1). Never act on missing data.
 is_stale_draft() {
   local pr=$1 is_draft labels committed cutoff committed_s inflight
-  is_draft=$(gh pr view "$pr" --json isDraft --jq '.isDraft' 2>/dev/null)
+  is_draft=$(sge_gh_pr view "$pr" --json isDraft --jq '.isDraft' 2>/dev/null)
   [ "$is_draft" = "true" ] || return 1
-  labels=$(gh pr view "$pr" --json labels \
+  labels=$(sge_gh_pr view "$pr" --json labels \
     --jq '[.labels[].name] | any(test("pr-reviewing|pr-reviewed"))' 2>/dev/null)
   [ "$labels" = "true" ] && return 1
-  committed=$(gh pr view "$pr" --json commits --jq '[.commits[].committedDate] | last' 2>/dev/null)
+  committed=$(sge_gh_pr view "$pr" --json commits --jq '[.commits[].committedDate] | last' 2>/dev/null)
   # Missing commit timestamp -> never act (treat as FRESH).
   [ -n "$committed" ] && [ "$committed" != "null" ] || return 1
   cutoff=$(date -u -d "-${STALE_DRAFT_MINUTES} min" +%s 2>/dev/null \
@@ -441,7 +453,7 @@ is_stale_draft() {
              || date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$committed" +%s)
   [ "${committed_s:-9999999999}" -lt "$cutoff" ] || return 1
   # Any check still in flight means the implementer's run may not be dead yet.
-  inflight=$(gh pr checks "$pr" --json state \
+  inflight=$(sge_gh_pr checks "$pr" --json state \
     --jq '[.[] | select(.state == "PENDING" or .state == "QUEUED" or .state == "IN_PROGRESS" or .state == "REQUESTED" or .state == "WAITING")] | length' 2>/dev/null)
   [[ "$inflight" =~ ^[0-9]+$ ]] || inflight=1   # unreadable -> assume in flight (FRESH)
   [ "$inflight" -eq 0 ] || return 1
@@ -464,9 +476,9 @@ is_stale_draft() {
 stale_draft_lane() {
   local pr=$1 head marker existing failing body
   is_stale_draft "$pr" || return 1
-  head=$(gh pr view "$pr" --json headRefOid --jq '.headRefOid' 2>/dev/null)
+  head=$(sge_gh_pr view "$pr" --json headRefOid --jq '.headRefOid' 2>/dev/null)
   marker="<!-- sge:stale-draft-lane ${head} -->"
-  failing=$(gh pr checks "$pr" --json state \
+  failing=$(sge_gh_pr checks "$pr" --json state \
     --jq "[.[] | select($FAILING_CHECK_JQ)] | length" 2>/dev/null)
   [[ "$failing" =~ ^[0-9]+$ ]] || failing=1   # unreadable -> treat as red (do not auto-ready)
   if [ "$failing" -eq 0 ]; then
@@ -498,7 +510,7 @@ pr_ready_for_merge() {
   local body labels failing
 
   # Gate 1 â€” issue linked
-  body=$(gh pr view "$pr" --json body --jq '.body' 2>/dev/null)
+  body=$(sge_gh_pr view "$pr" --json body --jq '.body' 2>/dev/null)
   # This gate asserts the PR is LINKED to an issue, not that it closes one.
   # `Part of #N` (#2241) is the deliberate non-closing link written when a PR
   # lands part of a multi-AC issue or the issue is a `tracking`/`epic` umbrella.
@@ -511,7 +523,7 @@ pr_ready_for_merge() {
   fi
 
   # Gate 2 â€” merge-gate label present
-  labels=$(gh pr view "$pr" --json labels --jq '[.labels[].name] | join(",")' 2>/dev/null)
+  labels=$(sge_gh_pr view "$pr" --json labels --jq '[.labels[].name] | join(",")' 2>/dev/null)
   if ! printf '%s' "$labels" | grep -q "$MERGE_GATE_LABEL"; then
     echo "GATE_FAIL:not_reviewed"; return 1
   fi
@@ -523,7 +535,7 @@ pr_ready_for_merge() {
   # settle window over a cancelled check. The shared set catches CANCELLED /
   # ACTION_REQUIRED / STARTUP_FAILURE / STALE too, matching held_review_stall and
   # stale_draft_lane. Non-numeric jq/gh output -> treat as failing (fail-closed).
-  failing=$(gh pr checks "$pr" --json state \
+  failing=$(sge_gh_pr checks "$pr" --json state \
     --jq "[.[] | select($FAILING_CHECK_JQ)] | length" 2>/dev/null)
   [[ "$failing" =~ ^[0-9]+$ ]] || failing=1
   if [[ "$failing" -gt 0 ]]; then
@@ -732,7 +744,7 @@ update_branch_safe() { # $1=branch  [$2=dir]
 post_update_branch_blocked_comment() { # $1=pr  [$2=holder worktree path]
   local pr=$1 holder="${2:-}" head marker existing body
   echo "WARNING: PR #$pr â€” CONFLICTING but update-branch is UNSAFE: a local worktree holds its branch${holder:+ ($holder)}; not rebasing (would strand that worktree, issue #1666). Re-sync the worktree, then it rebases next cycle." >&2
-  head=$(gh pr view "$pr" --json headRefOid --jq '.headRefOid' 2>/dev/null)
+  head=$(sge_gh_pr view "$pr" --json headRefOid --jq '.headRefOid' 2>/dev/null)
   marker="<!-- sge:update-branch-blocked ${head} -->"
   existing=$(gh api --paginate "repos/{owner}/{repo}/issues/$pr/comments" \
     --jq "[.[] | select(.body | contains(\"$marker\"))] | length" 2>/dev/null \
@@ -835,7 +847,7 @@ automerge_settle_ok() { # $1=pr
 # This is the compensating reversal that makes arming safe at all.
 armed_without_gate_label() { # [$1=label]
   local label="${1:-$MERGE_GATE_LABEL}"
-  gh pr list --state open --json number,labels,autoMergeRequest \
+  sge_gh_pr list --state open --json number,labels,autoMergeRequest \
     --jq ".[] | select(.autoMergeRequest != null)
           | select([.labels[].name] | index(\"$label\") | not) | .number" 2>/dev/null
 }
@@ -949,7 +961,7 @@ post_github_degraded_comment() {
   indicator=$(_github_degraded_indicator)
   # Only a genuinely healthy indicator is a no-op â€” everything else parks.
   [ "$indicator" = "none" ] && return 0
-  head=$(gh pr view "$pr" --json headRefOid --jq '.headRefOid' 2>/dev/null)
+  head=$(sge_gh_pr view "$pr" --json headRefOid --jq '.headRefOid' 2>/dev/null)
   marker="<!-- sge:github-degraded ${head} ${indicator} -->"
   existing=$(gh api --paginate "repos/{owner}/{repo}/issues/$pr/comments" \
     --jq "[.[] | select(.body | contains(\"$marker\"))] | length" 2>/dev/null \
@@ -967,7 +979,7 @@ check_systemic_failure() {
   while IFS= read -r pr; do
     is_spec_pr "$pr" && continue
     ((total++)); [[ $total -gt $N ]] && break
-    has_failure=$(gh pr checks "$pr" --json state \
+    has_failure=$(sge_gh_pr checks "$pr" --json state \
       --jq 'if any(.[]; .state == "FAILURE" or .state == "TIMED_OUT") then "yes" else "no" end' 2>/dev/null)
     [[ "$has_failure" == "yes" ]] && ((failing++))
   done < <(fetch_candidate_prs)
@@ -982,7 +994,7 @@ is_blast_radius_pr() {
   local pr=$1
   # Cache the file list â€” one API call, not four.
   local files
-  files=$(gh pr diff "$pr" --name-only 2>/dev/null)
+  files=$(sge_gh_pr diff "$pr" --name-only 2>/dev/null)
   printf '%s' "$files" | grep -qE \
     'package\.json$|pnpm-lock\.yaml$|package-lock\.json$|yarn\.lock$|\.npmrc$|^patches/|pyproject\.toml$|poetry\.lock$|uv\.lock$|requirements[^/]*\.txt$|(^|/)requirements/[^/]+\.txt$|(^|/)setup\.(py|cfg)$|(^|/)Pipfile(\.lock)?$' \
     && { echo "lockfile"; return 0; }
@@ -999,7 +1011,7 @@ is_blast_radius_pr() {
     '(^|/)Dockerfile|docker-compose[^/]*\.ya?ml$' \
     && { echo "container"; return 0; }
   local author
-  author=$(gh pr view "$pr" --json author --jq '.author.login' 2>/dev/null)
+  author=$(sge_gh_pr view "$pr" --json author --jq '.author.login' 2>/dev/null)
   echo "$author" | grep -qE '\[bot\]$|^dependabot|/dependabot|^renovate' \
     && { echo "bot-author"; return 0; }
   return 1
@@ -1120,7 +1132,7 @@ rereview_decision() {
 # Echo green | red | pending | unknown for a PR's checks.
 pr_ci_state() { # $1=pr
   local pr=$1 out
-  out=$(gh pr checks "$pr" --json state --jq \
+  out=$(sge_gh_pr checks "$pr" --json state --jq \
     "if any(.[]; $FAILING_CHECK_JQ) then \"red\" elif any(.[]; .state == \"PENDING\" or .state == \"QUEUED\" or .state == \"IN_PROGRESS\" or .state == \"REQUESTED\" or .state == \"WAITING\" or .state == \"EXPECTED\") then \"pending\" else \"green\" end" \
     2>/dev/null) || out=""
   case "$out" in green|red|pending) printf '%s' "$out" ;; *) printf 'unknown' ;; esac
@@ -1133,7 +1145,7 @@ pr_ci_state() { # $1=pr
 #   skip:<reason> head=<sha>      return 1 -- log it in the heartbeat; no action
 stale_review_check() { # $1=pr
   local pr=$1 meta head draft labels claimed hold cov covered scope ci counts decision
-  meta=$(gh pr view "$pr" --json headRefOid,isDraft,labels \
+  meta=$(sge_gh_pr view "$pr" --json headRefOid,isDraft,labels \
     --jq '[.headRefOid, (.isDraft|tostring), ([.labels[].name] | join(","))] | join("\u001f")' 2>/dev/null) || meta=""
   # \x1f (not a tab): a non-whitespace IFS keeps an EMPTY head field empty
   # instead of collapsing it and shifting "false" into $head.

@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/WealthTechPros/sge/docs/schemas/vision.schema.json",
+  "title": "SGE vision frontmatter (L0)",
+  "description": "The YAML frontmatter (between --- lines at the top of the file) of an SGE Vision: docs/vision.md, or docs/sgd-build/vision.md. Success measures carry stable SM-N ids that specs cite. SPEC-133.",
+  "type": "object",
+  "required": ["layer", "ref", "status"],
+  "properties": {
+    "layer": { "const": 0, "description": "The cascade layer. A Vision is layer 0." },
+    "ref": { "const": "VISION", "description": "The node id the DAG and every capability model cite." },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "proposed", "accepted", "approved", "superseded"],
+      "description": "Lifecycle of the vision text."
+    },
+    "owner": { "type": "string", "minLength": 1, "description": "Who owns the vision (a person or the organisation)." }
+  },
+  "additionalProperties": true,
+  "x-sge-sections": [
+    { "name": "non-goals", "headings": ["non-goals"] },
+    { "name": "success measures", "headings": ["success measures"] }
+  ]
+}

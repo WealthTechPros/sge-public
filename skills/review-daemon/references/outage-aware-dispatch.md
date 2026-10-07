@@ -14,7 +14,7 @@ switches each from *failure* to **retry-later**:
 
 | Decision point | Healthy (`indicator == "none"`) | Degraded (`indicator != "none"`) |
 |---|---|---|
-| **Timed-out / failed dispatch** (AC1) | `_track_failed_dispatch` increments the per-PR no-op/quarantine counter; PR marches toward `pr-review-stalled` | `_claim_and_dispatch` releases the claim and returns `None` (retry-later). The attempt is **not** counted against the 1800 s timeout budget and the **no-op/quarantine counter is not incremented**. |
+| **Timed-out / failed dispatch** (AC1) | `_track_failed_dispatch` increments the per-PR no-op/quarantine counter; PR marches toward `pr-review-stalled` | `_claim_and_dispatch` releases the claim and returns `None` (retry-later). The attempt is **not** counted against the per-tier review time cap (600 s light/standard, 900 s full; sge#2980 replaced the 1800 s budget) and the **no-op/quarantine counter is not incremented**. |
 | **Cycle wall-clock timeout** (AC2) | `_AdaptiveWidth.observe(timed_out=True)` halves effective dispatch width for the backoff window | `run_once` reports the cycle as clean (`timed_out=False`); width is **held at the configured value** — no backoff armed |
 | **Exit-0-no-artefact read** (#1250, AC3) | an exit=0-no-artefact dispatch whose last SDK message is a SessionStart hook_started event with zero tool calls is reclassified as an infra failure and does NOT increment the per-PR quarantine counter (or is auto-retried once within the same cycle), regardless of GitHub health; every other exit=0-no-artefact dispatch is still reported as a silent no-op **failure** (`ok=False`), counter increments | released and returned `None` (retry-later); the unreadable artefact is a transient read failure, not a no-op |
 
@@ -61,7 +61,7 @@ disables the carve-out) *consecutive* hook-terminates for a PR are
 retry-later. From the next one on, the dispatch is a **transient** failure
 (self-healing quarantine, below): jittered exponential backoff, an uncounted
 `sge:dispatch-transient` breadcrumb naming the cap, and **never** quarantine
-(superseding #2652's count-then-quarantine, Rob 2026-09-29). Any other
+(superseding #2652's count-then-quarantine). Any other
 dispatch outcome breaks the streak. The streak counter is in-memory, so a
 daemon restart re-grants at most one cap's worth of retries. Every dispatch
 span carries `sge.dispatch.hook_terminate` (true/false) for fleet-wide

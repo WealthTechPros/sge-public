@@ -26,8 +26,7 @@ Scoped by `DIFF_RISK` (issue #688's tier, already computed in Phase 3):
 
 1. **Detect native randomization support first — never hand-roll a shuffler.** Check the repo's test
    runner for a built-in randomized-order mode:
-   - Vitest: `test.sequence.shuffle` config option (this repo's own stack — `platform/app/backend` and
-     `platform/app/frontend` are both on Vitest 4.x already; no plugin needed). Invoke: `vitest run --sequence.shuffle`.
+   - Vitest: `test.sequence.shuffle` config option (built in from Vitest 4.x; no plugin needed). Invoke: `vitest run --sequence.shuffle`.
    - Jest: `--testSequencer` / built-in randomization. Invoke: `jest --testSequencer=jest-random-sequencer` (or the repo's own configured sequencer).
    - pytest: `pytest-random-order`. Invoke: `pytest -p random_order`.
    - Go: `go test -shuffle=on`. Invoke: `go test -shuffle=on ./...`.
