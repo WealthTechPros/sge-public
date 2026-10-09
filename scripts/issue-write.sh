@@ -80,6 +80,10 @@
 # before any network call.
 
 set -euo pipefail
+# SGD_ fallback: remove in SGD rename Phase 6
+# shellcheck source=sge-env-compat.sh
+. "$(dirname "${BASH_SOURCE[0]}")/sge-env-compat.sh"
+sge_env_compat DISPATCH_LABEL JIRA_PROJECT JIRA_BASE_URL JIRA_HOSTS JIRA_BEARER JIRA_EMAIL JIRA_API_TOKEN JIRA_CLAIM_TRANSITION_ID JIRA_RELEASE_TRANSITION_ID JIRA_CLAIM_STATUS JIRA_ISSUETYPE JIRA_CLOSE_TRANSITION_ID
 
 _IW_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _JA="${_IW_SCRIPT_DIR}/jira-adapter.sh"

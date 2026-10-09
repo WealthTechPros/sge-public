@@ -79,8 +79,10 @@ REPO_ID="$(resolve_repo)"
 
 # ── specId: SGE_SPEC_ID env, else SPEC-\d+/SGE-\d+/SGD-\d+ in the branch name, else unattributed
 resolve_spec_id() {
-  if [ -n "${SGE_SPEC_ID:-}" ]; then
-    printf '%s' "$SGE_SPEC_ID"
+  # SGD_ fallback: remove in SGD rename Phase 6
+  local env_spec="${SGE_SPEC_ID:-${SGD_SPEC_ID:-}}"  # SGD_ fallback: remove in SGD rename Phase 6
+  if [ -n "$env_spec" ]; then
+    printf '%s' "$env_spec"
     return 0
   fi
   local branch match
