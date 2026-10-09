@@ -25,7 +25,7 @@ open, non-draft PRs and dispatches `/sge:pr-review --no-automerge` against eligi
 candidates — or, for a PR that is conflicting or has a failing required check,
 `/sge:pr-fix` via the [fix lane](#fix-lane--pr-warden-review--fix-never-merge).
 Neither lane ever merges.  All code-host access goes through the provider-agnostic `HostPort`
-(`hostport.py`) so the daemon core is decoupled from GitHub specifics.
+(`hostport.py`) so the daemon core is decoupled from host specifics (GitHub and Azure DevOps via AzdoHostAdapter, `azdo_adapter.py`).
 
 This document covers the **claim-mutex protocol** (issue #1312) in full — the
 mechanism that prevents double-review races across daemon pods, interactive
