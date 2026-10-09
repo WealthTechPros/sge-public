@@ -115,6 +115,10 @@
 # their adapter context at the top of every shell call, exactly as for
 # with-repo-cwd.sh and forgejo-adapter.sh.
 
+# SGD_ fallback: remove in SGD rename Phase 6
+# shellcheck source=sge-env-compat.sh
+. "$(dirname "${BASH_SOURCE[0]}")/sge-env-compat.sh"
+sge_env_compat DISPATCH_LABEL JIRA_PROJECT JIRA_BASE_URL JIRA_HOSTS JIRA_BEARER JIRA_EMAIL JIRA_API_TOKEN JIRA_CLAIM_TRANSITION_ID JIRA_RELEASE_TRANSITION_ID JIRA_CLAIM_STATUS JIRA_ISSUETYPE JIRA_CLOSE_TRANSITION_ID
 _JA_SELF="${BASH_SOURCE[0]}"
 
 # Never run traced: xtrace is INHERITABLE via SHELLOPTS=xtrace in the

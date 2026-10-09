@@ -179,4 +179,7 @@ details and for how to measure Cortex savings.
   `require-test-evidence.yml`) are GitHub Actions. If your repo is hosted on
   Azure DevOps, the skills still run locally, but hook-driven automation and
   CI backstops need an Azure DevOps-native equivalent — see the Azure DevOps
-  extension work tracked under `platform/azdo-extension/`.
+  host adapter (`services/review-daemon-poc/azdo_adapter.py`,
+  `skills/lib/azdo-gh-pr.sh`) and the customer-hosted rollout runbook
+  (`docs/governance/sge-azdo-customer-hosted-rollout-runbook.md`, WTP-internal —
+  not part of this public doc set).
