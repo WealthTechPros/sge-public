@@ -184,3 +184,4 @@ neg-ci-edit-removes-check-step	-	[{"filename":".github/workflows/unit-tests.yml"
 neg-ci-edit-adds-paths-ignore	-	[{"filename":".github/workflows/unit-tests.yml","status":"modified","patch":"@@ -10,3 +10,9 @@ jobs:\n   lint:\n+    paths-ignore:\n+      - 'src/**'"}]	full
 neg-ci-edit-changes-trigger	-	[{"filename":".github/workflows/unit-tests.yml","status":"modified","patch":"@@ -10,3 +10,9 @@ jobs:\n   lint:\n-on: pull_request\n+on: workflow_dispatch"}]	full
 neg-ci-edit-timeout	-	[{"filename":".github/workflows/unit-tests.yml","status":"modified","patch":"@@ -10,3 +10,9 @@ jobs:\n   lint:\n+    timeout-minutes: 1"}]	full
+rename-compat-chore-standard	-	[{"filename":"src/new_name.py","previous_filename":"src/old_name.py","status":"renamed"},{"filename":"src/compat_shim.py","status":"modified"}]	standard
