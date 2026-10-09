@@ -93,7 +93,10 @@ definition and confirm every accepted value is storable — a validator that acc
 column rejects is `major`. A regression or authorization test that cannot distinguish 'correctly
 denied' from 'denied for every caller' (NULL owner/tenant fixture, no positive control) is at
 least `major` when it is the only evidence for the fix."* Full rules, severity edges and the
-incident: [`review-rubric.md`](review-rubric.md).
+incident: [`review-rubric.md`](review-rubric.md). When the PR adds an enforcement control (CI guard, lint, gate,
+allowlist), also include rubric §3 (#2996): *"State in the first review whether the control's shape can hold
+and recommend descoping or a simpler/advisory design before itemising bypasses; carry that finding at its
+original severity in delta rounds."*
 
 ## Verify the agent actually ran before trusting its (non-)result (issue #883)
 
