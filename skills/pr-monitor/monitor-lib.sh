@@ -157,6 +157,12 @@ if [ -f "$(dirname "${BASH_SOURCE[0]}")/../lib/azdo-gh-pr.sh" ]; then
 else
   sge_gh_pr() { gh pr "$@"; }
   sge_pr_host() { printf 'unknown'; }
+  sge_pr_post_comment() { gh pr comment "$1" --body "$2" >/dev/null 2>&1; }
+  sge_pr_marker_count() {
+    gh api --paginate "repos/{owner}/{repo}/issues/$1/comments" \
+      --jq "[.[] | select(.body | contains(\"$2\"))] | length" 2>/dev/null \
+      | awk '{s+=$1} END{print s+0}'
+  }
 fi
 
 # A PR is spec-only if EVERY changed file matches the repo's spec globs.
@@ -413,15 +419,13 @@ post_stall_comment() {
   # is a controlled `<!-- sge:held-review-stall <hex-sha> -->` string (no
   # jq-metacharacters), so it is inlined into the filter â€” gh's --jq takes only
   # a filter string, not jq's --arg.
-  existing=$(gh api --paginate "repos/{owner}/{repo}/issues/$pr/comments" \
-    --jq "[.[] | select(.body | contains(\"$marker\"))] | length" 2>/dev/null \
-    | awk '{s+=$1} END{print s+0}')
+  existing=$(sge_pr_marker_count "$pr" "$marker")
   if [ "${existing:-0}" -gt 0 ]; then
     return 0
   fi
   local body
   body=$(printf '%s\n**Held review â€” red required check(s), no forward progress (issue #1148).** This PR holds a `pr-reviewing` claim but has failing required check(s):\n\n%s\n\nThe review gate cannot open over red CI. Per `pr-review` Phase 7, this must hand off to `/sge:pr-fix` (spec-drift / lint / format failures are control-preserving-resolvable there). Surfacing the check name so this is not a silent stall.' "$marker" "$(printf '%s\n' "$names" | sed 's/^/- /')")
-  gh pr comment "$pr" --body "$body" >/dev/null 2>&1
+  sge_pr_post_comment "$pr" "$body"
 }
 
 # Returns 0 (stale draft) when a PR is an ABANDONED draft the stale-draft lane
@@ -484,15 +488,19 @@ stale_draft_lane() {
   if [ "$failing" -eq 0 ]; then
     # GREEN â€” mark ready, log loudly, and leave an audit trail.
     echo "WARNING: PR #$pr â€” abandoned GREEN draft (no commit for >${STALE_DRAFT_MINUTES}m, CI green, no in-flight checks); marking ready for review" >&2
+    # Azure Repos (#2989): there is no wired "publish draft" here, and the audit
+    # comment below must never claim a PR was readied when it was not.
+    if [ "$(sge_pr_host)" = azdo ]; then
+      echo "WARNING: PR #$pr - abandoned GREEN draft on Azure Repos: marking it ready is not wired; a human publishes it. No comment posted." >&2
+      return 1
+    fi
     gh pr ready "$pr" >/dev/null 2>&1
     body=$(printf '%s\n**Abandoned draft â€” auto-marked ready (issue #1248).** This draft had no new commit for over %s minutes and its CI is green with no checks in flight, so its implementer is presumed to have died before running `gh pr ready`. Marking it ready for review so a review lane will pick it up. If this was premature, convert it back to a draft.' "$marker" "$STALE_DRAFT_MINUTES")
-    gh pr comment "$pr" --body "$body" >/dev/null 2>&1
+    sge_pr_post_comment "$pr" "$body"
     return 0
   fi
   # RED / incomplete â€” surface it (idempotent per head), never mark ready.
-  existing=$(gh api --paginate "repos/{owner}/{repo}/issues/$pr/comments" \
-    --jq "[.[] | select(.body | contains(\"$marker\"))] | length" 2>/dev/null \
-    | awk '{s+=$1} END{print s+0}')
+  existing=$(sge_pr_marker_count "$pr" "$marker")
   if [ "${existing:-0}" -gt 0 ]; then
     return 0
   fi
@@ -500,7 +508,7 @@ stale_draft_lane() {
   names=$(named_failing_checks "$pr")
   echo "WARNING: PR #$pr â€” abandoned RED draft (no commit for >${STALE_DRAFT_MINUTES}m, failing check(s)); flagging, not readying" >&2
   body=$(printf '%s\n**Abandoned draft â€” red CI (issue #1248).** This draft had no new commit for over %s minutes and has failing required check(s):\n\n%s\n\nIts implementer is presumed to have died mid-run, leaving it invisible to every review/merge lane (drafts are excluded). It is NOT being auto-readied over red CI â€” route it to `/sge:pr-fix` (or fix and re-push), then it will be readied on the next pass. Surfacing so it is not a silent zero-cost cycle.' "$marker" "$STALE_DRAFT_MINUTES" "$(printf '%s\n' "$names" | sed 's/^/- /')")
-  gh pr comment "$pr" --body "$body" >/dev/null 2>&1
+  sge_pr_post_comment "$pr" "$body"
   return 0
 }
 
@@ -746,14 +754,12 @@ post_update_branch_blocked_comment() { # $1=pr  [$2=holder worktree path]
   echo "WARNING: PR #$pr â€” CONFLICTING but update-branch is UNSAFE: a local worktree holds its branch${holder:+ ($holder)}; not rebasing (would strand that worktree, issue #1666). Re-sync the worktree, then it rebases next cycle." >&2
   head=$(sge_gh_pr view "$pr" --json headRefOid --jq '.headRefOid' 2>/dev/null)
   marker="<!-- sge:update-branch-blocked ${head} -->"
-  existing=$(gh api --paginate "repos/{owner}/{repo}/issues/$pr/comments" \
-    --jq "[.[] | select(.body | contains(\"$marker\"))] | length" 2>/dev/null \
-    | awk '{s+=$1} END{print s+0}')
+  existing=$(sge_pr_marker_count "$pr" "$marker")
   if [ "${existing:-0}" -gt 0 ]; then
     return 0
   fi
   body=$(printf '%s\n**CONFLICTING â€” update-branch withheld (issue #1666).** This PR is behind its base, but the monitor is **not** running `gh pr update-branch` because a local worktree is checked out on its branch%s. Rebasing the remote while a worktree holds the branch strands that worktree on the pre-rebase commit â€” an agent could then push a tree that reverts merged work (the #1666 near-miss). **Action:** re-sync (or free) that worktree to the branch tip, then the monitor rebases on the next cycle. Surfaced once per head-SHA so this is not a silent stall.' "$marker" "${holder:+ (\`$holder\`)}")
-  gh pr comment "$pr" --body "$body" >/dev/null 2>&1
+  sge_pr_post_comment "$pr" "$body"
 }
 
 # Report whether the worktree at <dir> needs a manual re-sync after an
@@ -963,14 +969,12 @@ post_github_degraded_comment() {
   [ "$indicator" = "none" ] && return 0
   head=$(sge_gh_pr view "$pr" --json headRefOid --jq '.headRefOid' 2>/dev/null)
   marker="<!-- sge:github-degraded ${head} ${indicator} -->"
-  existing=$(gh api --paginate "repos/{owner}/{repo}/issues/$pr/comments" \
-    --jq "[.[] | select(.body | contains(\"$marker\"))] | length" 2>/dev/null \
-    | awk '{s+=$1} END{print s+0}')
+  existing=$(sge_pr_marker_count "$pr" "$marker")
   if [ "${existing:-0}" -gt 0 ]; then
     return 0
   fi
   body=$(printf '%s\n**Parked â€” GitHub degraded (`%s`).** Per the outage runbook (`docs/fleet-deployment-config.md`), reruns and `/sge:pr-fix` / `/sge:pr-review` dispatch are suppressed while GitHub is degraded â€” the failure has no diff cause. This monitor re-checks each cycle and resumes routing (with a single rerun) once `scripts/github-status.sh` reports full recovery (`none`). Posted once per head-SHA + indicator, so it is not re-posted every cycle.' "$marker" "$indicator")
-  gh pr comment "$pr" --body "$body" >/dev/null 2>&1
+  sge_pr_post_comment "$pr" "$body"
 }
 
 # Returns 0 (systemic) when >= 67% of the oldest-N eligible PRs are failing.
