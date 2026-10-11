@@ -60,8 +60,21 @@ echoed `<!--`/`<pre>`, parity shifts). A body is clean only when **all** hold:
   (`<pre>`, `<script>`, `<style>`, `<textarea>`) left open;
 - the verdict fence is the **last** block: only blank lines follow its closer
   (`/sge:pr-review` Phase 5 and the daemon always end the body with it);
-- inside the fence there is no ` ``` ` or `~~~`, and at most one `verdict:`,
-  `commit:`, `sha:` and `head:` line each;
+- inside the fence there is no ` ``` ` or `~~~`, and the block is a **positive
+  allowlist** (SPEC-090): every line is exactly `key: value` (one space) of a
+  known key from the field tables, in printable ASCII only, each key at most
+  once, `verdict` exactly `pass`/`fail`/`incomplete` (ASCII case-folded) and
+  `commit`/`sha`/`head` 7-40 hex. Any other byte or shape (BOM, zero-width or
+  fullwidth characters, tabs, a token after the value, an HTML comment, an
+  unknown or duplicate key, a blank line) makes the body `malformed`, which is
+  never a pass;
+- **one verdict fence** (SPEC-090): after an NFKC fold to ASCII (every other
+  non-ASCII codepoint, such as a BOM or zero-width character, dropped), the body
+  has exactly one `sge-verdict` fence opener, and nothing outside that fence's
+  content (HTML comments and other fences included) reads `verdict:` followed by
+  the gate's own token `pass`, `fail` or `incomplete` as a whole word (any case,
+  spaces allowed around the colon) -- else `malformed`. Other `Verdict:` prose,
+  such as a lane's `Verdict: CONTROL_HOLDS`, is ignored;
 - a closer is compared by run **length**, never a counted `{N,}` regex (gh's
   gojq/RE2 rejects counts above 1000); every pattern uses explicit ASCII
   classes, never `\s` or a case-insensitive flag, so jq, gojq and Python agree

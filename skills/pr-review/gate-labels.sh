@@ -41,6 +41,7 @@
 #   gate-labels.sh classify <label> <verdict> <head> current|stale|unproven|not-verdict-label
 #   gate-labels.sh verdict-sha <pr>                  latest trusted sge-verdict commit (empty if none; exit 3 on API error)
 #   gate-labels.sh latest-verdict <pr>               "<sha><TAB><verdict>" of the newest trusted sge-verdict (exit 3 on API error)
+#   gate-labels.sh latest-for-head <pr> <head>       like latest-verdict, over the verdicts for <head> only (reviews AND comments)
 #   gate-labels.sh current <pr> <label> [<head>]     exit 0 iff <label> is ON the PR and current at head
 # END_USAGE
 #
@@ -100,6 +101,9 @@ gl_classify() {
 # is no allow-list at all, so the wtp-sge[bot] default applies; entries
 # compare by exact equality (no globs), so no value widens trust past the
 # logins it lists (PR #2800 review).
+# THIS is the one trust definition: GL_VERDICT_JQ applies it to every row, so
+# `current` (merge gate), `latest-verdict` and `latest-for-head` (the `pr-labels.sh
+# pass` guard) all trust exactly the same authors -- the wtp-sge App, nothing wider.
 GL_TRUST_FILTER='(((env.REVIEW_DAEMON_TRUSTED_VERDICT_AUTHORS // "") | ascii_downcase | split(",")
        | map(gsub("^[ \\t]+|[ \\t]+$"; "")) | map(select(. != ""))) as $allow
      | ((.user.login // "") | ascii_downcase) as $login
@@ -155,8 +159,10 @@ GL_COMMENT_MARKER_FILTER='(((.body // "") | split("\n") | map(sub("\r$"; ""))) a
 #     fence, an indented code block, an HTML comment or a
 #     <pre>/<script>/<style>/<textarea> block is content; the body ends at top
 #     level (no fence, HTML comment or raw block left open); only blank lines
-#     follow the fence's closer; the fence holds no ``` or ~~~ and at most one
-#     `verdict:`, `commit:`, `sha:` and `head:` line each; the node -- comment
+#     follow the fence's closer; the fence holds no ``` or ~~~ and passes the
+#     POSITIVE ALLOWLIST (gl_line_ok: exact `key: value` lines of gl_known keys,
+#     printable ASCII, each key once, verdict pass|fail|incomplete, SHA 7-40
+#     hex; anything else is malformed, never a pass); the node -- comment
 #     OR review -- was never edited (no lastEditedAt; for a REST-shaped node
 #     also updated_at == created_at: gl_latest_verdict reads both sources
 #     through GraphQL, because REST /pulls/N/reviews carries no edit stamp at
@@ -173,6 +179,66 @@ GL_COMMENT_MARKER_FILTER='(((.body // "") | split("\n") | map(sub("\r$"; ""))) a
 # sources sort into one timeline (sge#2729 item 2).
 GL_VERDICT_JQ='
     def gl_raw_tag: "([pP][rR][eE]|[sS][cC][rR][iI][pP][tT]|[sS][tT][yY][lL][eE]|[tT][eE][xX][tT][aA][rR][eE][aA])";
+    def gl_known: ["verdict", "recommendation", "pr", "commit", "sha", "head", "reviewed_at", "plugin_ref",
+      "mode", "session", "governance_tier", "blockers", "majors", "minors", "traceability", "quality_gates",
+      "quality_gates_scope", "diff_coverage", "qa_evidence", "unresolved_threads", "tool_call_count",
+      "diff_risk", "suite_order", "mutation_gate", "specialist_dispatch", "review_tier",
+      "review_tier_reason", "bot_findings_folded", "findings_comment", "budget_exceeded", "not_completed",
+      "delta_from", "prior_findings_open", "delta_escalation", "rescued_env", "hold_active",
+      "held_for_human", "head_moved", "control_bearing", "oracle_bearing", "applied_order",
+      "carried_from", "base_commit", "decision"];
+    def gl_line_ok:
+      test("^[ -~]*$") and (test("<!--|-->") | not)
+      and (([capture("^(?<k>[a-z_]+):(?: (?<v>.*))?$")] | first) as $c
+           | $c != null and ((gl_known | index($c.k)) != null)
+             and (if $c.k == "verdict" then
+                    ((($c.v // "") | ascii_downcase) as $w | $w == "pass" or $w == "fail" or $w == "incomplete")
+                  elif $c.k == "commit" or $c.k == "sha" or $c.k == "head" then
+                    (($c.v // "") | test("^[0-9a-fA-F]{7,40}$"))
+                  else true end));
+    # gl_nfkc_runs: [first codepoint, ASCII target, run length] for every non-ASCII codepoint
+    # whose NFKC form is ONE printable ASCII character (generated from Unicode 16.0;
+    # the Python twin _NFKC_RUNS is byte-identical, parity-tested). gl_norm maps a line
+    # through it and DROPS every other non-ASCII codepoint (BOM, zero-width, format, combining),
+    # then ASCII-lowercases: the text the one-verdict-fence rule searches.
+    def gl_nfkc_runs: [
+      [160,32,1],[170,97,1],[178,50,2],[185,49,1],[186,111,1],[383,115,1],[688,104,1],[690,106,1],
+      [691,114,1],[695,119,1],[696,121,1],[737,108,1],[738,115,1],[739,120,1],[894,59,1],[7468,65,1],
+      [7470,66,1],[7472,68,2],[7475,71,8],[7484,79,1],[7486,80,1],[7487,82,1],[7488,84,2],[7490,87,1],
+      [7491,97,1],[7495,98,1],[7496,100,2],[7501,103,1],[7503,107,1],[7504,109,1],[7506,111,1],
+      [7510,112,1],[7511,116,2],[7515,118,1],[7522,105,1],[7523,114,1],[7524,117,2],[7580,99,1],
+      [7584,102,1],[7611,122,1],[8175,96,1],[8192,32,1],[8193,32,1],[8194,32,1],[8195,32,1],
+      [8196,32,1],[8197,32,1],[8198,32,1],[8199,32,1],[8200,32,1],[8201,32,1],[8202,32,1],[8228,46,1],
+      [8239,32,1],[8287,32,1],[8304,48,1],[8305,105,1],[8308,52,6],[8314,43,1],[8316,61,1],
+      [8317,40,2],[8319,110,1],[8320,48,10],[8330,43,1],[8332,61,1],[8333,40,2],[8336,97,1],
+      [8337,101,1],[8338,111,1],[8339,120,1],[8341,104,1],[8342,107,4],[8346,112,1],[8347,115,2],
+      [8450,67,1],[8458,103,1],[8459,72,1],[8460,72,1],[8461,72,1],[8462,104,1],[8464,73,1],
+      [8465,73,1],[8466,76,1],[8467,108,1],[8469,78,1],[8473,80,3],[8476,82,1],[8477,82,1],
+      [8484,90,1],[8488,90,1],[8490,75,1],[8492,66,2],[8495,101,1],[8496,69,2],[8499,77,1],
+      [8500,111,1],[8505,105,1],[8517,68,1],[8518,100,2],[8520,105,2],[8544,73,1],[8548,86,1],
+      [8553,88,1],[8556,76,1],[8557,67,2],[8559,77,1],[8560,105,1],[8564,118,1],[8569,120,1],
+      [8572,108,1],[8573,99,2],[8575,109,1],[9312,49,9],[9398,65,26],[9424,97,26],[9450,48,1],
+      [11388,106,1],[11389,86,1],[12288,32,1],[42994,67,1],[42995,70,1],[42996,81,1],[64297,43,1],
+      [65040,44,1],[65043,58,2],[65045,33,1],[65046,63,1],[65075,95,1],[65076,95,1],[65077,40,2],
+      [65079,123,1],[65080,125,1],[65095,91,1],[65096,93,1],[65101,95,1],[65102,95,1],[65103,95,1],
+      [65104,44,1],[65106,46,1],[65108,59,1],[65109,58,1],[65110,63,1],[65111,33,1],[65113,40,2],
+      [65115,123,1],[65116,125,1],[65119,35,1],[65120,38,1],[65121,42,2],[65123,45,1],[65124,60,1],
+      [65125,62,1],[65126,61,1],[65128,92,1],[65129,36,2],[65131,64,1],[65281,33,94],[67493,113,1],
+      [117974,65,26],[118000,48,10],[119808,65,26],[119834,97,26],[119860,65,26],[119886,97,7],
+      [119894,105,18],[119912,65,26],[119938,97,26],[119964,65,1],[119966,67,2],[119970,71,1],
+      [119973,74,2],[119977,78,4],[119982,83,8],[119990,97,4],[119995,102,1],[119997,104,7],
+      [120005,112,11],[120016,65,26],[120042,97,26],[120068,65,2],[120071,68,4],[120077,74,8],
+      [120086,83,7],[120094,97,26],[120120,65,2],[120123,68,4],[120128,73,5],[120134,79,1],
+      [120138,83,7],[120146,97,26],[120172,65,26],[120198,97,26],[120224,65,26],[120250,97,26],
+      [120276,65,26],[120302,97,26],[120328,65,26],[120354,97,26],[120380,65,26],[120406,97,26],
+      [120432,65,26],[120458,97,26],[120782,48,10],[120792,48,10],[120802,48,10],[120812,48,10],
+      [120822,48,10],[127275,67,1],[127276,82,1],[127280,65,26],[130032,48,10]
+    ];
+    def gl_norm: explode
+      | map(. as $c | if $c < 128 then $c
+                      else (first(gl_nfkc_runs[] | select($c >= .[0] and $c < .[0] + .[2]) | .[1] + ($c - .[0])) // empty)
+                      end)
+      | implode | ascii_downcase;
     .[] | select(.body != null)
      | select(((.state // "") | ascii_upcase) != "PENDING")
      | select('"$GL_TRUST_FILTER"')
@@ -212,10 +278,15 @@ GL_VERDICT_JQ='
      | (if $fs.mode == "" and $hits == 1 and ($fs.starts | length) == 1 and ($fs.ends | length) == 1
           and ([$ls[$fs.ends[0]+1:][] | select(test("^[ \t]*$") | not)] | length) == 0
         then $ls[$fs.starts[0]+1:$fs.ends[0]] else null end) as $b0
-     | (if $b0 != null
-          and ([$b0[] | select(test("```|~~~"))] | length) == 0
-          and ([("verdict", "commit", "sha", "head") as $k
-                | [$b0[] | select(test("^[ \t]*" + $k + "[ \t]*:"))] | length | select(. > 1)] | length) == 0
+     | (if $b0 != null and ([$b0[] | gl_line_ok] | all)
+          and ([$b0[] | sub(":.*$"; "")] | (length == (unique | length)))
+          # ONE-VERDICT-FENCE rule (SPEC-090, 2026-10-11): after gl_norm, exactly one
+          # verdict-like fence opener in the body, and nothing outside the fence content
+          # (prose, HTML comments, other fences) folds to `verdict: pass|fail|incomplete`
+          # (whole word) -- else malformed. Other `Verdict:` prose is ignored.
+          and ([$ls[] | gl_norm | select(test("(```|~~~).*sge-verdict"))] | length) == 1
+          and ([($ls[:$fs.starts[0] + 1] + $ls[$fs.ends[0]:])[] | gl_norm
+                | select(test("verdict[ \t]*:[ \t]*(pass|fail|incomplete)([^a-z0-9_]|$)"))] | length) == 0
         then $b0 else null end) as $blk
      | def kv($k): [($blk // [])[] | capture("^[ \t]*" + $k + "[ \t]*:[ \t]*(?<v>[^ \t]*)") | .v] | first // "";
        (kv("commit") | if . == "" then kv("sha") else . end | if . == "" then kv("head") else . end) as $sha
@@ -223,6 +294,7 @@ GL_VERDICT_JQ='
      | (if $edited or $blk == null then ["", "malformed"]
         elif ($isc | not) and ((.state // "") | ascii_upcase) == "CHANGES_REQUESTED" and $v == "pass" then ["", "malformed"]
         elif ($isc | not) and ((.state // "") | ascii_upcase) == "DISMISSED" then [$sha, "dismissed"]
+        elif $v == "" then ["", "malformed"]
         else [$sha, $v] end) as $r
      | [(if $ts == "" then "-" else $ts end), (if $r[0] == "" then "-" else $r[0] end), (if $r[1] == "" then "-" else $r[1] end)]
      | @tsv'
@@ -263,8 +335,8 @@ gl_repo() {
 # an older review). Either field may be empty; prints a lone tab when there is
 # no verdict. Returns 3 when the API could not be read (callers must not
 # mistake an outage for "no verdict").
-gl_latest_verdict() {
-  local pr="$1" repo rows more last sha v
+gl_verdict_rows() {
+  local pr="$1" repo rows more
   repo=$(gl_repo) || repo=""
   [[ -n "$repo" ]] || return 3
   [[ "$repo" == */* && "$pr" =~ ^[0-9]+$ ]] || return 3
@@ -275,8 +347,39 @@ gl_latest_verdict() {
     -f query="$GL_GQL_COMMENTS" \
     --jq "$GL_GQL_REST .data.repository.pullRequest.comments.nodes | map(gl_gql_rest) | $GL_VERDICT_JQ" 2>/dev/null) || return 3
   # Stable sort on the timestamp: equal stamps keep reviews before comments.
-  last=$(printf '%s\n%s\n' "$rows" "$more" | tr -d '\r' | grep -v '^[[:space:]]*$' \
-    | LC_ALL=C sort -s -t $'\t' -k1,1 | tail -n 1)
+  local all
+  all=$(printf '%s\n%s\n' "$rows" "$more" | tr -d '\r' | grep -v '^[[:space:]]*$')
+  # Every row is `<ts><TAB><sha><TAB><verdict>`: anything else is garbage from a broken
+  # fetch, which must read as unreadable (fail closed), never as "no verdict".
+  if [[ -n "$all" ]] && ! printf '%s\n' "$all" | awk -F'\t' 'NF != 3 { bad = 1 } END { exit bad }'; then
+    return 3
+  fi
+  [[ -z "$all" ]] || printf '%s\n' "$all" | LC_ALL=C sort -s -t $'\t' -k1,1
+  return 0   # no rows at all is a valid (empty) answer, not an error
+}
+
+gl_latest_verdict() {
+  local pr="$1" rows last sha v
+  rows=$(gl_verdict_rows "$pr") || return 3
+  last=$(printf '%s\n' "$rows" | tail -n 1)
+  sha=$(printf '%s' "$last" | cut -f2)
+  v=$(printf '%s' "$last" | cut -f3)
+  [[ "$sha" == "-" ]] && sha=""
+  [[ "$v" == "-" ]] && v=""
+  printf '%s\t%s' "$sha" "$v"
+}
+
+# gl_latest_verdict_for_head <pr> <head> -- like gl_latest_verdict, but over the
+# verdicts that judged <head> (or name no commit): an unrelated trusted fence for
+# another commit cannot mask the head's own verdict (SPEC-090 incomplete guard).
+gl_latest_verdict_for_head() {
+  local pr="$1" head rows last sha v
+  head=$(gl_norm_sha "$2") || head=""
+  rows=$(gl_verdict_rows "$pr") || return 3
+  last=$(printf '%s\n' "$rows" | awk -F'\t' -v h="$head" '
+    { s = tolower($2) }
+    s == "-" || s == "" { print; next }
+    h != "" && length(s) >= 7 && length(h) >= 7 && (index(h, s) == 1 || index(s, h) == 1) { print }' | tail -n 1)
   sha=$(printf '%s' "$last" | cut -f2)
   v=$(printf '%s' "$last" | cut -f3)
   [[ "$sha" == "-" ]] && sha=""
@@ -315,6 +418,11 @@ gl_main() {
     latest-verdict)
       [[ -n "${2:-}" ]] || { echo "usage: gate-labels.sh latest-verdict <pr>" >&2; return 2; }
       gl_latest_verdict "$2" || { echo "gate-labels: could not read verdicts for PR #$2" >&2; return 3; }
+      echo
+      ;;
+    latest-for-head)
+      [[ -n "${2:-}" && -n "${3:-}" ]] || { echo "usage: gate-labels.sh latest-for-head <pr> <head>" >&2; return 2; }
+      gl_latest_verdict_for_head "$2" "$3" || { echo "gate-labels: could not read verdicts for PR #$2" >&2; return 3; }
       echo
       ;;
     current)
