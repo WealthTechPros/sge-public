@@ -276,6 +276,31 @@ rl__repo() {
   printf '%s\n' "${GH_REPO:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"
 }
 
+# Azure Repos comment plumbing (#2989): the issue-comment POST/GET the review
+# lane makes through `gh api` goes through the adapter instead, whose pr-comment
+# prints the new closed thread's numeric id. GitHub behaviour is unchanged.
+#   rl__post_issue_comment       <repo> <pr> <body>  App-token (rl_gh) POST; prints
+#                                the response JSON ({"id": N} on Azure Repos)
+#   rl__post_issue_comment_plain <repo> <pr> <body>  ambient-gh POST (--jq .id)
+rl__azdo_post() { # <pr> <body> -> {"id": N}
+  local origin f tid rc=0
+  origin=$(git remote get-url origin 2>/dev/null) || return 1
+  f=$(mktemp "${TMPDIR:-/tmp}/sge-azdo-comment.XXXXXX") || return 1
+  printf '%s' "$2" > "$f"
+  tid=$(AZDO_ADAPTER_ALLOW_WRITE=1 bash "$_SGE_GHPR_AA" pr-comment "$origin" "$1" "$f" 2>/dev/null) || rc=$?
+  rm -f "$f"
+  [ "$rc" -eq 0 ] && [[ "$tid" =~ ^[0-9]+$ ]] || return 1
+  printf '{"id":%s}\n' "$tid"
+}
+rl__post_issue_comment() {
+  if [ "$(sge_pr_host)" = azdo ]; then rl__azdo_post "$2" "$3"; return; fi
+  rl_gh api --method POST "repos/${1}/issues/${2}/comments" -f body="$3" 2>/dev/null
+}
+rl__post_issue_comment_plain() {
+  if [ "$(sge_pr_host)" = azdo ]; then rl__azdo_post "$2" "$3"; return; fi
+  gh api "repos/$1/issues/$2/comments" -f body="$3" --jq '.id'
+}
+
 # rl_scratch_file <pr> [label] -- print a PR-scoped, collision-proof scratch
 # path for a review draft/body/thread artefact (issue #1667). Two concurrent
 # /sge:pr-review lanes (pr-monitor runs LANES=3 by default) MUST NOT share a
@@ -368,6 +393,9 @@ rl_bot_login_regex() {
 # No output = no bot signal (a normal, common case — blocks nothing).
 rl_bot_signal() {
   local pr="$1" repo refusal bot_re
+  # Azure Repos (#2989) has no bot-typed reviewer (no Copilot/CodeQL review
+  # objects): no signal, which blocks nothing and never suppresses a dispatch.
+  if [ "$(sge_pr_host)" = azdo ]; then return 0; fi
   repo=$(rl__repo) || return 1
   # Injected via the environment (env.REFUSAL_RE / env.BOT_RE): `gh api --jq`
   # has no --arg passthrough, so both regexes are read from per-command env
@@ -1090,7 +1118,7 @@ rl_post_lane_manifest() {
   claimed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   body="$(printf '```%s\n{"owner":"%s","role":"%s","claimedAt":"%s","ttl":%d}\n```' \
     "$LANE_MANIFEST_FENCE" "$owner" "$role" "$claimed_at" "${SGE_LANE_MANIFEST_TTL:-$LANE_MANIFEST_TTL_DEFAULT}")"
-  gh api "repos/$repo/issues/$pr/comments" -f body="$body" --jq '.id' >/dev/null 2>&1 \
+  rl__post_issue_comment_plain "$repo" "$pr" "$body" >/dev/null 2>&1 \
     && echo "PR #$pr: lane-manifest comment posted (role=$role, owner=$owner)" >&2 \
     || echo "warning: PR #$pr could not post lane-manifest comment — continuing (advisory, issue #2214)" >&2
   return 0
@@ -1107,9 +1135,14 @@ rl_lane_manifest_active() {
   local pr="${1:?rl_lane_manifest_active: pr required}" exclude_role="${2:-}"
   local repo comments winner
   repo=$(rl__repo) || return 0
+  if [ "$(sge_pr_host)" = azdo ]; then
+    comments=$(sge_pr_comments_json "$pr" 2>/dev/null \
+      | jq -c --arg f "$LANE_MANIFEST_FENCE" '[.[] | select(.body | ltrimstr("\n") | startswith("```" + $f))]' 2>/dev/null) || return 0
+  else
   comments=$(gh api "repos/$repo/issues/$pr/comments" --paginate \
     --jq "[.[] | select(.body | ltrimstr(\"\n\") | startswith(\"\`\`\`${LANE_MANIFEST_FENCE}\"))]" \
     2>/dev/null) || return 0
+  fi
   [ -n "$comments" ] && [ "$comments" != "null" ] || return 0
   # Single jq call does extraction, TTL-liveness math and last-wins reduction
   # in one process — no chained `jq | sed | while read` pipeline. A prior
@@ -1185,8 +1218,14 @@ rl_idempotency_check() {
   labels=$(printf '%s' "$state" | jq -r '.labels[]? // empty' 2>/dev/null) || labels=""
   if printf '%s\n' "$labels" | grep -qx 'pr-reviewed'; then
     repo=$(rl__repo) || return 0   # can't verify → proceed
+    if [ "$(sge_pr_host)" = azdo ]; then
+      # Azure Repos (#2989): the newest verdict ARTEFACT by this token identity
+      # ("<verdict> <sha>" | none) stands in for the last review body's commit.
+      last_verdict=$(rl__azdo_verdict_commit "$pr") || last_verdict=""
+    else
     last_verdict=$(gh api "repos/$repo/pulls/$pr/reviews" --jq \
       '[.[].body // "" | select(contains("sge-verdict"))] | last // ""' 2>/dev/null) || last_verdict=""
+    fi
     if [ -n "$last_verdict" ]; then
       last_sha=$(printf '%s' "$last_verdict" \
         | grep -oE 'commit:[[:space:]]*[0-9a-f]+' \
@@ -1200,6 +1239,17 @@ rl_idempotency_check() {
   fi
 
   return 0
+}
+
+# Azure Repos review coverage (#2989): "commit: <sha>" of the newest verdict
+# artefact the token identity wrote (adapter pr-verdict-status), nothing when
+# there is none or it is unreadable - the shape rl_idempotency_check greps.
+rl__azdo_verdict_commit() { # <pr>
+  local origin vs
+  origin=$(git remote get-url origin 2>/dev/null) || return 1
+  vs=$(bash "$_SGE_GHPR_AA" pr-verdict-status "$origin" "$1" 2>/dev/null | tr -d '\r') || return 1
+  [[ "$vs" =~ ^(approve|wait|reject)\ ([0-9a-f]{40})$ ]] || return 1
+  printf 'commit: %s\n' "${BASH_REMATCH[2]}"
 }
 
 # One-line PR state for the concurrency/idempotency short-circuit (#699).
@@ -2046,6 +2096,13 @@ rl_verdict_findings_ref() {
 rl_post_findings_comment() {
   local pr="${1:?rl_post_findings_comment: pr required}" src="${2:--}" repo body resp cid readback url
   repo=$(rl__repo) || return 1
+  # Azure Repos (#2989): delivery is verified against a GitHub issue-comment URL
+  # (rl_verdict_findings_unverified), which has no Azure equivalent - fail closed
+  # so the caller folds the findings INTO the verdict body (`findings_comment: inline`).
+  if [ "$(sge_pr_host)" = azdo ]; then
+    echo "rl_post_findings_comment: findings-comment delivery cannot be verified on Azure Repos - fold the findings inline (findings_comment: inline)" >&2
+    return 1
+  fi
   if [ "$src" = "-" ]; then
     body=$(cat)
   else
@@ -2208,7 +2265,7 @@ rl_post_verdict_comment() {
     return 5
   fi
   body="$(rl_verdict_mark_body "$body")"
-  resp=$(rl_gh api --method POST "repos/${repo}/issues/${pr}/comments" -f body="$body" 2>/dev/null) || {
+  resp=$(rl__post_issue_comment "$repo" "$pr" "$body") || {
     echo "rl_post_verdict_comment: could not post the verdict comment on PR #${pr}" >&2
     return 1
   }
@@ -2603,7 +2660,7 @@ rl_fail_loud_rate_limited() {
   msg=$(printf 'pr-review stopped: GitHub rate-limit exhaustion detected (%s).\n\nQuota snapshot (remaining limit reset_epoch): `%s`\n\nThis run is failing loud instead of silently retrying/wedging (issue #1147). Re-run once the quota window resets. (GraphQL draws from a separate bucket — `rl_pr_state_gql` / `rl_checks_status_gql` exist as contract-compatible prep helpers but are not yet wired into dispatch.)' \
     "$reason" "${status:-unknown}")
   if [ -n "$repo" ]; then
-    gh api "repos/$repo/issues/$pr/comments" -f body="$msg" >/dev/null 2>&1 \
+    rl__post_issue_comment_plain "$repo" "$pr" "$msg" >/dev/null 2>&1 \
       || echo "rl_fail_loud_rate_limited: could not post the stall-reason PR comment (best-effort only — the loud stderr message above is the primary signal)" >&2
   fi
   echo 1
