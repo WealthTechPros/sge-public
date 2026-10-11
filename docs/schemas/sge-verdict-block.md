@@ -158,8 +158,8 @@ One `key: value` per line inside the fence. All 31 fields below are emitted by
 `/sge:pr-review`; two are additionally required by the independence gate.
 
 ```sge-verdict
-verdict: pass | fail
-recommendation: APPROVE | REQUEST_CHANGES | COMMENT
+verdict: pass | fail | incomplete
+recommendation: APPROVE | REQUEST_CHANGES | COMMENT   # incomplete => COMMENT
 pr: <number>
 commit: <full 40-hex HEAD SHA reviewed; the merge gate treats a short SHA as unproven>
 reviewed_at: <ISO-8601 UTC>
@@ -205,7 +205,13 @@ existing fields without updating both parser implementations (see
 ### Field notes
 
 **`verdict`** — `pass` satisfies the independence gate (case-insensitive);
-`fail` does not. Hedged values such as `pass-with-blockers` do not satisfy the
+`fail` does not. `incomplete` (SPEC-090, sge#2996) means a required lane could not
+execute (no network/pytest in the sandbox, a lane timeout under the cap, or the
+turn cap hit after findings but before a verdict). It is neither pass nor fail:
+it never satisfies the gate, is **blocking** for auto-merge and `pr-reviewed`
+(a non-`pass` value, so every existing reader already fails closed on it), and
+by itself applies no `changes-requested` label or formal CHANGES_REQUESTED
+review. It MUST carry `not_completed:` naming exactly what was not run. Hedged values such as `pass-with-blockers` do not satisfy the
 gate (bypass 12).
 
 **`recommendation`** — maps to the GitHub review event: `APPROVE`,
@@ -287,8 +293,9 @@ delta_escalation: none | <one line>         # mode: delta -- none = light re-rev
 ```
 
 `not_completed` lists the lanes still running at the review's wall-clock cap
-(SPEC-090 §2.1); an unfinished lane is never a pass, and an unfinished required
-lane makes the verdict `fail` with a `timed out` reason
+(SPEC-090 §2.1), or any required lane/check that could not execute (sge#2996);
+an unfinished lane is never a pass, and an unfinished required
+lane makes the verdict `incomplete` (sge#2996; previously `fail`) with a `timed out` reason
 (`skills/pr-review/references/dispatch-scaling.md`). A `mode: delta` pass is
 merge authority (SPEC-090 §2.6 rule 5) only with `prior_findings_open: 0`,
 `delta_escalation: none` and a `delta_from` chain reaching an earlier trusted
