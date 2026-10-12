@@ -35,3 +35,7 @@ case "$HOLD" in
      echo "PR #$PR held [${HOLD:-parse-failed}] — advisory: comment-only (#1291/#1347)" ;;
 esac
 ```
+
+## Draft PRs at the Phase 6 gate
+
+Moved from `../SKILL.md` Phase 6 (size budget). **Draft PRs:** never `pass` a still-draft PR (script refuses; gate defers). The reviewer never undrafts (#1291) — a draft stays draft, verdict via `rl_post_verdict_comment`.

@@ -1675,17 +1675,37 @@ rl_reviewer_ran() {
 # `_attest_pending` / `_ATTEST_FILE`.
 rl__attest_file() {
   local pr="${1:?rl__attest_file: pr required}"
+  # A daemon-injected ledger (SPEC-090): repo slug, PR and head are in its name.
+  if [ -n "${SGE_REVIEW_ATTEST_FILE:-}" ]; then printf '%s' "$SGE_REVIEW_ATTEST_FILE"; return 0; fi
   local dir="${SGE_REVIEW_STATE_DIR:-${TMPDIR:-${TEMP:-/tmp}}}"
   local repo="${GH_REPO:-local}"
   repo="${repo//[^A-Za-z0-9._-]/_}"   # flatten owner/repo → owner_repo for a filename
   printf '%s/sge-review-attest.%s.%s' "$dir" "$repo" "$pr"
 }
 
-# rl_attest_reset <pr> — start a clean ledger for a fresh review pass.
+# rl__attest_ready <file> -- before ANY ledger write: a daemon-injected ledger's
+# directory is created (0700) and verified (a real directory, not a symlink, owned
+# by this user, no group/other access); failure is LOUD (stderr + return 1), never
+# silent. A legacy (non-injected) ledger keeps the old best-effort mkdir.
+rl__attest_ready() {
+  local f="$1" d perm
+  d=$(dirname "$f")
+  if [ -z "${SGE_REVIEW_ATTEST_FILE:-}" ]; then mkdir -p "$d" 2>/dev/null; return 0; fi
+  mkdir -p -m 700 "$d" 2>/dev/null
+  perm=$(stat -c %a "$d" 2>/dev/null || stat -f %Lp "$d" 2>/dev/null)
+  if [ -d "$d" ] && [ ! -L "$d" ] && [ -O "$d" ] && [ "${perm: -2}" = "00" ]; then return 0; fi
+  echo "rl_attest: the attestation directory $d cannot be created or trusted (not a real 0700 directory owned by this user) -- the #883 attestation would silently never engage" >&2
+  return 1
+}
+
+# rl_attest_reset <pr> — start a clean ledger for a fresh review pass. Lines the
+# DAEMON wrote (dispatch<TAB><id><TAB>daemon) survive the reset.
 rl_attest_reset() {
-  local pr="${1:?rl_attest_reset: pr required}" f
+  local pr="${1:?rl_attest_reset: pr required}" f keep=""
   f=$(rl__attest_file "$pr") || return 1
-  : > "$f" 2>/dev/null || return 1
+  rl__attest_ready "$f" || return 1
+  [ -f "$f" ] && keep=$(grep -E $'^dispatch\t[^\t]*\tdaemon$' "$f" 2>/dev/null || true)
+  if [ -n "$keep" ]; then printf '%s\n' "$keep" > "$f" 2>/dev/null || return 1; else : > "$f" 2>/dev/null || return 1; fi
 }
 
 # rl_reviewer_dispatch <pr> <agent_id> — record a dispatched reviewer as PENDING.
@@ -1693,6 +1713,7 @@ rl_attest_reset() {
 rl_reviewer_dispatch() {
   local pr="${1:?rl_reviewer_dispatch: pr required}" id="${2:?rl_reviewer_dispatch: agent id required}" f
   f=$(rl__attest_file "$pr") || return 1
+  rl__attest_ready "$f" || return 1
   printf 'dispatch\t%s\n' "$id" >> "$f" || return 1
 }
 
@@ -1706,7 +1727,13 @@ rl_reviewer_attest() {
   f=$(rl__attest_file "$pr") || return 1
   verdict=$(rl_reviewer_ran "$tool_uses" "$reply"); rc=$?
   if [ "$rc" -eq 0 ]; then
-    printf 'attest\t%s\n' "$id" >> "$f" || return 1
+    rl__attest_ready "$f" || return 1
+    # The dispatch's nonce (SPEC-090) rides on the attest line when the daemon set one.
+    if [ -n "${SGE_REVIEW_ATTEST_NONCE:-}" ]; then
+      printf 'attest\t%s\t%s\n' "$id" "$SGE_REVIEW_ATTEST_NONCE" >> "$f" || return 1
+    else
+      printf 'attest\t%s\n' "$id" >> "$f" || return 1
+    fi
   fi
   printf '%s\n' "$verdict"
   return "$rc"
@@ -1717,9 +1744,9 @@ rl_attest_pending() {
   local pr="${1:?rl_attest_pending: pr required}" f
   f=$(rl__attest_file "$pr") || { echo 0; return 0; }
   [ -f "$f" ] || { echo 0; return 0; }
-  awk -F'\t' '
+  awk -F'\t' -v inj="${SGE_REVIEW_ATTEST_FILE:+1}" -v nonce="${SGE_REVIEW_ATTEST_NONCE:-}" '
     $1=="dispatch" { pend[$2]=1 }
-    $1=="attest"   { delete pend[$2] }
+    $1=="attest"   { if (inj != "1" || (nonce != "" && NF == 3 && $3 == nonce)) delete pend[$2] }
     END { n=0; for (a in pend) n++; print n }
   ' "$f" 2>/dev/null || echo 0
 }
@@ -2226,6 +2253,23 @@ rl_verdict_field() {
     END { if (n == 1) print v }'
 }
 
+# rl_verdict_strict <body> -- print the verdict word (ASCII-lowercased) ONLY when <body>
+# is a CLEAN verdict body, and nothing otherwise, so callers fail closed. It runs
+# gate-labels.sh's own reader (GL_VERDICT_JQ: fence structure, the positive allowlist
+# and the one-verdict-fence rule) over <body> as an unedited COMMENTED review by the
+# review identity, so it can never disagree with the merge gate; the shared fixture
+# corpus (gate-labels.verdict-fixtures.json) pins that in
+# skills/tests/review-lib-incomplete-event.test.sh. SPEC-090.
+rl_verdict_strict() {
+  local gl out
+  gl="$(dirname "${BASH_SOURCE[0]}")/gate-labels.sh"
+  out=$(jq -n --arg b "${1:-}" '[{body: $b, state: "COMMENTED", user: {login: "wtp-sge[bot]"}}]' 2>/dev/null \
+    | REVIEW_DAEMON_TRUSTED_VERDICT_AUTHORS="" GL_PR_AUTHOR="" GL_NODE_SOURCE=review \
+      bash -c '. "$1"; jq -r "$GL_VERDICT_JQ"' _ "$gl" 2>/dev/null) || return 0
+  out=$(printf '%s\n' "$out" | head -n 1 | cut -f3)
+  case "$out" in ""|-|malformed) ;; *) printf '%s' "$out" ;; esac
+}
+
 # The review-verdict marker (sge#2808). Only the review identity (the wtp-sge
 # App, or a REVIEW_DAEMON_TRUSTED_VERDICT_AUTHORS login) supplies a verdict, and
 # an ISSUE COMMENT it posts counts as a verdict only when this is the body's
@@ -2307,6 +2351,38 @@ rl_post_verdict() {
   repo=$(rl__repo) || return 1
   [ -n "$body" ] || body="$(cat)"
   body="$(rl_verdict_fill_session "$body")"
+  # Incomplete guard (SPEC-090, sge#2996): `verdict: incomplete` (a required lane
+  # could not run) is neither pass nor fail, so it is only ever posted as a plain
+  # COMMENT: never an APPROVE (it would read as a pass) and never a
+  # REQUEST_CHANGES (incomplete applies no CHANGES_REQUESTED by itself). Refused
+  # before any network write; the value is read first-word, ASCII-folded.
+  local ivd
+  ivd=$(rl_verdict_strict "$body")
+  if [ "$ivd" = "incomplete" ] && [ "$event" != "COMMENT" ]; then
+    echo "rl_post_verdict: REFUSING to post verdict: incomplete as ${event} -- an incomplete review (a required lane could not run) posts only as COMMENT, never an approval and never CHANGES_REQUESTED (SPEC-090). Re-run with event COMMENT." >&2
+    return 7
+  fi
+  # An unparseable body that still says `verdict: incomplete` on a verdict-looking
+  # line is forced to a plain COMMENT: never an APPROVE, never a REQUEST_CHANGES.
+  if [ -z "$ivd" ] && [ "$event" != "COMMENT" ] \
+     && printf '%s\n' "$body" | grep -Eiq '^[[:space:]]*verdict[[:space:]]*:[[:space:]]*incomplete'; then
+    if [ "$event" = "APPROVE" ]; then
+      echo "rl_post_verdict: REFUSING to APPROVE a body that says 'verdict: incomplete' but does not parse as a clean verdict block (SPEC-090)." >&2
+      return 7
+    fi
+    echo "rl_post_verdict: the body does not parse as a clean verdict block but says 'verdict: incomplete' -- forcing event COMMENT instead of ${event} (SPEC-090)" >&2
+    event=COMMENT
+  fi
+  # Positive rule: an APPROVE of a body that carries ANY sge-verdict-shaped opener
+  # posts only when that fence parses to exactly one `verdict: pass`. A duplicate
+  # `verdict:` key, a non-exact opener, an empty fence or any other value makes
+  # rl_verdict_field print nothing, which must never read as permission. A body
+  # with no verdict opener at all (an advisory one-liner) is not a verdict.
+  if [ "$event" = "APPROVE" ] && [ "$ivd" != "pass" ] \
+     && printf '%s\n' "$body" | grep -Eq '(```|~~~).*[sS][gG][eE]-[vV][eE][rR][dD][iI][cC][tT]'; then
+    echo "rl_post_verdict: REFUSING to APPROVE -- the body carries an sge-verdict block that does not parse to exactly one 'verdict: pass' (got '${ivd:-none}': duplicate key, non-exact fence, empty or non-pass value) (SPEC-090)." >&2
+    return 7
+  fi
   # Pre-post draft-vs-PR guard (issue #1667). The load-bearing fix: BEFORE any
   # network write, prove the body being posted belongs to THIS PR, so a stale or
   # foreign draft (e.g. a concurrent lane's `review.md` that overwrote ours)

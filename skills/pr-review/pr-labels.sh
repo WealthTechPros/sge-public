@@ -829,6 +829,17 @@ if [ "$_PRL_HOST" = "azdo" ]; then
   exit "$_prl_azdo_rc"
 fi
 
+# _attest_dir_trusted <dir> -- create (0700) and verify a daemon-injected attestation
+# directory: a real directory (not a symlink), owned by this user, no group/other
+# access. Returns 1 (callers fail LOUDLY) otherwise. SPEC-090 / PR #3004 review.
+_attest_dir_trusted() {
+  local d="$1" perm
+  mkdir -p -m 700 "$d" 2>/dev/null || true
+  [[ -d "$d" && ! -L "$d" && -O "$d" ]] || return 1
+  perm=$(stat -c %a "$d" 2>/dev/null || stat -f %Lp "$d" 2>/dev/null) || return 1
+  [[ "$perm" =~ ^[0-7]{3,4}$ && "${perm: -2}" == "00" ]] || return 1
+}
+
 ensure_labels() {
   # Idempotent — creates if missing, updates colour/description if present.
   gh label create "$REVIEWING" --color FBCA04 --description "PR review in progress (SGE)"     --force >/dev/null
@@ -1594,9 +1605,25 @@ case "$CMD" in
     ensure_labels
     # Reset the #883 attestation ledger — a fresh review pass starts with an
     # empty dispatched-reviewer roster (matches review-lib.sh rl_attest_reset).
+    # A daemon-injected ledger (SGE_REVIEW_ATTEST_FILE, SPEC-090) keeps the DAEMON's
+    # own dispatch lines (dispatch<TAB><id><TAB>daemon) across the reset, and its
+    # directory is verified: failing to create or trust it is loud, never silent.
     _ATTEST_DIR="${SGE_REVIEW_STATE_DIR:-${TMPDIR:-${TEMP:-/tmp}}}"
     _ATTEST_REPO="${GH_REPO:-local}"; _ATTEST_REPO="${_ATTEST_REPO//[^A-Za-z0-9._-]/_}"
-    : > "${_ATTEST_DIR}/sge-review-attest.${_ATTEST_REPO}.${PR}" 2>/dev/null || true
+    _ATTEST_RESET="${_ATTEST_DIR}/sge-review-attest.${_ATTEST_REPO}.${PR}"
+    if [[ -n "${SGE_REVIEW_ATTEST_FILE:-}" ]]; then
+      _ATTEST_RESET="$SGE_REVIEW_ATTEST_FILE"
+      _attest_dir_trusted "$(dirname "$_ATTEST_RESET")" || { echo "refusing: the attestation ledger directory cannot be created or trusted ($(dirname "$_ATTEST_RESET")); not starting a review whose #883 attestation would silently never engage" >&2; exit 1; }
+      _ATTEST_KEEP=""
+      [[ -f "$_ATTEST_RESET" ]] && _ATTEST_KEEP=$(grep -E $'^dispatch\t[^\t]*\tdaemon$' "$_ATTEST_RESET" 2>/dev/null || true)
+      if [[ -n "$_ATTEST_KEEP" ]]; then
+        printf '%s\n' "$_ATTEST_KEEP" > "$_ATTEST_RESET" 2>/dev/null || { echo "refusing: cannot rewrite the attestation ledger $_ATTEST_RESET" >&2; exit 1; }
+      else
+        : > "$_ATTEST_RESET" 2>/dev/null || { echo "refusing: cannot reset the attestation ledger $_ATTEST_RESET" >&2; exit 1; }
+      fi
+    else
+      : > "$_ATTEST_RESET" 2>/dev/null || echo "warning: could not reset the attestation ledger $_ATTEST_RESET (no ledger: the #883 backstop will not engage)" >&2
+    fi
     add_label "$REVIEWING"
     remove_label "$REVIEWED"        # any prior pass is void once a review restarts
     # Post the claim comment alongside the label (issue #1312 AC1). Best-effort —
@@ -1652,13 +1679,41 @@ case "$CMD" in
     if [[ "${_PRL_HOST:-github}" != "forgejo" ]]; then
       _PASS_HEAD=$(gh pr view "$PR" --json headRefOid --jq .headRefOid 2>/dev/null) || _PASS_HEAD=""
       _PASS_REPO_FULL="${GH_REPO:-$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || true)}"
+      # SPEC-090: ONE invariant, and it is the merge gate's own reader. `pass` consults only
+      # `gate-labels.sh latest-for-head` (reviews AND issue comments, the gate's trust rules,
+      # its fence/structural parsing), so it cannot disagree with `gate-labels.sh current`
+      # (re-checked by sge-auto-merge.yml, which requires an exact `pass`):
+      #   1. an unresolvable head or repo, or any fetch/parse failure of that reader, refuses;
+      #   2. when the reader reports a verdict word for this head it must be EXACTLY `pass`
+      #      (incomplete, malformed, fail, garbled and empty-valued all refuse);
+      #   3. when it reports NO verdict for the head, behaviour is unchanged: a body the reader
+      #      cannot see (BOM, fullwidth colon, untrusted author, PAT comment fallback) is just as
+      #      invisible to `current`, so it can never produce a merge.
+      if [[ -z "$_PASS_HEAD" || -z "$_PASS_REPO_FULL" ]]; then
+        echo "refusing: PR #$PR -- the PR head or the repository could not be resolved (head='${_PASS_HEAD:0:12}', repo='${_PASS_REPO_FULL}'), so the verdict guard cannot run. Fail closed (SPEC-090)." >&2
+        exit 11
+      fi
+      if ! _PASS_GL=$(bash "$(dirname "${BASH_SOURCE[0]}")/gate-labels.sh" latest-for-head "$PR" "$_PASS_HEAD" 2>/dev/null); then
+        echo "refusing: PR #$PR -- the trusted verdicts for the current head (${_PASS_HEAD:0:12}) could not be read or parsed (API error or garbage). Fail closed (SPEC-090)." >&2
+        exit 11
+      fi
+      _PASS_GL_WORD=$(printf '%s' "${_PASS_GL#*$'\t'}" | tr -d '[:space:]')
+      if [[ -n "$_PASS_GL_WORD" && "$_PASS_GL_WORD" != "pass" ]]; then
+        echo "refusing: PR #$PR -- the latest trusted sge-verdict for the current head (${_PASS_HEAD:0:12}) is '${_PASS_GL_WORD:0:40}', not exactly 'pass' (incomplete, malformed, fail and garbled values all block). Only a clean 'verdict: pass' may proceed (SPEC-090)." >&2
+        exit 11
+      fi
       if [[ -n "$_PASS_HEAD" && -n "$_PASS_REPO_FULL" ]]; then
+        # Deliberately WIDER than the gate's trust (gate-labels.sh GL_TRUST_FILTER): this read can
+        # only REFUSE (shadow mode), never admit, so extra authors fail safe.
         _PASS_TRUST='.user.login == "wtp-sge[bot]" or .user.login == "github-actions[bot]"
              or (((.author_association // "") | ascii_upcase) as $assoc
                  | $assoc == "OWNER" or $assoc == "MEMBER" or $assoc == "COLLABORATOR")'
         _PASS_LAST=$(gh api "repos/$_PASS_REPO_FULL/pulls/$PR/reviews" --paginate \
           --jq '[.[] | select(.body != null) | select('"$_PASS_TRUST"') | select(.body | test("```sge-verdict")) | .body] | last // empty' \
-          2>/dev/null) || _PASS_LAST=""
+          2>/dev/null) || {
+            echo "refusing: PR #$PR -- the shadow-verdict read for the current head (${_PASS_HEAD:0:12}) failed. Fail closed (SPEC-090)." >&2
+            exit 11
+          }
         if [[ -n "$_PASS_LAST" ]]; then
           # Fallbacks (found by adversarial re-verification, issue #2653): a
           # trusted, fence-matching verdict whose body has no matchable
@@ -1703,14 +1758,22 @@ case "$CMD" in
       _ATTEST_REPO="${GH_REPO:-local}"
       _ATTEST_REPO="${_ATTEST_REPO//[^A-Za-z0-9._-]/_}"
       _ATTEST_FILE="${_ATTEST_DIR}/sge-review-attest.${_ATTEST_REPO}.${PR}"
+      [[ -n "${SGE_REVIEW_ATTEST_FILE:-}" ]] && _ATTEST_FILE="$SGE_REVIEW_ATTEST_FILE"
       _ATTEST_PENDING=0
+      if [[ -n "${SGE_REVIEW_ATTEST_FILE:-}" && ! -f "$_ATTEST_FILE" ]]; then
+        # A daemon-injected ledger that is gone is a broken control, not "0 pending".
+        echo "refusing: the daemon-injected attestation ledger $_ATTEST_FILE is missing (issue #883 / SPEC-090) -- fail closed" >&2
+        exit 5
+      fi
       if [[ -f "$_ATTEST_FILE" ]]; then
         # A present ledger MUST parse to a count; if awk fails or returns a
         # non-number, fail CLOSED (treat as pending) — never read a parse
         # failure as "0 unresolved" (same posture as the #717 thread gate).
-        if _ATTEST_PENDING=$(awk -F'\t' '
+        # Same rule as the daemon's retry_lanes_attested: for a daemon-injected ledger an
+        # attest line clears a reviewer ONLY with the dispatch's nonce (3rd field).
+        if _ATTEST_PENDING=$(awk -F'\t' -v inj="${SGE_REVIEW_ATTEST_FILE:+1}" -v nonce="${SGE_REVIEW_ATTEST_NONCE:-}" '
               $1=="dispatch" { pend[$2]=1 }
-              $1=="attest"   { delete pend[$2] }
+              $1=="attest"   { if (inj != "1" || (nonce != "" && NF == 3 && $3 == nonce)) delete pend[$2] }
               END { n=0; for (a in pend) n++; print n }
             ' "$_ATTEST_FILE"); then
           [[ "$_ATTEST_PENDING" =~ ^[0-9]+$ ]] || _ATTEST_PENDING=1

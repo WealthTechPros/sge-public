@@ -303,10 +303,17 @@ started).
   finished.
 - **An unfinished lane never counts as a pass.** It contributes no `[]`, and the verdict says
   which checks were not run.
-- **A required lane that did not finish makes the verdict FAIL** with the reason
-  `timed out: <lane> did not finish within the <cap> s review cap`: `security_auditor` when
-  the diff touches a security path, `adversarial_qa` when it is control-bearing, and the
-  Phase 3 quality gates. Never PASS a review whose required lane timed out.
+- **A required lane that could not finish or could not run makes the verdict `incomplete`**
+  (SPEC-090, sge#2996; never `fail`, never `pass`), naming the lane in `not_completed:` with
+  the reason, e.g. `timed out: <lane> did not finish within the <cap> s review cap`:
+  `security_auditor` when the diff touches a security path, `adversarial_qa` when it is
+  control-bearing, and the Phase 3 quality gates. The same verdict covers a check the
+  sandbox cannot execute (no network or no pytest, so the suite cannot run): name the check
+  and why in `not_completed:`. Post it as a plain COMMENT (`rl_post_verdict` refuses
+  `incomplete` as APPROVE or REQUEST_CHANGES), never run `pr-labels.sh fail` or `pass` for it, and
+  end with `pr-labels.sh release-review`. It blocks auto-merge and `pr-reviewed`; the
+  daemon retries once (every required lane again: the earlier `not_completed` list is unverified model output), then hands the PR to a human. A genuine
+  finding in a lane that did run still makes the verdict `fail`.
 - An unfinished optional lane (one this tier did not require) is listed but does not by
   itself fail the review; record `budget_exceeded: true`, `partial: true`.
 

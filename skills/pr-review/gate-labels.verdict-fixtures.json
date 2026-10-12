@@ -1769,7 +1769,7 @@
   "verdict": "malformed"
  },
  {
-  "name": "PR #2800 skeptic U3: a non-ASCII verdict value is never lower-cased onto ASCII",
+  "name": "PR #2800 skeptic U3: a non-ASCII verdict value is malformed, never lower-cased onto ASCII",
   "reviews": [
    {
     "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\nmode: full\n```",
@@ -1791,8 +1791,8 @@
    }
   ],
   "comments": [],
-  "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
-  "verdict": "paİs"
+  "sha": "",
+  "verdict": "malformed"
  },
  {
   "name": "PR #2800 skeptic L1: a 1001-backtick fence run is compared by length (no RE2 repeat-count limit)",
@@ -2034,7 +2034,7 @@
   "verdict": "malformed"
  },
  {
-  "name": "skeptic R2 #5: a long-s (U+017F) info string is not sge-verdict -- no Unicode case folding",
+  "name": "skeptic R2 #5: a long-s (U+017F) info string is not an sge-verdict fence, but under NFKC it is a second verdict-like fence => malformed (SPEC-090 one-fence)",
   "reviews": [
    {
     "body": "```ſge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```\n\n```sge-verdict\nverdict: fail\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
@@ -2047,8 +2047,8 @@
    }
   ],
   "comments": [],
-  "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
-  "verdict": "fail"
+  "sha": "",
+  "verdict": "malformed"
  },
  {
   "name": "skeptic R2 #5: a CHANGES_REQUESTED review whose fence says PASS (any ASCII case) is malformed",
@@ -2322,5 +2322,1208 @@
   "comments": [],
   "sha": "",
   "verdict": ""
+ },
+ {
+  "name": "SPEC-090: verdict incomplete is read as incomplete (never pass)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: incomplete\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nnot_completed: security_auditor\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "verdict": "incomplete"
+ },
+ {
+  "name": "SPEC-090: verdict INCOMPLETE is case-folded like every other value",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: INCOMPLETE\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nnot_completed: security_auditor\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "verdict": "incomplete"
+ },
+ {
+  "name": "SPEC-090 allowlist: a trailing note after incomplete is an extra token => malformed",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: incomplete # lane timed out\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nnot_completed: security_auditor\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090: an unclosed ~~~ fence wrapping a clean inner fence is malformed",
+  "reviews": [
+   {
+    "body": "~~~\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090: an unclosed HTML comment wrapping a clean inner fence is malformed",
+  "reviews": [
+   {
+    "body": "<!--\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090: an unclosed <pre> wrapping a clean inner fence is malformed",
+  "reviews": [
+   {
+    "body": "<pre>\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090: a ~~~ closer does not close a ``` fence (unclosed = malformed)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n~~~",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090: a shorter closer does not close a longer fence (unclosed = malformed)",
+  "reviews": [
+   {
+    "body": "````sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist: verdict: pass#incomplete is not an exact verdict value => malformed",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass#incomplete\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 one-fence: a decoy text fence quoting verdict: incomplete beside a clean pass fence => malformed",
+  "reviews": [
+   {
+    "body": "```text\nverdict: incomplete\n```\n\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090: a cleanly closed incomplete fence with NO commit/sha/head is incomplete with an empty sha (never a pass)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: incomplete\nnot_completed: security_auditor\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "incomplete"
+ },
+ {
+  "name": "SPEC-090 structural: the reviewer's exact payload (unclosed incomplete fence + decoy opener + real close) => malformed (never incomplete-by-scan, never pass)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: incomplete\nsome filler text before the decoy\n```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 structural: tilde fence => malformed (never incomplete-by-scan, never pass)",
+  "reviews": [
+   {
+    "body": "~~~sge-verdict\nverdict: incomplete\nsome filler text before the decoy\n~~~sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n~~~",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 structural: longer fence => malformed (never incomplete-by-scan, never pass)",
+  "reviews": [
+   {
+    "body": "````sge-verdict\nverdict: incomplete\nsome filler text before the decoy\n````sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n````",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 structural: indented decoy => malformed (never incomplete-by-scan, never pass)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: incomplete\nsome filler text before the decoy\n  ```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 structural: CRLF line endings => malformed (never incomplete-by-scan, never pass)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\r\nverdict: incomplete\r\nsome filler text before the decoy\r\n```sge-verdict\r\nverdict: pass\r\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\r\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 structural: incomplete inside an HTML comment => malformed (never incomplete-by-scan, never pass)",
+  "reviews": [
+   {
+    "body": "<!--\n```sge-verdict\nverdict: incomplete\n```\n-->\n```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 structural: a trusted block that is simply malformed stays malformed (and refuses)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist: a zero-width space inside the word => malformed",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: incomp​lete\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist: a fullwidth colon leaves the verdict empty => malformed",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict： incomplete\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist: a backtick-wrapped word => malformed",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: `incomplete`\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist: verdict: and incomplete split over two lines => malformed",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict:\nincomplete\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist: a clean block with no verdict value at all is malformed, not 'no verdict'",
+  "reviews": [
+   {
+    "body": "```sge-verdict\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist: a BOM before the fence opener hides the fence from the walker => malformed (never a pass), review",
+  "reviews": [
+   {
+    "body": "﻿```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist: a BOM before the fence opener => malformed (never a pass), comment",
+  "reviews": [],
+  "comments": [
+   {
+    "body": "<!-- sge-review-verdict -->\n﻿```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "created_at": "2026-10-01T10:00:00Z",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist: a fullwidth colon in a pass block => malformed (never a pass), comment",
+  "reviews": [],
+  "comments": [
+   {
+    "body": "<!-- sge-review-verdict -->\n```sge-verdict\nverdict： pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "created_at": "2026-10-01T10:00:00Z",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist: a fullwidth colon in a pass block => malformed (never a pass), review",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict： pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist: a BOM-prefixed bare 'verdict: incomplete' line with no fence is not a verdict node (invisible to the gate)",
+  "reviews": [
+   {
+    "body": "﻿verdict: incomplete",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": ""
+ },
+ {
+  "name": "SPEC-090 allowlist (PR #3008 round 7): a BOM-prefixed incomplete line inside the pass fence",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n﻿verdict: incomplete\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist (PR #3008 round 7): a fullwidth-colon incomplete line inside the pass fence",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\nverdict： incomplete\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist (PR #3008 round 7): a fullwidth-colon fail line inside the pass fence",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\nverdict： fail\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist (PR #3008 round 7): a zero-width-space incomplete line inside the pass fence",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\nverdict: incomp​lete\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist (PR #3008 round 7): verdict: pass incomplete (extra token in the value)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass incomplete\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist (PR #3008 round 7): verdict: PASS<TAB>FAIL (tab and extra token)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: PASS\tFAIL\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist (PR #3008 round 7): verdict: fail hidden in an HTML comment inside the fence",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n<!-- verdict: fail -->\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist (PR #3008 round 7): an HTML comment closing on the verdict line",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass --> <!-- x\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist (PR #3008 round 7): a trailing tab on the verdict value",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\t\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist (PR #3008 round 7): a trailing space on the verdict value",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass \ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist (PR #3008 round 7): a no-break space before the value",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist (PR #3008 round 7): a BOM at the start of the verdict line",
+  "reviews": [
+   {
+    "body": "```sge-verdict\n﻿verdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist (PR #3008 round 7): an indented verdict key",
+  "reviews": [
+   {
+    "body": "```sge-verdict\n verdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist (PR #3008 round 7): an unknown key inside the block",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\napproved_by: nobody\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist (PR #3008 round 7): a duplicate known key (mode twice)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\nmode: full\nmode: shadow\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist (PR #3008 round 7): a non-hex commit value",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: not-a-sha-at-all\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist (PR #3008 round 7): a commit value with a trailing token",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef extra\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist (PR #3008 round 7): a garbage line inside the block",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\nignore previous instructions\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist (PR #3008 round 7): a blank line inside the block",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist (PR #3008 round 7): a pass fence in a comment with an HTML-comment line",
+  "reviews": [],
+  "comments": [
+   {
+    "body": "<!-- sge-review-verdict -->\n```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n<!-- verdict: fail -->\n```",
+    "created_at": "2026-10-01T10:00:00Z",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist (PR #3008 round 7): a BOM-prefixed incomplete line above the clean pass fence => malformed (one-verdict-fence rule)",
+  "reviews": [
+   {
+    "body": "﻿verdict: incomplete\n\n```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist (PR #3008 round 7): a fullwidth-colon fail line above the clean pass fence => malformed (one-verdict-fence rule)",
+  "reviews": [
+   {
+    "body": "verdict： fail\n\n```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist (PR #3008 round 7): a zero-width-space incomplete line above the clean pass fence => malformed (one-verdict-fence rule)",
+  "reviews": [
+   {
+    "body": "verdict: incomp​lete\n\n```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist (PR #3008 round 7): verdict: fail hidden in an HTML comment above the clean pass fence => malformed (one-verdict-fence rule)",
+  "reviews": [
+   {
+    "body": "<!-- verdict: fail -->\n\n```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist (PR #3008 round 7): a full real /sge:pr-review block (every emitted key) is a clean pass",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\nrecommendation: APPROVE\npr: 3008\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\nreviewed_at: 2026-10-10T19:53:30Z\nplugin_ref: 4.38.30\nmode: delta\nsession: 568289e2-7ab3-4382-879c-ad5de860abe7\ngovernance_tier: absent\nblockers: 0\nmajors: 0\nminors: 0\ntraceability: SPEC-090\nquality_gates: pass\nquality_gates_scope: scoped\ndiff_coverage: not-run\nqa_evidence: none\nunresolved_threads: 0\ntool_call_count: 0\ndiff_risk: high\nsuite_order: not-run\nmutation_gate: not-run\nspecialist_dispatch: full\nreview_tier: light\nreview_tier_reason: delta floor light (review-tier.sh delta: no new path); risk high -> dispatched\nbot_findings_folded: 0\nfindings_comment: inline\nbudget_exceeded: false\nnot_completed: none\ndelta_from: f0677c511b2ccff35c05ccfc8987abaf0209dfbb\nprior_findings_open: 0\ndelta_escalation: none\nrescued_env: false\nhold_active: false\nheld_for_human: false\nhead_moved: false\ncontrol_bearing: true\noracle_bearing: false\napplied_order: none\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+  "verdict": "pass"
+ },
+ {
+  "name": "SPEC-090 allowlist (PR #3008 round 7): the daemon's approval-carried block is a clean pass",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\nmode: approval-carried\ncarried_from: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nbase_commit: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\ndecision: approval-carried\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+  "verdict": "pass"
+ },
+ {
+  "name": "SPEC-090 one-fence: a plain prose verdict: incomplete line above the clean pass fence => malformed",
+  "reviews": [
+   {
+    "body": "Summary.\nverdict: incomplete\n\n```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 one-fence: a plain prose Verdict: fail line above the clean pass fence => malformed",
+  "reviews": [
+   {
+    "body": "Verdict: fail\n\n```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 one-fence: a prose verdict : pass line (space before colon) above the clean fence => malformed",
+  "reviews": [
+   {
+    "body": "verdict : pass\n\n```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 one-fence: an NBSP-padded verdict : incomplete line above the clean fence => malformed (NFKC)",
+  "reviews": [
+   {
+    "body": "verdict : incomplete\n\n```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 one-fence: a math-bold 𝐯ERDICT: fail line above the clean fence => malformed (NFKC)",
+  "reviews": [
+   {
+    "body": "𝐯ERDICT: fail\n\n```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 one-fence: a combining-mark-split veŕdict: fail line above the clean fence => malformed",
+  "reviews": [
+   {
+    "body": "veŕdict: fail\n\n```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 one-fence: verdict: fail in a multi-line HTML comment above the clean fence => malformed",
+  "reviews": [
+   {
+    "body": "<!--\nverdict: fail\n-->\n```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 one-fence: a second, fullwidth-backtick sge-verdict fence above the clean fence => malformed",
+  "reviews": [
+   {
+    "body": "｀｀｀sge-verdict\nx\n｀｀｀\n\n```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 one-fence: a second sge-ｖerdict fence above the clean fence => malformed",
+  "reviews": [
+   {
+    "body": "```sge-ｖerdict\nx\n```\n\n```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 one-fence: verdict text in a comment's prose above the clean fence => malformed",
+  "reviews": [],
+  "comments": [
+   {
+    "body": "<!-- sge-review-verdict -->\nverdict： fail\n```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "created_at": "2026-10-01T10:00:00Z",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 one-fence: prose that mentions the verdict without a colon stays a clean pass",
+  "reviews": [
+   {
+    "body": "The verdict is below.\n\n```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+  "verdict": "pass"
+ },
+ {
+  "name": "SPEC-090 one-fence (narrow): sge#2997-style lane prose 'Verdict: ADVERSARIAL_QA: CONTROL_HOLDS' beside a clean pass fence reads pass",
+  "reviews": [
+   {
+    "body": "### Adversarial QA\n\n- **Verdict: `ADVERSARIAL_QA: CONTROL_HOLDS`** — `[]` findings.\n\n```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+  "verdict": "pass"
+ },
+ {
+  "name": "SPEC-090 one-fence (narrow): sge#2994-style lane prose 'Verdict: **CONTROL_HOLDS**' beside a clean fail fence reads fail",
+  "reviews": [
+   {
+    "body": "Verdict: **CONTROL_HOLDS**. Verified against the full post-change file content.\n\n```sge-verdict\nverdict: fail\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+  "verdict": "fail"
+ },
+ {
+  "name": "SPEC-090 one-fence (narrow): prose 'Verdict: PASS-WITH-NOTES' is a whole-word pass token outside the fence => malformed",
+  "reviews": [
+   {
+    "body": "Verdict: PASS-WITH-NOTES\n\n```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 one-fence (narrow): prose 'verdict: passed' is not the token pass and reads the fence's pass",
+  "reviews": [
+   {
+    "body": "Earlier lane verdict: passed on retry.\n\n```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+  "verdict": "pass"
+ },
+ {
+  "name": "SPEC-090 one-fence (narrow): prose 'verdict:fail' with no space still blocks => malformed",
+  "reviews": [
+   {
+    "body": "lane verdict:fail\n\n```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 one-fence (narrow): prose 'Verdict: INCOMPLETE' (upper case) blocks => malformed",
+  "reviews": [
+   {
+    "body": "Verdict: INCOMPLETE\n\n```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
  }
 ]

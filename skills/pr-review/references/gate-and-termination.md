@@ -372,6 +372,13 @@ design/architecture judgement call, a missing requirement, or a scope decision t
 author's intent (Phase 6 table, row 3). When in doubt whether a finding is fixable-in-scope, fix
 it; escalate to a comment only when a fix would need a decision you cannot make.
 
+### Direct-fix mechanics (Phase 6.5)
+
+Moved from `SKILL.md` (size budget). Fix here on the PR branch **in a worktree**. Priority:
+**1 security**, **2 bugs/logic**, **3 type errors**, **4 lint/format**. Re-run the relevant
+Phase 3 gates. **Scope discipline — review, not rewrite:** fix only what is broken/risky; a fix
+needing a design decision is a **comment**. Pushing moves the head → **re-pin `REVIEWED_HEAD`**.
+
 ## Follow-up preservation gate (issue #859)
 
 > **Follow-up cap (#2829) comes first:** blockers/majors are fixed in the PR, minors are recorded in the review or declined, and at most one issue per PR is filed, only for an out-of-scope major — see [`follow-up-cap.md`](../../lib/follow-up-cap.md). The gate below then only has to preserve that one issue; a minor marked `recorded-in-review`/`declined` passes it.
