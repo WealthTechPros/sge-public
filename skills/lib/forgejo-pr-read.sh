@@ -60,6 +60,16 @@
 #   # to delete anything (an empty/partial list reads every branch as "not open").
 #   fpr_open_pr_heads
 #
+#   # Completed-PR lookup for ONE source branch, FAIL-CLOSED (issue #3027;
+#   # tidy-worktrees' squash-merge cross-check). Azure DevOps only:
+#   #   Azure DevOps -> azdo-adapter.sh list-completed-prs <origin-url> <branch>
+#   # Prints "<number><TAB><recorded-source-head-sha><TAB><completion-time>" per
+#   # completed PR. Exit 0 + no output = confirmed zero completed PRs; exit 1 =
+#   # lookup failed / truncated / malformed (branch stays VALUABLE); exit 2 = no
+#   # completed-PR lookup on this host (GitHub uses `gh pr list --state merged`,
+#   # Forgejo has none) - skip the cross-check, fail safe.
+#   fpr_completed_pr_heads <branch>
+#
 # Environment:
 #   CLAUDE_PLUGIN_ROOT    — must be set (standard SGE harness var).
 #   FORGEJO_API_TOKEN /
@@ -423,4 +433,31 @@ fpr_open_pr_heads() {
   fi
   # tr: jq.exe on Windows emits CRLF; a stray \r would corrupt branch names.
   printf '%s' "$raw" | jq -r "$jqf" | tr -d '\r'
+}
+
+# fpr_completed_pr_heads <branch> - see the header block. The caller marks the
+# branch SAFE only when a line's head sha equals the local branch tip AND the
+# tree is clean; every non-zero exit leaves it VALUABLE.
+fpr_completed_pr_heads() {
+  local branch="${1:-}"
+  [ -n "$branch" ] || { _fpr_err "fpr_completed_pr_heads: <branch> required"; return 1; }
+  command -v jq >/dev/null 2>&1 || { _fpr_err "jq is required for fpr_completed_pr_heads"; return 1; }
+  local host raw origin
+  host="$(fpr_host_kind)"
+  case "$host" in
+    azdo)
+      origin="$(_fpr_origin_url)" || return 1
+      [ -f "$_FPR_AZDO_ADAPTER" ] || { _fpr_err "azdo-adapter.sh not found at $_FPR_AZDO_ADAPTER"; return 1; }
+      raw="$(bash "$_FPR_AZDO_ADAPTER" list-completed-prs "$origin" "$branch")" \
+        || { _fpr_err "azdo-adapter.sh list-completed-prs failed or may be truncated - completed-PR set unknown"; return 1; }
+      printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 \
+        || { _fpr_err "completed-PR payload is not a JSON array - completed-PR set unknown"; return 1; }
+      # tr: jq.exe on Windows emits CRLF.
+      printf '%s' "$raw" | jq -r '.[] | "\(.number)\t\(.headRefOid)\t\(.closedAt)"' | tr -d '\r'
+      ;;
+    *)
+      _fpr_err "no completed-PR lookup for host kind '$host' - skip the squash-merge cross-check"
+      return 2
+      ;;
+  esac
 }
