@@ -8,6 +8,15 @@ truth for which tier that is, so orchestration (`/sge:team-pipeline`,
 `/sge:pr-review` specialists, `/sge:sge-implement`, …) sends every agent to the
 cheapest model that is still safe for its task.
 
+> **Provider-neutral reviewers (sge#3035).** The tier names below are
+> *capability classes*, not model ids. For `/sge:pr-review` specialists the
+> concrete id is resolved against the active harness's model catalog by
+> `skills/pr-review/resolve-model.sh` from `skills/pr-review/model-roles.json`
+> (see `skills/pr-review/references/model-roles.md`); bundled agent files no
+> longer pin `model: sonnet|opus`. `sonnet`/`standard` and `opus`/`deep` map
+> 1:1 for the review lanes; a deep (security) lane with no eligible model is
+> not run, never downgraded.
+
 > **Stack-agnostic.** Routing is by *task type*, not by language or framework.
 > A repo MAY pin a specific agent to a higher tier in its own
 > `.claude/agents/<name>.md` (project agents override plugin agents) — that is
@@ -22,9 +31,10 @@ cheapest model that is still safe for its task.
 | **haiku** | `claude-haiku-4-5-20251001` | Trivial / mechanical tasks: lint fixes, label ops, doc typo fixes, CI status checks, issue discovery/triage, simple file lookups. Cheapest — the default floor for work with no real reasoning. |
 | **fable** | *(speed-tier alias)* | Speed-sensitive tasks where latency matters more than depth (interactive status pings, fast classification). Use only when responsiveness dominates; otherwise prefer haiku for cost or sonnet for safety. |
 
-> Model IDs are the current generation (Opus 4.8 / Sonnet 4.6 / Haiku 4.5).
-> When the org bumps a generation, update the IDs in this one table — every
-> consumer reads the tier name, not the raw ID.
+> Model IDs above are the Anthropic API ids (Opus 4.8 / Sonnet 4.6 / Haiku
+> 4.5) and describe the non-review routing rows. Reviewer lanes take their ids
+> from `skills/pr-review/model-roles.json` (Anthropic and OpenAI entries, one
+> place) filtered by what the harness catalog advertises.
 
 ## Routing table
 
@@ -52,7 +62,8 @@ Any task that touches **security/auth, database migrations, or multi-tenant /
 data-isolation boundaries** is CRITICAL and **always escalates to `opus`**,
 regardless of how mechanical it looks. A "trivial" label op on an auth config,
 or a "small" tweak to a migration, is still CRITICAL. Security paths **never**
-run below opus.
+run below the `deep` class (opus-class; an OpenAI entry only if listed in
+`model-roles.json`).
 
 ## Target mix
 
@@ -70,12 +81,14 @@ always win over the mix.
 ## How orchestration consumes this
 
 - **Bundled specialist agents** (`agents/code-reviewer.md`,
-  `agents/design-reviewer.md`, `agents/security-auditor.md`) carry a `model:`
-  in their front-matter matching their row above. `@code-reviewer` → `sonnet`
-  (escalating to `opus` on security-globbed diffs); `@design-reviewer` →
-  `sonnet` (pinned 2026-09-28 so it no longer inherits an opus session);
-  `@security-auditor` → `opus`, because every security review is a CRITICAL
-  path under the escalation rule.
+  `agents/design-reviewer.md`, `agents/security-auditor.md`) carry **no** `model:`
+  pin (sge#3035: the `sonnet`/`opus` aliases are rejected by Copilot CLI).
+  The dispatching skill resolves and passes the concrete id:
+  `@code-reviewer` / `@design-reviewer` → class `standard` (`@code-reviewer`
+  escalating to `deep` on security-globbed diffs); `@security-auditor` →
+  class `deep`, because every security review is a CRITICAL path under the
+  escalation rule. A spawn that omits `model:` is not a valid security
+  dispatch.
 - **The review daemon** (`services/review-daemon-poc/`) routes each unattended
   `/sge:pr-review` dispatch to a tier the same way (haiku for docs-only /
   dependency-bot / small non-risky diffs, sonnet by default, opus for large

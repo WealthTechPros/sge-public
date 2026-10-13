@@ -1717,6 +1717,22 @@ rl_reviewer_dispatch() {
   printf 'dispatch\t%s\n' "$id" >> "$f" || return 1
 }
 
+# rl_reviewer_resolve_model <pr> <agent_id> <role> [--security|--class C|--override ID]
+# Resolve the concrete model id for a dispatched lane via resolve-model.sh (#3035),
+# record it in the ledger (`model<TAB><id><TAB><model>`), and print it. Non-zero =
+# the lane must NOT be spawned (leave it PENDING). `pass` refuses a locally
+# dispatched @security-auditor with no recorded deep-class model (pr-labels.sh).
+rl_reviewer_resolve_model() {
+  local pr="${1:?rl_reviewer_resolve_model: pr required}" id="${2:?rl_reviewer_resolve_model: agent id required}"
+  local role="${3:?rl_reviewer_resolve_model: role required}" f m
+  shift 3
+  f=$(rl__attest_file "$pr") || return 1
+  m=$(bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/resolve-model.sh" --role "$role" "$@") || return 1
+  rl__attest_ready "$f" || return 1
+  printf 'model\t%s\t%s\n' "$id" "$m" >> "$f" || return 1
+  printf '%s\n' "$m"
+}
+
 # rl_reviewer_attest <pr> <agent_id> <tool_uses> [reply_file] — verify + clear.
 # Runs rl_reviewer_ran; on `ran` marks the reviewer ATTESTED (exit 0). Otherwise
 # leaves it PENDING and returns 1 (so `pass` stays blocked until it is re-run).

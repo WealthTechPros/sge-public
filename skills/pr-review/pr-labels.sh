@@ -1788,6 +1788,19 @@ case "$CMD" in
         exit 5
       fi
     fi
+    # Model floor (#3035): a LOCALLY dispatched @security-auditor (2-field dispatch line;
+    # daemon lines are the daemon's own tier) must carry a `model` line recorded by
+    # rl_reviewer_resolve_model whose id is in model-roles.json's `deep` class. The agent
+    # file no longer pins a model, so without this a lane could run on the session model.
+    if [[ "${SGE_REVIEW_ATTEST_SKIP:-}" != "1" && -f "${_ATTEST_FILE:-}" ]] \
+       && awk -F'\t' '$1=="dispatch" && $2=="@security-auditor" && NF==2 {f=1} END{exit !f}' "$_ATTEST_FILE"; then
+      _SEC_MODEL=$(awk -F'\t' '$1=="model" && $2=="@security-auditor" && NF==3 {m=$3} END{print m}' "$_ATTEST_FILE")
+      if [[ -z "$_SEC_MODEL" ]] || ! jq -e --arg m "$_SEC_MODEL" '(.classes.deep // []) | index($m) != null' "${_PRL_SCRIPT_DIR}/model-roles.json" >/dev/null 2>&1; then
+        echo "refusing: @security-auditor was dispatched without a recorded deep-class model (#3035; got '${_SEC_MODEL:-none}') -- the security lane must never run below the deep class" >&2
+        echo "Resolve it with rl_reviewer_resolve_model \"\$PR\" @security-auditor security-auditor --security and spawn with that id; or run the check inline (no @security-auditor dispatch)." >&2
+        exit 5
+      fi
+    fi
     if is_draft; then
       echo "refusing: PR #$PR is a DRAFT — drafts never receive $REVIEWED or auto-merge" >&2
       exit 1
