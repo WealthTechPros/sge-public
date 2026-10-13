@@ -137,7 +137,10 @@
 #                                   Refuses (exit 6) a verdict declaring
 #                                   findings whose findings_comment is not
 #                                   `inline` or a verified URL (#1858)
-#   rl_verify_verdict_posted <pr> <review_id_or_url>
+#   rl_verify_verdict_posted <pr> <review_id_or_url> [expected]
+#                                   (azdo: <id> = COMMENT thread id, or `-` for a
+#                                   vote, which then REQUIRES [expected] =
+#                                   approve|wait|reject|pass|fail)
 #                                   CONFIRM (re-fetch, never assume) that a
 #                                   posted verdict review exists at the
 #                                   current head SHA with a parseable
@@ -276,6 +279,15 @@ rl__repo() {
   printf '%s\n' "${GH_REPO:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"
 }
 
+# Azure Repos (sge#3028): a `gh` call that has no Azure Repos route must refuse
+# loudly, never fall through to a `gh` that cannot see the repo. Prints one
+# line to stderr; the caller returns its own documented fail-closed value.
+#   rl__azdo_unrouted <what>
+rl__azdo_unrouted() {
+  printf 'review-lib: %s has no Azure Repos route (SPEC-110 S4, #3028) - refusing instead of calling gh
+' "$1" >&2
+}
+
 # Azure Repos comment plumbing (#2989): the issue-comment POST/GET the review
 # lane makes through `gh api` goes through the adapter instead, whose pr-comment
 # prints the new closed thread's numeric id. GitHub behaviour is unchanged.
@@ -339,7 +351,8 @@ rl_security_files() {
   local pr="$1" repo files since="" head delta
   [ "${2:-}" = "--since" ] && since=$(printf '%s' "${3:-}" | tr 'A-F' 'a-f')
   repo=$(rl__repo) || return 1
-  if [[ "$since" =~ ^[0-9a-f]{40}$ ]]; then
+  # Azure Repos (#3028): no compare endpoint -> the documented whole-PR fallback.
+  if [ "$(sge_pr_host)" != azdo ] && [[ "$since" =~ ^[0-9a-f]{40}$ ]]; then
     head=$(sge_gh_pr view "$pr" --repo "$repo" --json headRefOid 2>/dev/null | jq -r '.headRefOid // ""' 2>/dev/null | tr -d '\r' | tr 'A-F' 'a-f')
     if [[ "$head" =~ ^[0-9a-f]{40}$ ]]; then
       delta=$(gh api "repos/$repo/compare/$since...$head" 2>/dev/null \
@@ -433,6 +446,21 @@ rl_test_doc_glob_regex() {
 rl_diff_weighted_lines() {
   local pr="$1" repo raw testdoc re
   repo=$(rl__repo) || return 1
+  if [ "$(sge_pr_host)" = azdo ]; then
+    # Azure Repos (#3028): no additions/deletions on the PR object; count the
+    # unified diff's changed lines. No per-file discount -> weighted==raw, the
+    # same conservative fallback as a failed per-file breakdown below.
+    local adiff
+    adiff=$(sge_gh_pr diff "$pr" --repo "$repo") || return 1   # a failed diff is never "0 lines"
+    # Count +/- lines INSIDE hunks (after an `@@`), so a changed line that itself
+    # starts `-- `/`++ ` is counted. No hunk header at all -> every +/- line, the
+    # larger (conservative) count.
+    raw=$(printf '%s\n' "$adiff" | awk '/^diff /{h=0; next} /^@@/{h=1; hs=1; next}
+      /^[+-]/{a++; if (h) c++} END{print (hs ? c : a) + 0}')
+    [[ "$raw" =~ ^[0-9]+$ ]] || return 1
+    printf '%s %s\n' "$raw" "$raw"
+    return 0
+  fi
   raw=$(gh api "repos/$repo/pulls/$pr" --jq '.additions + .deletions') || return 1
   re=$(rl_test_doc_glob_regex)
   testdoc=$(RE="$re" sge_gh_pr view "$pr" --repo "$repo" --json files --jq \
@@ -505,6 +533,8 @@ rl_lockfile_glob_regex() {
 # fail closed) rather than guessing.
 rl_diff_trivial() {
   local pr="$1" repo base head files f nonws checks
+  # Azure Repos (#3028): no base/head sha via gh -> "not trivial" (fail closed, normal tier).
+  if [ "$(sge_pr_host)" = azdo ]; then rl__azdo_unrouted rl_diff_trivial; echo 0; return 0; fi
   repo=$(rl__repo) || { echo 0; return 0; }
 
   base=$(gh api "repos/$repo/pulls/$pr" --jq '.base.sha' 2>/dev/null) || { echo 0; return 0; }
@@ -597,6 +627,8 @@ rl_generated_manifest_path() {
 # artefact can never downgrade a security-sensitive diff.
 rl_diff_generated() {
   local pr="$1" repo base base_ref default_branch files manifest decl f sec
+  # Azure Repos (#3028): base-ref manifest cannot be fetched via gh -> "not generated" (fail closed).
+  if [ "$(sge_pr_host)" = azdo ]; then rl__azdo_unrouted rl_diff_generated; echo 0; return 0; fi
   repo=$(rl__repo) || { echo 0; return 0; }
 
   base=$(gh api "repos/$repo/pulls/$pr" --jq '.base.sha' 2>/dev/null) || { echo 0; return 0; }
@@ -722,6 +754,8 @@ rl_prose_deny_regex()  {
 # #1492 misclassification silently skipped @security-auditor dispatch.
 rl_diff_prose() {
   local pr="$1" repo files prev f sec
+  # Azure Repos (#3028): rename sources are not readable -> "not prose" (fail closed).
+  if [ "$(sge_pr_host)" = azdo ]; then rl__azdo_unrouted rl_diff_prose; echo 0; return 0; fi
   repo=$(rl__repo) || { echo 0; return 0; }
 
   files=$(sge_gh_pr diff "$pr" --repo "$repo" --name-only 2>/dev/null) || { echo 0; return 0; }
@@ -822,6 +856,8 @@ rl_control_bearing_test_path_regex() {
 
 rl_diff_control_bearing() {
   local pr="$1" repo json since="" head delta f
+  # Azure Repos (#3028): per-file status unavailable -> "not detected" (fail closed, normal tier).
+  if [ "$(sge_pr_host)" = azdo ]; then rl__azdo_unrouted rl_diff_control_bearing; echo 0; return 0; fi
   [ "${2:-}" = "--since" ] && since=$(printf '%s' "${3:-}" | tr 'A-F' 'a-f')
   repo=$(rl__repo) || { echo 0; return 0; }
   [ -n "$repo" ] || { echo 0; return 0; }
@@ -900,6 +936,8 @@ rl_oracle_bearing_glob_regex() {
 # that cannot be run reliably anyway).
 rl_diff_oracle_bearing() {
   local pr="$1" repo files prev f
+  # Azure Repos (#3028): rename sources are not readable -> "not detected" (fail closed).
+  if [ "$(sge_pr_host)" = azdo ]; then rl__azdo_unrouted rl_diff_oracle_bearing; echo 0; return 0; fi
   repo=$(rl__repo) || { echo 0; return 0; }
 
   files=$(sge_gh_pr diff "$pr" --repo "$repo" --name-only 2>/dev/null) || { echo 0; return 0; }
@@ -944,6 +982,8 @@ rl__findings_diff_paths() {   # <pr> [repo] -> the PR's changed-file set (incl. 
   # Callers pass the target explicitly; the ambient fallback remains only for a
   # same-repo invocation where cwd IS the target.
   local pr="$1" repo="${2:-}" files prev rc
+  # Azure Repos (#3028): rename sources are not readable -> the caller reports `unverifiable`.
+  if [ "$(sge_pr_host)" = azdo ]; then rl__azdo_unrouted rl__findings_diff_paths; return 1; fi
   [ -n "$repo" ] || repo=$(rl__repo) || return 1
   files=$(sge_gh_pr diff "$pr" --repo "$repo" --name-only 2>/dev/null) || return 1
   [ -n "$files" ] || return 1
@@ -1065,6 +1105,8 @@ rl_findings_provenance() {
 # fail-safe posture as rl_diff_generated (empty output, never a guess).
 rl_generated_manifest_lookup() {
   local pr="$1" path="$2" repo base manifest
+  # Azure Repos (#3028): the trusted base manifest is not readable -> declared nowhere (empty, exit 0).
+  if [ "$(sge_pr_host)" = azdo ]; then rl__azdo_unrouted rl_generated_manifest_lookup; return 0; fi
   repo=$(rl__repo) || return 0
   base=$(gh api "repos/$repo/pulls/$pr" --jq '.base.sha' 2>/dev/null) || return 0
   [ -n "$base" ] || return 0
@@ -1084,7 +1126,11 @@ rl_generated_manifest_lookup() {
 rl_phase5_verdict() {
   local pr="$1" repo body raw
   repo=$(rl__repo) || return 1
+  if [ "$(sge_pr_host)" = azdo ]; then
+    body=$(sge_gh_pr view "$pr" --json body --jq .body) || return 1   # Azure Repos (#3028)
+  else
   body=$(gh api "repos/$repo/pulls/$pr" --jq .body) || return 1
+  fi
   raw=$(printf '%s' "$body" | grep -o '<!-- sge-phase5-verdict: {[^}]*} -->' | head -1) || true
   PHASE5_SHA=$(printf '%s' "$raw" | grep -o '"sha": *"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"') || true
   PHASE5_VERDICT=$(printf '%s' "$raw" | grep -o '"verdict": *"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"') || true
@@ -1252,6 +1298,17 @@ rl__azdo_verdict_commit() { # <pr>
   printf 'commit: %s\n' "${BASH_REMATCH[2]}"
 }
 
+# Azure Repos (#3028): the body of comment thread <id> ("" when no such thread),
+# non-zero when the comment read fails or is not an array of objects - an
+# unreadable PR is never reported as a missing thread.
+rl__azdo_thread_body() { # <pr> <thread-id>
+  local cm
+  cm=$(sge_pr_comments_json "$1" 2>/dev/null) || return 1
+  printf '%s' "$cm" | jq -er --argjson id "$2" '
+    if type == "array" and all(.[]; type == "object")
+    then ([.[] | select(.id == $id)] | first | .body // "") else error("malformed") end' 2>/dev/null
+}
+
 # One-line PR state for the concurrency/idempotency short-circuit (#699).
 rl_pr_state() {
   local pr="$1"
@@ -1338,7 +1395,7 @@ rl_pr_state() {
 #       (a) and (b) are what actually fix #2188, not a proximity bound.
 rl_hold_check() {
   local pr="$1" state="$2" repo draft hold sign
-  repo="${GH_REPO:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"
+  repo=$(rl__repo) || { echo "hold:signoff-check-failed"; return 0; }
   # $STATE parse — a malformed/empty state is unverifiable: fail closed.
   draft=$(printf '%s' "$state" | jq -r '.draft' 2>/dev/null) \
     || { echo "hold:state-parse-failed"; return 0; }
@@ -1368,9 +1425,8 @@ rl_hold_check() {
   # one JSON object per candidate ({t: trusted?, b: body}); every trusted
   # candidate plus the last 10 untrusted ones across ALL pages are then tested
   # (sge#2780; a gh or jq failure is still unverifiable: fail closed).
-  local cand
-  cand=$(BOT_RE="$bot_re" PR_NUM="$pr" gh api --paginate "repos/$repo/issues/$pr/comments" \
-    --jq '.[]
+  local cand cand_jq
+  cand_jq='.[]
            | select(
                ((.user.type == "Bot") and ((.user.login // "") | test(env.BOT_RE; "i")))
                or ((((.author_association // "") | ascii_upcase) as $assoc | ($assoc == "OWNER" or $assoc == "MEMBER" or $assoc == "COLLABORATOR"))
@@ -1379,8 +1435,27 @@ rl_hold_check() {
              )
            | {t: (((.author_association // "") | ascii_upcase) as $a | ($a == "OWNER" or $a == "MEMBER" or $a == "COLLABORATOR")),
               b: (.body // "")}
-           | tojson' 2>/dev/null) \
+           | tojson'
+  if [ "$(sge_pr_host)" = azdo ]; then
+    # Azure Repos (#3028): the same filter over the adapter's issue-comment-shaped
+    # comments; fail closed on a read error. They carry no author_association:
+    # every commenter holds repo contribute rights, so each is read as MEMBER -
+    # scanned in full, never pushed out by the untrusted-only tail window below.
+    # The read is captured first (no pipefail here): a failed read must be
+    # "unverifiable", never an empty candidate set that reads as "ok".
+    local acm
+    acm=$(sge_pr_comments_json "$pr" 2>/dev/null) \
+      || { echo "hold:signoff-check-failed"; return 0; }
+    printf '%s' "$acm" | jq -e 'type == "array"' >/dev/null 2>&1 \
+      || { echo "hold:signoff-check-failed"; return 0; }
+    cand=$(printf '%s' "$acm" | jq -c '[.[] | . + {author_association: "MEMBER"}]' 2>/dev/null \
+             | BOT_RE="$bot_re" PR_NUM="$pr" jq -r "$cand_jq" 2>/dev/null) \
+      || { echo "hold:signoff-check-failed"; return 0; }
+  else
+  cand=$(BOT_RE="$bot_re" PR_NUM="$pr" gh api --paginate "repos/$repo/issues/$pr/comments" \
+    --jq "$cand_jq" 2>/dev/null) \
     || { echo "hold:signoff-check-failed"; return 0; }
+  fi
   # sge#2780: every trusted (OWNER/MEMBER/COLLABORATOR) candidate is scanned;
   # the `.[-10:]` tail window bounds ONLY untrusted candidates, so no volume of
   # later comments can push a trusted sign-off-pending note out of the scan.
@@ -1428,6 +1503,9 @@ rl_hold_check() {
 # See sge-implement/references/close-keyword.md for the full rule.
 rl_ensure_closing_link() {
   local pr="$1" n="$2" repo body labels tracking_raw label want
+  # Azure Repos (#3028): GitHub `Fixes #n` keywords do not link work items there;
+  # use `azdo-adapter.sh link-close-on-merge <work-item-id> <pr-url>` instead.
+  if [ "$(sge_pr_host)" = azdo ]; then rl__azdo_unrouted rl_ensure_closing_link; return 1; fi
   repo=$(rl__repo) || return 1
   body=$(gh api "repos/$repo/pulls/$pr" --jq .body) || return 1
 
@@ -1472,8 +1550,13 @@ rl_ensure_closing_link() {
 rl_qa_evidence() {
   local pr="$1" repo
   repo=$(rl__repo) || return 1
+  if [ "$(sge_pr_host)" = azdo ]; then
+    QA_COMMENT=$(sge_pr_comments_json "$pr" | jq -r \
+      '[.[].body // "" | select(contains("qa-audit-report"))] | last') || return 1   # Azure Repos (#3028)
+  else
   QA_COMMENT=$(gh api "repos/$repo/issues/$pr/comments" --jq \
     '[.[].body // "" | select(contains("qa-audit-report"))] | last') || return 1
+  fi
   QA_HEAD_SHA=$(printf '%s' "$QA_COMMENT" | grep -A20 'qa-audit-verdict' \
     | grep -o 'head_sha: *[0-9a-f]*' | grep -o '[0-9a-f]\{7,40\}' | head -1) || true
 }
@@ -1484,6 +1567,26 @@ rl_qa_evidence() {
 rl_changes_requested() {
   local pr="$1" repo
   repo=$(rl__repo) || return 1
+  if [ "$(sge_pr_host)" = azdo ]; then
+    # Azure Repos (#3028): the GitHub path counts every CHANGES_REQUESTED review,
+    # so this counts BOTH the newest verdict artefact by the token identity
+    # (`wait`/`reject`) AND every reviewer's own Wait/Reject vote (-5/-10), human
+    # votes included. Either source unreadable is a non-zero exit (never "0"), so
+    # the caller cannot arm on it.
+    local vs votes origin n=0
+    origin=$(git remote get-url origin 2>/dev/null) || return 1
+    vs=$(bash "$_SGE_GHPR_AA" pr-verdict-status "$origin" "$pr" 2>/dev/null | tr -d '\r') || return 1
+    case "$vs" in
+      wait\ *|reject\ *) n=1 ;;
+      approve\ *|none) ;;
+      *) return 1 ;;
+    esac
+    votes=$(bash "$_SGE_GHPR_AA" pr-votes "$origin" "$pr" 2>/dev/null | tr -d '\r') || return 1
+    votes=$(printf '%s' "$votes" | jq -r '[.[] | select(.vote < 0)] | length' 2>/dev/null) || return 1
+    [[ "$votes" =~ ^[0-9]+$ ]] || return 1
+    echo $((n + votes))
+    return 0
+  fi
   gh api "repos/$repo/pulls/$pr/reviews" --jq \
     '[.[] | select(.state == "CHANGES_REQUESTED")] | length'
 }
@@ -1715,6 +1818,22 @@ rl_reviewer_dispatch() {
   f=$(rl__attest_file "$pr") || return 1
   rl__attest_ready "$f" || return 1
   printf 'dispatch\t%s\n' "$id" >> "$f" || return 1
+}
+
+# rl_reviewer_resolve_model <pr> <agent_id> <role> [--security|--class C|--override ID]
+# Resolve the concrete model id for a dispatched lane via resolve-model.sh (#3035),
+# record it in the ledger (`model<TAB><id><TAB><model>`), and print it. Non-zero =
+# the lane must NOT be spawned (leave it PENDING). `pass` refuses a locally
+# dispatched @security-auditor with no recorded deep-class model (pr-labels.sh).
+rl_reviewer_resolve_model() {
+  local pr="${1:?rl_reviewer_resolve_model: pr required}" id="${2:?rl_reviewer_resolve_model: agent id required}"
+  local role="${3:?rl_reviewer_resolve_model: role required}" f m
+  shift 3
+  f=$(rl__attest_file "$pr") || return 1
+  m=$(bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/resolve-model.sh" --role "$role" "$@") || return 1
+  rl__attest_ready "$f" || return 1
+  printf 'model\t%s\t%s\n' "$id" "$m" >> "$f" || return 1
+  printf '%s\n' "$m"
 }
 
 # rl_reviewer_attest <pr> <agent_id> <tool_uses> [reply_file] — verify + clear.
@@ -2206,6 +2325,8 @@ rl_verdict_findings_unverified() {
   # fragment (bare trailing digits would let a plain PR URL misparse the PR
   # number as a comment id), and the comment must read back non-empty WITH an
   # issue_url binding it to this PR. Fail closed on every mismatch or error.
+  # Azure Repos (#3028): a findings URL cannot be read back -> blocked; only `inline` posts.
+  if [ "$(sge_pr_host)" = azdo ]; then return 0; fi
   repo=$(rl__repo) || return 0
   [ -n "$repo" ] || return 0           # rl__repo can emit empty on exit 0 -- still fail closed
   case "$ref" in
@@ -2383,6 +2504,22 @@ rl_post_verdict() {
     echo "rl_post_verdict: REFUSING to APPROVE -- the body carries an sge-verdict block that does not parse to exactly one 'verdict: pass' (got '${ivd:-none}': duplicate key, non-exact fence, empty or non-pass value) (SPEC-090)." >&2
     return 7
   fi
+  # Draft guard (sge#3032): an APPROVE must never land on a draft PR (`pr-labels.sh pass`
+  # refuses a draft; the verdict-posting path must agree). Read before any network write;
+  # an unreadable draft state refuses too (fail closed). Same refusal exit code (7).
+  if [ "$event" = "APPROVE" ]; then
+    local isdraft
+    if [ "$(sge_pr_host)" = azdo ]; then
+      isdraft=$(sge_gh_pr view "$pr" --json isDraft --jq .isDraft 2>/dev/null | tr -d '[:space:]') || isdraft=""
+    else
+      # GitHub: read through rl_gh so the wtp-sge App installation token is used, like every other read here.
+      isdraft=$(rl_gh pr view "$pr" --json isDraft --jq .isDraft 2>/dev/null | tr -d '[:space:]') || isdraft=""
+    fi
+    if [ "$isdraft" != "false" ]; then
+      echo "rl_post_verdict: REFUSING to APPROVE PR #${pr} -- it is a draft or its draft state could not be read (isDraft='${isdraft:-unreadable}'). Mark it ready for review and retry (sge#3032, SPEC-090)." >&2
+      return 7
+    fi
+  fi
   # Pre-post draft-vs-PR guard (issue #1667). The load-bearing fix: BEFORE any
   # network write, prove the body being posted belongs to THIS PR, so a stale or
   # foreign draft (e.g. a concurrent lane's `review.md` that overwrote ours)
@@ -2405,6 +2542,26 @@ rl_post_verdict() {
   if rl_verdict_findings_unverified "$pr" "$body"; then
     echo "rl_post_verdict: REFUSING to post — the verdict declares $(rl_verdict_findings_total "$body") finding(s) but findings_comment is '$(rl_verdict_findings_ref "$body")' and no verified findings comment exists (issue #1858). Post the findings via rl_post_findings_comment first, or fold them into the verdict body and set 'findings_comment: inline'." >&2
     return 6
+  fi
+  # Azure Repos (#3028): there is no review object to POST. The verdict VOTE is
+  # cast, bound to the head judged and behind the claim/CI/thread gates, only by
+  # `pr-labels.sh pass|fail --expect-head <40-hex> [--verdict-file <f>]`, so an
+  # APPROVE/REQUEST_CHANGES here is REFUSED (exit 8) rather than posted twice or
+  # sent to gh. A plain COMMENT (advisory / incomplete) is a closed PR thread.
+  if [ "$(sge_pr_host)" = azdo ]; then
+    if [ "$event" != "COMMENT" ]; then
+      echo "rl_post_verdict: REFUSING ${event} on Azure Repos - the vote is cast by 'pr-labels.sh pass|fail ${pr} --expect-head <sha> --verdict-file <f>' (bound to the judged head). Use event COMMENT for an advisory body (SPEC-110 S4, #3028)." >&2
+      return 8
+    fi
+    resp=$(rl__post_issue_comment "$repo" "$pr" "$(rl_verdict_mark_body "$body")") || {
+      echo "rl_post_verdict: could not post the verdict comment on PR #${pr}" >&2
+      return 1
+    }
+    rid=$(printf '%s' "$resp" | jq -r '.id // empty' 2>/dev/null)
+    [[ "$rid" =~ ^[0-9]+$ ]] || { echo "rl_post_verdict: Azure Repos comment returned no numeric thread id" >&2; return 1; }
+    echo "rl_post_verdict: posted COMMENT verdict on PR #${pr} (Azure Repos closed thread ${rid})" >&2
+    printf '%s\n' "$rid"
+    return 0
   fi
   # Verdict pinned to what it judged (sge#2781). The block's `commit:` goes out
   # as commit_id on every route: without it GitHub binds the review to whatever
@@ -2528,8 +2685,70 @@ rl_post_verdict() {
 # own POST's exit code.
 rl_verify_verdict_posted() {
   local pr="${1:?rl_verify_verdict_posted: pr required}"
-  local target="${2:?rl_verify_verdict_posted: review_id_or_url required}"
+  local target
   local repo head reviews id review commit_id body
+
+  # Azure Repos (#3028): there is no review id. Two shapes, never mixed:
+  #   * a numeric <target> is a COMMENT verdict: the thread itself must exist and
+  #     carry an sge-verdict fence. It is checked on its own; a vote artefact at
+  #     the head never stands in for it.
+  #   * "-" (or empty) is a VOTE: the newest verdict artefact by this token
+  #     identity judged the CURRENT head AND is of the kind the caller expects
+  #     (what `pass` / `fail` wrote). [expected] is approve|wait|reject, or the
+  #     aliases pass (= approve) / fail (= wait or reject); omitted = any kind.
+  if [ "$(sge_pr_host)" = azdo ]; then
+    local avs ahead acom acommit want wantre
+    target="${2:-}"; want="${3:-}"
+    [ "$target" = "-" ] && target=""
+    case "$target" in
+      ''|*[!0-9]*) [ -z "$target" ] || { echo "rl_verify_verdict_posted: unsupported target '${target}' on Azure Repos (a numeric COMMENT thread id or '-')" >&2; return 1; } ;;
+    esac
+    case "$want" in
+      ""|-)
+        # A vote is checked against the kind the caller means to have cast: with
+        # none given any kind would verify (a stale `wait` for a `pass`). Refuse.
+        if [ -z "$target" ]; then
+          echo "rl_verify_verdict_posted: a vote check needs the expected verdict (approve|wait|reject|pass|fail) -- refusing to accept any kind (SPEC-110 S4, #3028)" >&2
+          return 1
+        fi
+        wantre='approve|wait|reject' ;;
+      approve|pass) wantre='approve' ;;
+      wait)         wantre='wait' ;;
+      reject)       wantre='reject' ;;
+      fail)         wantre='wait|reject' ;;
+      *) echo "rl_verify_verdict_posted: unknown expected verdict '$want' (approve|wait|reject|pass|fail)" >&2; return 1 ;;
+    esac
+    ahead=$(rl_head_sha "$pr") && [[ "$ahead" =~ ^[0-9a-fA-F]{40}$ ]] \
+      || { echo "rl_verify_verdict_posted: cannot read PR #${pr}'s current head SHA -- unverifiable" >&2; return 1; }
+    if [[ "$target" =~ ^[0-9]+$ ]]; then
+      acom=$(rl__azdo_thread_body "$pr" "$target")         || { echo "rl_verify_verdict_posted: PR #${pr} comments unreadable or malformed -- unverifiable (SPEC-110 S4, #3028)" >&2; return 1; }
+      if [ -n "$acom" ] && [ -n "$(rl__verdict_block "$acom")" ]; then
+        # Stale-coverage check (as the GitHub path's commit_id vs head): the
+        # fence's own `commit:` must be the current head, and the fence unique.
+        acommit=$(rl__verdict_block "$acom" | sed -n 's/^[[:space:]]*[Cc]ommit:[[:space:]]*\([0-9a-fA-F]\{7,40\}\)[[:space:]]*$/\1/p' | head -1 | tr 'A-F' 'a-f')
+        ahead=$(printf '%s' "$ahead" | tr 'A-F' 'a-f')
+        if [ -n "$acommit" ] && [ "${ahead#"$acommit"}" != "$ahead" ] \
+           && [ "$(rl__verdict_fence_count "$acom")" = 1 ]; then
+          printf '%s\n' "$target"
+          return 0
+        fi
+        echo "rl_verify_verdict_posted: thread ${target} of PR #${pr} does not carry exactly one fence whose commit is the current head ${ahead:0:12} (got '${acommit:-none}') -- stale or ambiguous (SPEC-110 S4, #3028)" >&2
+        return 1
+      fi
+      echo "rl_verify_verdict_posted: thread ${target} of PR #${pr} is missing or has no sge-verdict fence -- not verified (SPEC-110 S4, #3028)" >&2
+      return 1
+    fi
+    avs=$(bash "$_SGE_GHPR_AA" pr-verdict-status "$(git remote get-url origin 2>/dev/null)" "$pr" 2>/dev/null | tr -d '\r') \
+      || { echo "rl_verify_verdict_posted: verdict artefacts of PR #${pr} unreadable -- unverifiable" >&2; return 1; }
+    if [[ "$avs" =~ ^(${wantre})[[:space:]]([0-9a-f]{40})$ ]] \
+       && [ "${BASH_REMATCH[2]}" = "$(printf '%s' "$ahead" | tr 'A-F' 'a-f')" ]; then
+      printf '%s\n' "${BASH_REMATCH[1]}"
+      return 0
+    fi
+    echo "rl_verify_verdict_posted: no ${want:-any} verdict artefact covering PR #${pr}'s head ${ahead:0:12} (newest: ${avs:-none}) -- not verified (SPEC-110 S4, #3028)" >&2
+    return 1
+  fi
+  target="${2:?rl_verify_verdict_posted: review_id_or_url required}"
 
   repo=$(rl__repo) || { echo "rl_verify_verdict_posted: cannot resolve repo" >&2; return 1; }
 
@@ -2667,6 +2886,8 @@ rl_is_rate_limit_error() {
 # Non-zero exit + no output on any fetch/parse failure.
 rl_rate_limit_status() {
   local raw remaining limit reset
+  # Azure Repos (#3028): no GitHub quota to read; the adapter has its own throttle.
+  if [ "$(sge_pr_host)" = azdo ]; then rl__azdo_unrouted rl_rate_limit_status; return 1; fi
   raw=$(gh api graphql -f query='query { rateLimit { remaining limit resetAt } }' \
     --jq '"\(.data.rateLimit.remaining) \(.data.rateLimit.limit) \(.data.rateLimit.resetAt)"' 2>/dev/null) || return 1
   remaining=$(printf '%s' "$raw" | awk '{print $1}')
@@ -2767,6 +2988,7 @@ rl_fail_loud_rate_limited() {
 rl_pr_state_gql() {
   local pr="${1:?rl_pr_state_gql: pr required}" repo
   repo=$(rl__repo) || return 1
+  if [ "$(sge_pr_host)" = azdo ]; then rl_pr_state "$pr"; return; fi   # Azure Repos (#3028): same shape
   gh api graphql -f query='
     query($owner:String!,$repo:String!,$pr:Int!){
       repository(owner:$owner,name:$repo){ pullRequest(number:$pr){
@@ -2812,6 +3034,8 @@ rl_pr_state_gql() {
 rl_checks_status_gql() {
   local pr="${1:?rl_checks_status_gql: pr required}" repo raw total got
   repo=$(rl__repo) || return 1
+  # Azure Repos (#3028): no statusCheckRollup; use `sge_gh_pr checks` (DP5 rows).
+  if [ "$(sge_pr_host)" = azdo ]; then rl__azdo_unrouted rl_checks_status_gql; return 1; fi
   raw=$(gh api graphql -f query='
     query($owner:String!,$repo:String!,$pr:Int!){
       repository(owner:$owner,name:$repo){ pullRequest(number:$pr){
@@ -2903,6 +3127,8 @@ rl_policy_approval_for() {
 # no excluded category/path, no human-only hold); nothing otherwise.
 rl_hold_release_order() {
   local pr="$1" repo
+  # Azure Repos (#3028): release-hold is refused there (needs a human); no order.
+  if [ "$(sge_pr_host)" = azdo ]; then return 0; fi
   _rl_dp_load
   repo="${GH_REPO:-$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)}" || return 0
   [ -n "$repo" ] || return 0

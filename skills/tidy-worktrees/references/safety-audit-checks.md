@@ -27,9 +27,23 @@ gh pr list --state merged --head "$b" --json number,mergedAt,headRefOid
 # or: gh pr view "$b" --json state,headRefOid
 ```
 
-On a non-GitHub host (`fpr_host_kind` ≠ `github`: Forgejo/Gitea or Azure DevOps) there is no merged-PR lookup yet, so skip this cross-check: the branch stays 🟥 VALUABLE on ahead-count (fail safe — never SAFE on an unverified merge).
+On **Azure DevOps** (`fpr_host_kind` = `azdo`) use the completed-PR lookup instead (issue #3027; needs `SGE_AZDO_TOKEN`, the same read-only Code PAT as the open-PR list):
 
-If a merged PR exists for the branch **and** the branch tip equals the PR's `headRefOid` (no commits added after the merge) **and** the working tree is clean → ⬜ SAFE (squash-merged). If the tip has moved past the merged PR's head, the extra commits are 🟥 VALUABLE.
+```bash
+source "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/lib/forgejo-pr-read.sh"
+# "<number><TAB><recorded-source-head-sha><TAB><completion-time>" per status=completed PR
+if COMPLETED="$(fpr_completed_pr_heads "$b")"; then
+  tip="$(git rev-parse "refs/heads/$b")"
+  printf '%s
+' "$COMPLETED" | cut -f2 | grep -qx "$tip" && echo "completed-PR head == tip"
+fi
+```
+
+A branch is ⬜ SAFE only when a **completed** PR exists, its recorded source head (`lastMergeSourceCommit`) equals the local branch tip, **and** the tree is clean. Everything else stays 🟥 VALUABLE: a tip that moved past the completed head, an abandoned or active PR (only `status=completed` counts; completion is never inferred from mergeability or a merge commit), no completed PR, a missing token or disallowed host, an API/auth error, malformed JSON, or a page-cap hit (possible truncation). `fpr_completed_pr_heads` exits non-zero on every uncertainty; an empty list with exit 0 is a confirmed zero and also leaves the branch VALUABLE. Never print or log the token.
+
+On any other non-GitHub host (Forgejo/Gitea) there is no merged-PR lookup yet, so skip this cross-check: the branch stays 🟥 VALUABLE on ahead-count (fail safe — never SAFE on an unverified merge).
+
+If a merged PR exists for the branch **and** the branch tip equals the PR's `headRefOid` (on Azure DevOps, the completed PR's `lastMergeSourceCommit`) (no commits added after the merge) **and** the working tree is clean → ⬜ SAFE (squash-merged). If the tip has moved past the merged PR's head, the extra commits are 🟥 VALUABLE.
 
 Other useful checks (per worktree `$wt` / branch `$b`):
 

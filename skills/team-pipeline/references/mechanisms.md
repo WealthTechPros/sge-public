@@ -326,12 +326,25 @@ TIER=$(node -e "
   process.stdout.write((st.tierMap || {})['$N'] || 'sonnet');
 ")
 # TIER defaults to "sonnet" when Phase 1.5 didn't cover this issue (e.g. the
-# resolver failed for it) — never
-# leave the Agent() dispatch call's model parameter unset.
+# resolver failed for it).
 ```
 
-Pass `$TIER` as the `model` argument on the lane's `Agent(name: "impl-<N>",
-model: $TIER)` dispatch (SKILL.md Phase 3c / [dispatch-prompts](dispatch-prompts.md)).
+**Resolve the tier to a concrete model id before spawning** (sge#3035). The bare
+tier name (`haiku`/`sonnet`/`opus`) is an Anthropic alias a non-Anthropic harness
+rejects, so never pass `$TIER` as `model` directly:
+
+```bash
+MODEL=$(bash -c 'source "${CLAUDE_PLUGIN_ROOT:-.}/skills/team-pipeline/assets/resolve-tier.sh"; resolve_tier_model "$1"' _ "$TIER"); MODEL_RC=$?
+```
+
+- `MODEL_RC` non-zero (no eligible model for the tier, an invalid override, or no
+  catalog for an `opus` lane): **do not spawn the lane**. Record the issue in
+  `failedIssues` with reason `no-eligible-model` and report it; never fall back
+  to a lower tier or to the bare alias.
+- `MODEL` is `default` (a `haiku`/`sonnet` lane with no catalog available):
+  spawn **without** a `model:` argument so the harness default applies.
+- Otherwise pass the id: `Agent(name: "impl-<N>", model: $MODEL)` (SKILL.md
+  Phase 3c / [dispatch-prompts](dispatch-prompts.md)).
 
 ---
 

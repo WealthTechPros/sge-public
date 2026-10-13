@@ -21,6 +21,9 @@
 #            regardless of how mechanical the rest of the signal looks — this
 #            check runs LAST and overrides haiku/sonnet if it matches.
 #
+# Concrete ids: resolve_tier_model <tier> (below) turns the tier into a catalog-
+# verified model id; do not pass the bare tier name to a non-Anthropic harness.
+#
 # Contract (same family as reconcile-flush.sh):
 #   * resolve_tier <title> <body> -> prints "haiku"|"sonnet"|"opus" to stdout,
 #     exit 0 always (never fails — an unclassifiable issue defaults to sonnet,
@@ -93,6 +96,22 @@ $body"
 
   printf '%s' "$tier"
   return 0
+}
+
+# resolve_tier_model <tier> — print the CONCRETE model id for a tier via the
+# provider-neutral resolver (skills/pr-review/resolve-model.sh, issue #3035), so
+# callers pass `Agent(model: <id>)` rather than a bare haiku|sonnet|opus alias a
+# non-Anthropic-aliasing harness rejects. haiku maps to the `light` class (its own
+# catalog-verified ids first, then standard/deep as an upward fallback, never a
+# model BELOW the tier); sonnet maps to `standard`; opus to `deep`. Prints
+# `default` (omit `model:`) for a light/standard lane with no catalog; non-zero +
+# a reason on stderr when a deep lane has no eligible model (the lane must not
+# run, never downgrade).
+resolve_tier_model() {
+  local tier=${1:-sonnet} class=standard
+  case "$tier" in haiku) class=light ;; opus) class=deep ;; esac
+  bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../pr-review/resolve-model.sh" \
+    --role "impl-$tier" --class "$class"
 }
 
 main() {

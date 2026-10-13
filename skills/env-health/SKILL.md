@@ -304,30 +304,44 @@ fi
 
 ---
 
-## Component C2 — Forgejo CI portability scan (sge-public#48)
+## Component C2: CI portability scan (Forgejo sge-public#48, Azure Pipelines sge#3030)
 
-When the host is Forgejo/Gitea (`with-repo-cwd.sh host` → `forgejo`) and the
-repo has `.forgejo/workflows/`, warn on steps that are GitHub-only and **fail
-silently or noisily on Forgejo runners** — the per-PR CI noise otherwise gets
-misread as a real regression:
+On a Forgejo/Gitea host (`.forgejo/workflows/`) or an Azure DevOps host
+(`azure-pipelines.yml`, `.azure-pipelines/**`; `fpr_host_kind` = `azdo`), warn on
+steps that are GitHub-only and fail silently or noisily on that CI, so the
+per-PR noise is not misread as a regression:
 
-- `uses: actions/github-script` — Forgejo resolves bare `actions/*` against its
-  own mirror (`data.forgejo.org`), which has no `github-script` (it wraps
-  Octokit; there is no Forgejo-API equivalent) → `repository not found`.
-- bare `gh ` invocations — the GitHub CLI is not in stock Forgejo runner images
-  (`gh: command not found`, exit 127), and even when installed it cannot talk
-  to a Forgejo API.
+- `uses: actions/github-script` (Forgejo), `uses: actions/*` and `GitHub*@N`
+  tasks such as `GitHubRelease@1` (Azure Pipelines): no equivalent on that host.
+- bare `gh ` invocations: the GitHub CLI is not in stock runner/agent images
+  and cannot talk to a Forgejo or Azure DevOps API.
 
 ```bash
-if [ "$(fpr_host_kind)" = "forgejo" ] && [ -d .forgejo/workflows ]; then
-  grep -nE 'uses:[[:space:]]*actions/github-script|(^|[[:space:];|&(])gh[[:space:]]+(pr|issue|api|release|run|repo|label|workflow)[[:space:]]'     .forgejo/workflows/*.y*ml 2>/dev/null     | sed 's/^/CI_PORTABILITY_WARN: GitHub-only step on a Forgejo runner: /'
+# the `gh` executable in command position, any subcommand (auth, secret, ...)
+GH='(^|[[:space:];|&(])gh[[:space:]]+[a-z]'
+FILES=""
+case "$(fpr_host_kind)" in
+  forgejo) WHERE="a Forgejo runner"; PAT="uses:[[:space:]]*actions/github-script|$GH"
+           FILES="$(find .forgejo/workflows -name '*.y*ml' -type f 2>/dev/null)" ;;
+  azdo)    WHERE="an Azure Pipelines agent"; PAT="uses:[[:space:]]*actions/|task:[[:space:]]*GitHub[A-Za-z]*@|$GH"
+           FILES="$(find azure-pipelines.y*ml .azure-pipelines -name '*.y*ml' -type f 2>/dev/null)" ;;
+esac   # github and unknown hosts: skipped
+CI_PORTABILITY_WARNS=0
+if [ -n "$FILES" ]; then
+  WARNS="$(printf '%s\n' "$FILES" | xargs grep -nE "$PAT" 2>/dev/null \
+    | sed "s|^|CI_PORTABILITY_WARN: GitHub-only step on $WHERE (fix: curl the host REST API, see references/forgejo-actions-portability.md): |")"
+  if [ -n "$WARNS" ]; then
+    printf '%s\n' "$WARNS"
+    CI_PORTABILITY_WARNS="$(printf '%s\n' "$WARNS" | wc -l | tr -d ' ')"
+  fi
 fi
+true
 ```
 
-Advisory only — it never gates fan-out. Remedy: replace with `curl` against the
-Forgejo REST API (or a `data.forgejo.org/actions/*` action), or install `gh`
-in the runner image only for steps that genuinely target GitHub. Full
-guidance: [`references/forgejo-actions-portability.md`](references/forgejo-actions-portability.md).
+Advisory only: never gates fan-out, never fails the run. The snippet sets
+`CI_PORTABILITY_WARNS` (read by the heartbeat line as `ci_portability=`). Fix
+text and `curl` replacements (label, PR comment) for both hosts:
+[`references/forgejo-actions-portability.md`](references/forgejo-actions-portability.md).
 
 ---
 
@@ -383,9 +397,9 @@ expected. This is the audit trail for "what was the box doing at 14:00 on a day
 like 2026-06-16":
 
 ```bash
-printf '[%s] env-health | reaped=%s integrity=%s sessions=%s/%s merged=%s/~%s\n' \
+printf '[%s] env-health | reaped=%s integrity=%s sessions=%s/%s merged=%s/~%s ci_portability=%s\n' \
   "$(date -u +%H:%M:%S)" "$REAPED_COUNT" "$INTEGRITY" "$SESSIONS" "$AGENT_MAX" \
-  "$MERGED_TODAY" "$EXPECTED" >> "${ENV_HEALTH_LOG:-/tmp/env-health.log}"
+  "$MERGED_TODAY" "$EXPECTED" "${CI_PORTABILITY_WARNS:-0}" >> "${ENV_HEALTH_LOG:-/tmp/env-health.log}"
 ```
 
 ---

@@ -74,7 +74,8 @@ echoed `<!--`/`<pre>`, parity shifts). A body is clean only when **all** hold:
   content (HTML comments and other fences included) reads `verdict:` followed by
   the gate's own token `pass`, `fail` or `incomplete` as a whole word (any case,
   spaces allowed around the colon) -- else `malformed`. Other `Verdict:` prose,
-  such as a lane's `Verdict: CONTROL_HOLDS`, is ignored;
+  such as a lane's `Verdict: CONTROL_HOLDS`, is ignored. Reviewers therefore
+  write lane summaries as `Result:`, never `verdict:` outside the block;
 - a closer is compared by run **length**, never a counted `{N,}` regex (gh's
   gojq/RE2 rejects counts above 1000); every pattern uses explicit ASCII
   classes, never `\s` or a case-insensitive flag, so jq, gojq and Python agree
