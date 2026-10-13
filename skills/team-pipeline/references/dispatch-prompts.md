@@ -152,16 +152,18 @@ Phase 6. **Do NOT spawn this as a detached background Agent or with
 
 ## Implementation lane (Phase 3c) — Task name `"impl-<N>"`
 
-Dispatched via `Agent(name: "impl-<N>", model: <tier>)` — `<tier>` is the
-queue entry's Phase 1.5-resolved model tier (`haiku`/`sonnet`/`opus`, #2488;
-resolved via `resolve-tier.sh`, looked up from `tierMap` —
-[commands](mechanisms.md#per-lane-model-tier-2488)). Naming it `"impl-<N>"`
+Dispatched via `Agent(name: "impl-<N>", model: <model-id>)` — `<model-id>` is the
+queue entry's Phase 1.5 tier (`haiku`/`sonnet`/`opus`, #2488; `resolve-tier.sh`,
+looked up from `tierMap`) resolved to a **catalog-verified id** by
+`resolve_tier_model` (sge#3035). Omit `model:` when it returns `default`; do not
+spawn the lane when it exits non-zero —
+[commands](mechanisms.md#per-lane-model-tier-2488). Naming it `"impl-<N>"`
 keeps it a stoppable "named Task" per the Stoppable-Only Fan-Out Rule —
 `model` changes which model the lane runs on, not its stoppability.
 
 ```
 Task name: "impl-<N>"
-Model tier: <tier>   # haiku | sonnet | opus — Phase 1.5 batch resolution (#2488)
+Model tier: <tier>   # haiku | sonnet | opus — Phase 1.5 batch resolution (#2488); passed as the resolved id
 Prompt:
   Implement GitHub issue #<N> (tracked in <TRACKING_REPO>).
   Execution repo: <EXEC_REPO>  (where the branch + PR live; == the tracking

@@ -60,6 +60,16 @@
 #   # to delete anything (an empty/partial list reads every branch as "not open").
 #   fpr_open_pr_heads
 #
+#   # Completed-PR lookup for ONE source branch, FAIL-CLOSED (issue #3027;
+#   # tidy-worktrees' squash-merge cross-check). Azure DevOps only:
+#   #   Azure DevOps -> azdo-adapter.sh list-completed-prs <origin-url> <branch>
+#   # Prints "<number><TAB><recorded-source-head-sha><TAB><completion-time>" per
+#   # completed PR. Exit 0 + no output = confirmed zero completed PRs; exit 1 =
+#   # lookup failed / truncated / malformed (branch stays VALUABLE); exit 2 = no
+#   # completed-PR lookup on this host (GitHub uses `gh pr list --state merged`,
+#   # Forgejo has none) - skip the cross-check, fail safe.
+#   fpr_completed_pr_heads <branch>
+#
 # Environment:
 #   CLAUDE_PLUGIN_ROOT    — must be set (standard SGE harness var).
 #   FORGEJO_API_TOKEN /
@@ -84,6 +94,17 @@ _FPR_AZDO_ADAPTER="${CLAUDE_PLUGIN_ROOT:-$_FPR_SCRIPT_DIR/../..}/scripts/azdo-ad
 _FPR_AZDO_SHIM="$_FPR_SCRIPT_DIR/azdo-gh-pr.sh"
 
 _fpr_err()  { printf 'forgejo-pr-read: error: %s\n' "$*" >&2; }
+
+# _fpr_timed <cmd...> -- run with a wall-clock limit when `timeout` is available
+# (SGE_FPR_TIMEOUT_SEC, default 60) so a hung adapter request cannot block a sweep
+# forever. Exit 124 on expiry; without `timeout` the command just runs.
+_fpr_timed() {
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "${SGE_FPR_TIMEOUT_SEC:-60}" "$@"
+  else
+    "$@"
+  fi
+}
 
 # Resolve and cache the host kind for this shell invocation. Re-sourcing the file
 # in the same shell resets it (safe: same repo, same origin, same result).
@@ -423,4 +444,52 @@ fpr_open_pr_heads() {
   fi
   # tr: jq.exe on Windows emits CRLF; a stray \r would corrupt branch names.
   printf '%s' "$raw" | jq -r "$jqf" | tr -d '\r'
+}
+
+# fpr_completed_pr_heads <branch> - see the header block. The caller marks the
+# branch SAFE only when a line's head sha equals the local branch tip AND the
+# tree is clean; every non-zero exit leaves it VALUABLE.
+fpr_completed_pr_heads() {
+  local branch="${1:-}"
+  [ -n "$branch" ] || { _fpr_err "fpr_completed_pr_heads: <branch> required"; return 1; }
+  command -v jq >/dev/null 2>&1 || { _fpr_err "jq is required for fpr_completed_pr_heads"; return 1; }
+  local host raw origin rc lines
+  host="$(fpr_host_kind)"
+  case "$host" in
+    azdo)
+      origin="$(_fpr_origin_url)" || return 1
+      [ -f "$_FPR_AZDO_ADAPTER" ] || { _fpr_err "azdo-adapter.sh not found at $_FPR_AZDO_ADAPTER"; return 1; }
+      rc=0
+      raw="$(_fpr_timed bash "$_FPR_AZDO_ADAPTER" list-completed-prs "$origin" "$branch")" || rc=$?
+      if [ "$rc" -ne 0 ]; then
+        if [ "$rc" -eq 124 ]; then
+          _fpr_err "azdo-adapter.sh list-completed-prs timed out after ${SGE_FPR_TIMEOUT_SEC:-60}s - completed-PR set unknown"
+        else
+          _fpr_err "azdo-adapter.sh list-completed-prs failed or may be truncated (exit $rc) - completed-PR set unknown"
+        fi
+        return 1
+      fi
+      # Every record must be a complete object: a record with a missing/null number,
+      # head sha or closedAt must never be printed as "41<TAB>null<TAB>..." (a null
+      # head could not match a branch tip, but it would also hide a broken lookup).
+      # jq's exit status is checked and output is buffered, so a bad record
+      # anywhere yields NO partial lines and a non-zero exit.
+      lines="$(printf '%s' "$raw" | jq -r '
+          if type != "array" then error("not an array") else . end
+          | .[]
+          | if (type == "object"
+                and (.number | type == "number")
+                and (.headRefOid | type == "string" and length > 0)
+                and (.closedAt | type == "string" and length > 0))
+            then "\(.number)\t\(.headRefOid)\t\(.closedAt)"
+            else error("malformed completed-PR record") end' 2>/dev/null)" \
+        || { _fpr_err "completed-PR payload is not an array of complete records - completed-PR set unknown"; return 1; }
+      # tr: jq.exe on Windows emits CRLF.
+      [ -z "$lines" ] || printf '%s\n' "$lines" | tr -d '\r'
+      ;;
+    *)
+      _fpr_err "no completed-PR lookup for host kind '$host' - skip the squash-merge cross-check"
+      return 2
+      ;;
+  esac
 }

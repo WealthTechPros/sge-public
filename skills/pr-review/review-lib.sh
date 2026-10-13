@@ -1717,6 +1717,22 @@ rl_reviewer_dispatch() {
   printf 'dispatch\t%s\n' "$id" >> "$f" || return 1
 }
 
+# rl_reviewer_resolve_model <pr> <agent_id> <role> [--security|--class C|--override ID]
+# Resolve the concrete model id for a dispatched lane via resolve-model.sh (#3035),
+# record it in the ledger (`model<TAB><id><TAB><model>`), and print it. Non-zero =
+# the lane must NOT be spawned (leave it PENDING). `pass` refuses a locally
+# dispatched @security-auditor with no recorded deep-class model (pr-labels.sh).
+rl_reviewer_resolve_model() {
+  local pr="${1:?rl_reviewer_resolve_model: pr required}" id="${2:?rl_reviewer_resolve_model: agent id required}"
+  local role="${3:?rl_reviewer_resolve_model: role required}" f m
+  shift 3
+  f=$(rl__attest_file "$pr") || return 1
+  m=$(bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/resolve-model.sh" --role "$role" "$@") || return 1
+  rl__attest_ready "$f" || return 1
+  printf 'model\t%s\t%s\n' "$id" "$m" >> "$f" || return 1
+  printf '%s\n' "$m"
+}
+
 # rl_reviewer_attest <pr> <agent_id> <tool_uses> [reply_file] — verify + clear.
 # Runs rl_reviewer_ran; on `ran` marks the reviewer ATTESTED (exit 0). Otherwise
 # leaves it PENDING and returns 1 (so `pass` stays blocked until it is re-run).
@@ -2382,6 +2398,22 @@ rl_post_verdict() {
      && printf '%s\n' "$body" | grep -Eq '(```|~~~).*[sS][gG][eE]-[vV][eE][rR][dD][iI][cC][tT]'; then
     echo "rl_post_verdict: REFUSING to APPROVE -- the body carries an sge-verdict block that does not parse to exactly one 'verdict: pass' (got '${ivd:-none}': duplicate key, non-exact fence, empty or non-pass value) (SPEC-090)." >&2
     return 7
+  fi
+  # Draft guard (sge#3032): an APPROVE must never land on a draft PR (`pr-labels.sh pass`
+  # refuses a draft; the verdict-posting path must agree). Read before any network write;
+  # an unreadable draft state refuses too (fail closed). Same refusal exit code (7).
+  if [ "$event" = "APPROVE" ]; then
+    local isdraft
+    if [ "$(sge_pr_host)" = azdo ]; then
+      isdraft=$(sge_gh_pr view "$pr" --json isDraft --jq .isDraft 2>/dev/null | tr -d '[:space:]') || isdraft=""
+    else
+      # GitHub: read through rl_gh so the wtp-sge App installation token is used, like every other read here.
+      isdraft=$(rl_gh pr view "$pr" --json isDraft --jq .isDraft 2>/dev/null | tr -d '[:space:]') || isdraft=""
+    fi
+    if [ "$isdraft" != "false" ]; then
+      echo "rl_post_verdict: REFUSING to APPROVE PR #${pr} -- it is a draft or its draft state could not be read (isDraft='${isdraft:-unreadable}'). Mark it ready for review and retry (sge#3032, SPEC-090)." >&2
+      return 7
+    fi
   fi
   # Pre-post draft-vs-PR guard (issue #1667). The load-bearing fix: BEFORE any
   # network write, prove the body being posted belongs to THIS PR, so a stale or

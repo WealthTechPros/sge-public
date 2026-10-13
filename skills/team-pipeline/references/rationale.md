@@ -182,7 +182,8 @@ running, e.g. a 1M-context Opus-class model for a mechanical rename). Phase 1.5
 now resolves a **per-issue** `tier` (`resolve-tier.sh`, #2488) — mechanical/
 docs/rename ≤ 50 lines → `haiku`; the sonnet default is unchanged for
 ordinary implementation work; migration/cross-package-schema/UI-design-
-judgement → `opus` — and Phase 3c passes it as `Agent(name:, model: <tier>)`.
+judgement → `opus` — and Phase 3c resolves it to a catalog-verified model id
+(`resolve_tier_model`, sge#3035) and passes that as `Agent(name:, model: <id>)`.
 Review agents still run at **sonnet** (escalating to **opus** on
 security-globbed diffs); the PR monitor's triage / CI-check / label work stays
 **haiku**-tier. The registry's CRITICAL escalation rule is absolute — anything
