@@ -38,3 +38,52 @@ re-reviewed. A rebase rewrites every commit: the approved head is no longer an
 ancestor, the carry cannot apply, and the PR needs a full re-review — the
 "failed the merge gate 2–3 times" churn #2829 measured. Force-pushes also
 strand any worktree on the old commits (#1666).
+
+
+## Resolving conflicts without losing good code
+
+Strong models resolve conflicts well and we use them for it. The point of this
+section is to make that trust *checkable*, so a wrong resolution cannot land
+silently and good code is not lost or regressed. It applies to every lane and
+every model; conflict resolution is never handed to a lightweight tier.
+
+1. **Read both sides and the base, not just the markers** (`git diff --merge`,
+   `git show :1:<file> :2:<file> :3:<file>`). Decide per hunk: ours, theirs, both,
+   or rewritten.
+2. **Never resolve wholesale.** No `git checkout --ours|--theirs <file>`, no
+   `-X ours|theirs`, no `-s ours`, and no deleting a conflicted hunk to make the
+   markers go away. If a whole-file choice is genuinely right, say why in the
+   merge body.
+3. **A test, assertion, guard, lock or validation present on either side must
+   still be present afterwards**, unless the merge body names why it is obsolete.
+   Never default a conflicted test file to the side that deletes it.
+4. **Diff the result against both parents before the plain push.** After the
+   merge commit, the PR's own change must be unchanged except where you resolved
+   a conflict on purpose:
+
+   ```bash
+   BASE=$(git merge-base HEAD^1 HEAD^2)
+   git diff "$BASE" HEAD^1   # the branch's own change BEFORE the merge
+   git diff HEAD^2 HEAD      # the branch's own change AFTER the merge
+   git diff HEAD^1 HEAD      # what the base brought in PLUS any intentional resolution edits
+   ```
+
+   Compare the first two by their actual changes (which files, which added and
+   removed lines), not as rendered patch text: base changes shift hunk headers
+   and context even when the branch's change is untouched. Any difference must
+   be a conflict you resolved on purpose. A line removed from either parent that
+   the other side's change does not account for is a regression until explained.
+5. **Run the tests of both sides** (the ones the branch added and the ones the
+   base added) before pushing. A resolution that needs a test edited to pass is a
+   finding, not a fix.
+6. **Record it in the merge body**: both parent tips (`HEAD^1`, `HEAD^2`), each
+   conflicted file and its decision. Keep git's default merge subject: a custom
+   `merge: ...` subject tripped the trailer check (sge#3004, replaced by #3008).
+7. **Review reads a conflict-resolution merge as a diff against both parents.**
+   A removed test, assertion or guard is a finding. Files where a silent loss is
+   expensive (workflows, rulesets and policy, security guards, compliance data)
+   get the one adversarial pass the lean flow already allows.
+
+Because the rule is merge-only, every resolution keeps both histories reachable:
+a wrong one is repaired by a follow-up commit or a revert, never by rewriting
+history. Record the parent tips (item 6) so that is always possible.

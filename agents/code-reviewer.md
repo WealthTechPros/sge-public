@@ -16,7 +16,6 @@ description: |
   a project-level agent of the same name overrides this bundled one, so this
   acts as the portable floor and the repo version as the specialization.
 tools: Read, Glob, Grep, Bash
-model: sonnet
 color: green
 ---
 

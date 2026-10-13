@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "roles": {
+    "code-reviewer": "standard",
+    "design-reviewer": "standard",
+    "security-auditor": "deep",
+    "impl-haiku": "light",
+    "impl-sonnet": "standard",
+    "impl-opus": "deep"
+  },
+  "classes": {
+    "light": ["claude-haiku-4-5-20251001", "claude-haiku-4-5"],
+    "standard": ["claude-sonnet-5.5", "claude-sonnet-5", "gpt-6-sol"],
+    "deep": ["claude-opus-5.5", "claude-opus-5-5", "gpt-6-sol"]
+  }
+}

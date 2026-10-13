@@ -417,6 +417,14 @@ _sge_default_branch_cfg() { # -> the base repo's default-branch .claude/sge.json
 }
 _sge_ensure_agent_bot_login() {
   [ -n "${SGE_AGENT_BOT_LOGIN+x}" ] && return 0
+  # A Forgejo/Gitea repo is invisible to gh: the lookup below could only ever
+  # be a stray gh call on a forgejo host (SPEC-094 s2.2a, #3067). Trust no
+  # extra App there, which is what a failed lookup already yielded.
+  if [ "${_PRL_HOST:-github}" = "forgejo" ]; then
+    SGE_AGENT_BOT_LOGIN=""
+    export SGE_AGENT_BOT_LOGIN
+    return 0
+  fi
   SGE_AGENT_BOT_LOGIN="$(_sge_default_branch_cfg \
     | jq -r 'if type == "object" then (.agentBotLogin // empty | strings) else empty end' 2>/dev/null || true)"
   export SGE_AGENT_BOT_LOGIN
@@ -827,6 +835,26 @@ if [ "$_PRL_HOST" = "azdo" ]; then
   _prl_azdo_rc=0
   _prl_azdo_main "$@" || _prl_azdo_rc=$?
   exit "$_prl_azdo_rc"
+fi
+
+# ── Forgejo/Gitea host dispatch (SPEC-094 §2.2a, issue #3067) ─────────────
+# The gate state machine for a Forgejo PR is ported slice by slice into
+# pr-labels-forgejo.sh. A subcommand whose slice has not landed answers
+# $_PRL_FJ_NOT_IMPLEMENTED (75); that alone falls through to the inline
+# Forgejo path below (#1239), so nothing regresses mid-port. Every other exit
+# code, including the exit 2 refusal of an unsupported subcommand, is final and
+# never reaches gh.
+# The fall-through needs BOTH the 75 and the stub's own marker, so a real slice
+# that happens to propagate a 75 from a command stays a final refusal.
+if [ "$_PRL_HOST" = "forgejo" ]; then
+  # shellcheck source=skills/pr-review/pr-labels-forgejo.sh
+  . "${_PRL_SCRIPT_DIR}/pr-labels-forgejo.sh" || exit 1   # a missing file refuses, never skips
+  _prl_fj_rc=0
+  _PRL_FJ_STUB_HIT=0
+  _prl_forgejo_main "$@" || _prl_fj_rc=$?
+  if [ "$_prl_fj_rc" -ne "$_PRL_FJ_NOT_IMPLEMENTED" ] || [ "$_PRL_FJ_STUB_HIT" != 1 ]; then
+    exit "$_prl_fj_rc"
+  fi
 fi
 
 # _attest_dir_trusted <dir> -- create (0700) and verify a daemon-injected attestation
@@ -1785,6 +1813,19 @@ case "$CMD" in
         echo "refusing: $_ATTEST_PENDING dispatched reviewer(s) never cleared rl_reviewer_ran (issue #883) — their (non-)result must not be trusted as a clean pass" >&2
         echo "Re-run each unattested Layer 2/3 agent (or do its check inline) and clear it via rl_reviewer_attest before 'pass'. Ledger: $_ATTEST_FILE" >&2
         echo "SGE_REVIEW_ATTEST_SKIP=1 bypasses this only for a genuinely inline review with no dispatched specialists." >&2
+        exit 5
+      fi
+    fi
+    # Model floor (#3035): a LOCALLY dispatched @security-auditor (2-field dispatch line;
+    # daemon lines are the daemon's own tier) must carry a `model` line recorded by
+    # rl_reviewer_resolve_model whose id is in model-roles.json's `deep` class. The agent
+    # file no longer pins a model, so without this a lane could run on the session model.
+    if [[ "${SGE_REVIEW_ATTEST_SKIP:-}" != "1" && -f "${_ATTEST_FILE:-}" ]] \
+       && awk -F'\t' '$1=="dispatch" && $2=="@security-auditor" && NF==2 {f=1} END{exit !f}' "$_ATTEST_FILE"; then
+      _SEC_MODEL=$(awk -F'\t' '$1=="model" && $2=="@security-auditor" && NF==3 {m=$3} END{print m}' "$_ATTEST_FILE")
+      if [[ -z "$_SEC_MODEL" ]] || ! jq -e --arg m "$_SEC_MODEL" '(.classes.deep // []) | index($m) != null' "${_PRL_SCRIPT_DIR}/model-roles.json" >/dev/null 2>&1; then
+        echo "refusing: @security-auditor was dispatched without a recorded deep-class model (#3035; got '${_SEC_MODEL:-none}') -- the security lane must never run below the deep class" >&2
+        echo "Resolve it with rl_reviewer_resolve_model \"\$PR\" @security-auditor security-auditor --security and spawn with that id; or run the check inline (no @security-auditor dispatch)." >&2
         exit 5
       fi
     fi

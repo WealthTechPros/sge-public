@@ -11,7 +11,7 @@ a stage; calls that gate the dispatch, or that read/write the PR body, are order
 | `rl_pr_state` | `pulls/$PR` (state/draft/head/labels) | READ | gates all spend (#699) — evaluate first |
 | `rl_head_sha` | `pulls/$PR` `.head.sha` | READ | pins reviewed head; immutable in Phase 1 |
 | `rl_phase5_verdict` | `pulls/$PR` `.body` | READ **body** | feeds pass-through gate; must precede the body WRITE |
-| `gh pr diff --name-only` | diff | READ | independent |
+| `sge_gh_pr diff --name-only` | diff | READ | independent |
 | `gh issue view` (linked) | `issues/N` | READ | independent |
 | `gh api .../pulls/$PR/comments` | PR comments | READ | independent |
 | `rl_bot_signal` | `pulls/$PR/reviews` + `/comments` | READ | independent; produces `BOT_FINDINGS` (feeds `rl_diff_risk`) |
@@ -27,8 +27,8 @@ here spends nothing downstream:
 ```bash
 SGE_ROOT="$(bash ./scripts/resolve-sge-root.sh 2>/dev/null || bash "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-sge-root.sh")" || exit 1
 source "$SGE_ROOT/skills/pr-review/review-lib.sh"   # rl_* helpers
-REPO="${GH_REPO:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"; export GH_REPO="$REPO"
-PR="${1:-$(gh pr view --json number --jq .number 2>/dev/null)}"   # orchestrators pass it positionally
+REPO="$(rl__repo)"; [ "$(sge_pr_host)" = azdo ] || export GH_REPO="$REPO"   # azdo: no gh, no GH_REPO (#3028)
+PR="${1:-$(sge_gh_pr view --json number --jq .number 2>/dev/null)}"   # orchestrators pass it positionally
 [ -n "$PR" ] || { echo "NO_PR — pass a PR number"; exit 1; }
 REVIEW_MODE="default"                                             # issue #754; no export — env is per-call (#2656)
 case " $ARGUMENTS " in
@@ -54,9 +54,14 @@ These four calls are pure, mutually-independent READs (distinct resources; none 
 write). Issue them concurrently and join:
 
 ```bash
-gh pr diff "$PR" --repo "$REPO" --name-only &                                            # changed files
-gh issue view <ISSUE_NUMBER> --repo "$REPO" --json number,title,body,labels,comments &   # linked issue
-gh api "repos/$REPO/pulls/$PR/comments" --jq '.[]|{path,line,body,author:.user.login}' & # PR comments
+sge_gh_pr diff "$PR" --repo "$REPO" --name-only &                                        # changed files (routed on every host)
+if [ "$(sge_pr_host)" = azdo ]; then                  # Azure Repos: no gh (#3028); work item + PR comments via the adapter
+  bash "$_SGE_GHPR_AA" view-item <ISSUE_NUMBER> &                    # linked work item
+  sge_pr_comments_json "$PR" &                                                          # PR comments
+else
+  gh issue view <ISSUE_NUMBER> --repo "$REPO" --json number,title,body,labels,comments & # linked issue
+  gh api "repos/$REPO/pulls/$PR/comments" --jq '.[]|{path,line,body,author:.user.login}' & # PR comments
+fi
 BOT_SIGNAL=$(rl_bot_signal "$PR")                                                         # bot reviews (#688)
 wait
 ```

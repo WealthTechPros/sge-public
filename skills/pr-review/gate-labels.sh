@@ -189,7 +189,8 @@ GL_VERDICT_JQ='
       "carried_from", "base_commit", "decision"];
     def gl_line_ok:
       test("^[ -~]*$") and (test("<!--|-->") | not)
-      and (([capture("^(?<k>[a-z_]+):(?: (?<v>.*))?$")] | first) as $c
+      # Keys compare ASCII case-insensitively (`Commit:` is `commit:`); values stay exact.
+      and (([capture("^(?<k>[A-Za-z_]+):(?: (?<v>.*))?$")] | first | if . != null then .k |= ascii_downcase else . end) as $c
            | $c != null and ((gl_known | index($c.k)) != null)
              and (if $c.k == "verdict" then
                     ((($c.v // "") | ascii_downcase) as $w | $w == "pass" or $w == "fail" or $w == "incomplete")
@@ -279,7 +280,7 @@ GL_VERDICT_JQ='
           and ([$ls[$fs.ends[0]+1:][] | select(test("^[ \t]*$") | not)] | length) == 0
         then $ls[$fs.starts[0]+1:$fs.ends[0]] else null end) as $b0
      | (if $b0 != null and ([$b0[] | gl_line_ok] | all)
-          and ([$b0[] | sub(":.*$"; "")] | (length == (unique | length)))
+          and ([$b0[] | sub(":.*$"; "") | ascii_downcase] | (length == (unique | length)))
           # ONE-VERDICT-FENCE rule (SPEC-090, 2026-10-11): after gl_norm, exactly one
           # verdict-like fence opener in the body, and nothing outside the fence content
           # (prose, HTML comments, other fences) folds to `verdict: pass|fail|incomplete`
@@ -288,7 +289,8 @@ GL_VERDICT_JQ='
           and ([($ls[:$fs.starts[0] + 1] + $ls[$fs.ends[0]:])[] | gl_norm
                 | select(test("verdict[ \t]*:[ \t]*(pass|fail|incomplete)([^a-z0-9_]|$)"))] | length) == 0
         then $b0 else null end) as $blk
-     | def kv($k): [($blk // [])[] | capture("^[ \t]*" + $k + "[ \t]*:[ \t]*(?<v>[^ \t]*)") | .v] | first // "";
+     | def kv($k): [($blk // [])[] | capture("^(?<k>[A-Za-z_]+):(?: (?<v>.*))?$")
+                    | select((.k | ascii_downcase) == $k) | (.v // "")] | first // "";
        (kv("commit") | if . == "" then kv("sha") else . end | if . == "" then kv("head") else . end) as $sha
      | (kv("verdict") | ascii_downcase) as $v
      | (if $edited or $blk == null then ["", "malformed"]
@@ -374,12 +376,18 @@ gl_latest_verdict() {
 # another commit cannot mask the head's own verdict (SPEC-090 incomplete guard).
 gl_latest_verdict_for_head() {
   local pr="$1" head rows last sha v
-  head=$(gl_norm_sha "$2") || head=""
+  # A head that does not normalise (not >= 7 hex) can match nothing: unreadable, fail closed
+  # (sge#3032), never "no verdict".
+  head=$(gl_norm_sha "$2") || return 3
   rows=$(gl_verdict_rows "$pr") || return 3
+  # A row that names no commit judged no head, so it is never a `pass` for this one
+  # (sge#3032: a SHA-less pass was a wildcard). A SHA-less row whose word is anything but
+  # an exact `pass` is kept: it can only ever BLOCK (pr-labels.sh `pass` refuses on any
+  # non-`pass` word), never admit; dropping it would silently remove a blocker.
   last=$(printf '%s\n' "$rows" | awk -F'\t' -v h="$head" '
-    { s = tolower($2) }
-    s == "-" || s == "" { print; next }
-    h != "" && length(s) >= 7 && length(h) >= 7 && (index(h, s) == 1 || index(s, h) == 1) { print }' | tail -n 1)
+    { s = tolower($2); v = tolower($3); gsub(/[ \t\r]/, "", v) }
+    s == "-" || s == "" { if (v != "" && v != "-" && v != "pass") print; next }
+    length(s) >= 7 && length(h) >= 7 && (index(h, s) == 1 || index(s, h) == 1) { print }' | tail -n 1)
   sha=$(printf '%s' "$last" | cut -f2)
   v=$(printf '%s' "$last" | cut -f3)
   [[ "$sha" == "-" ]] && sha=""
