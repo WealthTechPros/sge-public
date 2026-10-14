@@ -95,14 +95,16 @@ _FPR_AZDO_SHIM="$_FPR_SCRIPT_DIR/azdo-gh-pr.sh"
 
 _fpr_err()  { printf 'forgejo-pr-read: error: %s\n' "$*" >&2; }
 
-# _fpr_timed <cmd...> -- run with a wall-clock limit when `timeout` is available
-# (SGE_FPR_TIMEOUT_SEC, default 60) so a hung adapter request cannot block a sweep
-# forever. Exit 124 on expiry; without `timeout` the command just runs.
+# _fpr_timed <cmd...> -- run with a wall-clock limit (SGE_FPR_TIMEOUT_SEC, default 60)
+# so a hung adapter request cannot block a sweep forever. Exit 124 on expiry. Without
+# a `timeout` utility it fails closed (non-zero, command not run): an unbounded call
+# would break the bounded-lookup contract.
 _fpr_timed() {
   if command -v timeout >/dev/null 2>&1; then
     timeout "${SGE_FPR_TIMEOUT_SEC:-60}" "$@"
   else
-    "$@"
+    _fpr_err "timeout utility is required for bounded provider calls"
+    return 1
   fi
 }
 
@@ -395,6 +397,8 @@ fpr_check_is_failing() {
 #   - gh / adapter call fails                                   → exit 1
 #   - payload is not a JSON array                               → exit 1
 #   - payload length reaches the page cap (possible truncation) → exit 1
+# Every external call is wall-clock bounded (_fpr_timed, SGE_FPR_TIMEOUT_SEC); a
+# timeout is exit 124 inside the call, which maps to exit 1 here.
 # Exit 0 with no output means "confirmed zero open PRs".
 #
 # Page caps: GitHub asks for SGE_OPEN_PR_LIMIT (default 1000) — `gh pr list`'s
@@ -410,7 +414,7 @@ fpr_open_pr_heads() {
     github)
       cap="${SGE_OPEN_PR_LIMIT:-1000}"
       case "$cap" in ''|*[!0-9]*|0) _fpr_err "SGE_OPEN_PR_LIMIT must be a positive integer"; return 1 ;; esac
-      raw="$(gh pr list --state open --limit "$cap" --json number,headRefName)" \
+      raw="$(_fpr_timed gh pr list --state open --limit "$cap" --json number,headRefName)" \
         || { _fpr_err "gh pr list failed — open-PR set unknown"; return 1; }
       jqf='.[] | "\(.number)\t\(.headRefName)"'
       ;;
@@ -418,7 +422,7 @@ fpr_open_pr_heads() {
       cap=50
       origin="$(_fpr_origin_url)" || return 1
       [ -f "$_FPR_ADAPTER" ] || { _fpr_err "forgejo-adapter.sh not found at $_FPR_ADAPTER"; return 1; }
-      raw="$(bash "$_FPR_ADAPTER" list-prs "$origin")" \
+      raw="$(_fpr_timed bash "$_FPR_ADAPTER" list-prs "$origin")" \
         || { _fpr_err "forgejo-adapter.sh list-prs failed — open-PR set unknown"; return 1; }
       jqf='.[] | "\(.number)\t\(.head.ref)"'
       ;;
@@ -426,7 +430,7 @@ fpr_open_pr_heads() {
       cap=""
       origin="$(_fpr_origin_url)" || return 1
       [ -f "$_FPR_AZDO_ADAPTER" ] || { _fpr_err "azdo-adapter.sh not found at $_FPR_AZDO_ADAPTER"; return 1; }
-      raw="$(bash "$_FPR_AZDO_ADAPTER" list-prs "$origin")" \
+      raw="$(_fpr_timed bash "$_FPR_AZDO_ADAPTER" list-prs "$origin")" \
         || { _fpr_err "azdo-adapter.sh list-prs failed or may be truncated — open-PR set unknown"; return 1; }
       jqf='.[] | "\(.number)\t\(.headRefName)"'
       ;;
