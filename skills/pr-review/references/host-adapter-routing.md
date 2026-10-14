@@ -49,6 +49,21 @@ does not duplicate it. **Not live-validated** against a real Forgejo instance
 (built without `git.feaw.co.uk` credentials or `mcp__forgejo__*` access); needs a
 manual pass before any Forgejo repo's pr-review flow depends on it.
 
+**Forgejo merge arm (`pass --auto-merge`) — required permission (#3122).** Before it
+merges, the arm reads the base branch's protection rule (`status_check_contexts`,
+`required_approvals`) and checks every required context is green at the reviewed head.
+Forgejo/Gitea allow that read (`GET /repos/{o}/{r}/branch_protections/{branch}`) only
+for **repo admins**, so the reviewing identity needs **admin** on the repo to arm a
+merge. A write collaborator can still record the verdict (`pass` without
+`--auto-merge`), but the arm refuses with `no readable branch protection for '<branch>'
+(HTTP <code>)` and exit 1; nothing merges and any scheduled merge is cancelled. HTTP 403
+means the identity is not an admin; 404 is ambiguous (no rule, or hidden from a
+non-admin). The arm never skips or degrades the protection read for a write identity:
+it is the safety pre-check that required contexts are satisfied. (The cause is inferred
+from the admin-versus-write difference seen in the 2026-10-14 live run on Forgejo
+16.0.2; it was not isolated further.) The message shows only the numeric status, never a
+response body or token.
+
 **Forgejo PR fields mapping** (from Gitea JSON to the names this skill references):
 
 | This skill uses           | Gitea JSON field                        |
