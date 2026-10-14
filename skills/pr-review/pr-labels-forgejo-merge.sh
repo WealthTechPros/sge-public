@@ -55,10 +55,18 @@ _prl_fjm_cancel() {
 # protection can enforce the gate and every required context is green at head.
 _prl_fjm_protection_gate() {
   local branch="$1" head="$2" bp ctxs_n approvals en statuses pat missing bad
-  bp="$(bash "$_PRL_FJM_ADAPTER" branch-protection "$_PRL_FJM_ORIGIN" "$branch" 2>/dev/null)" || {
-    _prl_fjm_err "no readable branch protection for '$branch' — the gate cannot be enforced; refusing to arm merge"
+  local bp_errf bp_code
+  bp_errf="$(mktemp 2>/dev/null)" || bp_errf=""
+  bp="$(bash "$_PRL_FJM_ADAPTER" branch-protection "$_PRL_FJM_ORIGIN" "$branch" 2>"${bp_errf:-/dev/null}")" || {
+    # Surface ONLY a 3-digit status parsed from the adapter's fixed-form line;
+    # never echo adapter stderr itself (it is not ours to forward verbatim).
+    bp_code=""
+    [ -z "$bp_errf" ] || bp_code="$(sed -n 's/.*branch-protection read failed: HTTP \([0-9][0-9][0-9]\).*/\1/p' "$bp_errf" | head -n 1)"
+    [ -z "$bp_errf" ] || rm -f "$bp_errf"
+    _prl_fjm_err "no readable branch protection for '$branch' (HTTP ${bp_code:-unknown}) — the gate cannot be enforced; refusing to arm merge. Branch protection is readable only by repo admins on Forgejo/Gitea (403, or 404 when hidden from a non-admin): the reviewing identity needs admin on the repo. The merge arm never skips this check for a write-permission identity."
     return 1
   }
+  [ -z "$bp_errf" ] || rm -f "$bp_errf"
   en="$(printf '%s' "$bp" | jq -r '.enable_status_check // false' 2>/dev/null)" || en=""
   ctxs_n="$(printf '%s' "$bp" | jq -r '(.status_check_contexts // []) | length' 2>/dev/null)" || ctxs_n=""
   approvals="$(printf '%s' "$bp" | jq -r '.required_approvals // empty' 2>/dev/null)" || approvals=""
