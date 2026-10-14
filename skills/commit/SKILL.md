@@ -101,12 +101,12 @@ Run the repo's quality suite (lint, type-check, tests) — refer to the repo's C
 ### 3. Secrets scan of the staged diff (mechanical, before committing)
 
 ```bash
-git diff --staged | grep -E '^\+' | grep -nEi \
-  '(api[_-]?key|secret|token|passw(or)?d|credential|private[_-]?key|BEGIN [A-Z ]*PRIVATE KEY|aws_access_key_id|ghp_[A-Za-z0-9]{20,}|github_pat_|sk-[A-Za-z0-9]{20,}|xox[bpars]-|eyJ[A-Za-z0-9_-]{20,})'
+bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/commit/scan-staged-secrets.sh"   # 0 clean, 1 findings, 2 scan error
 ```
 
-- **Any hit → stop.** Show the matching lines and ask the user to confirm each one is a false positive (variable name, test fixture, docs) before proceeding. Never commit a real credential "to fix later" — it's in history forever.
-- This is a cheap mechanical net, not a guarantee — stay alert for secrets the patterns miss.
+- **Rules (value-aware, staged ADDED lines only; exact rule set is pinned by `skills/tests/commit-secret-scan.test.sh`).** Blocked: known credential shapes (`ghp_`/`github_pat_` PATs, AWS `AKIA`/`ASIA`, GCP `AIza`, Slack `xox*`, Stripe/`sk-` keys, JWTs), private-key blocks, `Bearer`/`Basic` credentials, `user:pass@` URLs, `key=value` / `key: value` / `-Password "value"` / `the password is value` where the key names a secret/token/password/key/credential and the value is a real-looking literal (≥8 chars), and high-entropy strings (≥32 chars, mixed case + digits, ≥16 distinct). NOT blocked: prose or env-var names with no value, references (`$VAR`, `${{ secrets.X }}`, `<placeholder>`, `a.b.c`, calls, plain numbers).
+- **Synthetic-fixture exception:** a value made only of dummy words (`fixture`, `test`, `dummy`, `example`, `changeme`, `placeholder`, `xxxx`, ...) is allowed ONLY in a test path (`tests/`, `fixtures/`, `*.test.*`, `*_test.*`, `test_*`). A test path is never a blanket bypass: known shapes and realistic values still block there; a dummy word with a real suffix still blocks.
+- **Exit 1 or 2 → stop.** Findings print `file:line rule masked-prefix` only (never the value): confirm each with the user before proceeding; exit 2 (scan error) is treated as a finding. Never skip the scan or add a flag; never commit a real credential "to fix later" — it's in history forever. A mechanical net, not a guarantee: stay alert for secrets it misses (short values, values split across lines).
 
 ### 4. Detect whether the repo is SGE-governed (stack-agnostic)
 
