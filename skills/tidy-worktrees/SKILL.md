@@ -99,7 +99,7 @@ if ! OPEN_PRS="$(fpr_open_pr_heads)"; then   # "<number><TAB><head-branch>" per 
 fi
 ```
 
-`fpr_open_pr_heads` exits non-zero when the host is `unknown` (self-hosted Forgejo/Gitea not declared in `SGE_FORGEJO_HOSTS`), the `gh`/adapter call fails (an Azure DevOps token missing, or its host not in `SGE_AZDO_HOSTS`), the payload is malformed, or the list hits its page cap (possible truncation). **On any non-zero exit, stop: no deletion plan, in any mode including `--force`.** You may still print the read-only audit, marked "open-PR set unknown". An empty `OPEN_PRS` with exit 0 is a confirmed zero; an empty list from a failed call is never treated as one.
+`fpr_open_pr_heads` exits non-zero when the host is `unknown` (self-hosted Forgejo/Gitea not declared in `SGE_FORGEJO_HOSTS`), the `gh`/adapter call fails (an Azure DevOps token missing, or its host not in `SGE_AZDO_HOSTS`), the payload is malformed, or the list hits its page cap (possible truncation). On Azure DevOps the squash-merge cross-check uses `fpr_completed_pr_heads <branch>` (`azdo-adapter.sh list-completed-prs`, read-only, same `SGE_AZDO_TOKEN`/`SGE_AZDO_ORG`/`SGE_AZDO_HOSTS` rules, no credential is ever printed); it is fail-closed too: a failed, truncated or malformed lookup leaves the branch VALUABLE, never SAFE. **On any non-zero exit, stop: no deletion plan, in any mode including `--force`.** You may still print the read-only audit, marked "open-PR set unknown". An empty `OPEN_PRS` with exit 0 is a confirmed zero; an empty list from a failed call is never treated as one.
 
 Record: every worktree path + branch + HEAD SHA, every local branch + tip SHA + upstream/ahead-behind, the set of **open-PR branches** (always preserved), and the stash list with each stash's subject line.
 
@@ -235,7 +235,7 @@ When given several repo directories, **fan out the read-only part, keep the dest
 3. **A branch with no upstream is a single copy** — record its SHA before discard, or push it first.
 4. **`main`, open-PR branches, and the current worktree are sacrosanct.**
 5. **Stashes are repo-global** — attribute them to branches; unrelated stashes are a note, not a blocker.
-6. **Squash merges hide behind phantom "ahead" commits** — trust `gh`'s merged-PR record over `git log origin/main..branch`.
+6. **Squash merges hide behind phantom "ahead" commits** — trust the host's merged-PR record (`gh` on GitHub, `fpr_completed_pr_heads` on Azure DevOps) over `git log origin/main..branch`. On Azure DevOps a branch is SAFE only when a completed PR exists, the tip equals its recorded source head, and the tree is clean; any lookup failure leaves it VALUABLE.
 7. **Every deletion quotes a recovery SHA.** When in doubt, keep and report — a slightly untidy repo is cheap; lost work is not.
 8. **Windows junction guard is mandatory on Windows.** NTFS directory junctions inside a worktree are followed by `git worktree remove` and recursive deletes, destroying real target files. Always run Steps 4a–4b (detect junctions, unlink with `cmd /c rmdir`, verify gone) before any worktree removal on Windows.
 9. **A rescued/resumed worktree is rebased onto base and isolated-installed before its work is pushed or verified** (issue #951). The `../worktrees/rescue-guard.sh` guard is a default action on the Phase 3 "Push + draft PR" path, not an optional troubleshooting step — a stale branch must not merge behind main, and a junctioned `node_modules` must not let main's stale build masquerade as the worktree's verification.

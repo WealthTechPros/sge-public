@@ -30,12 +30,45 @@ could never have worked.
 ## Detection
 
 `/sge:env-health` Component C2 scans `.forgejo/workflows/*.yml` when the repo's
-host is Forgejo/Gitea (`scripts/with-repo-cwd.sh host` → `forgejo`; declare a
-self-hosted instance in `SGE_FORGEJO_HOSTS`) and prints a
-`CI_PORTABILITY_WARN` line for each `actions/github-script` use and each bare
-`gh <subcommand>` call. It is advisory and never gates fan-out. Grep-based, so
-it can miss a `gh` call built dynamically, and it can flag a `gh` step you
-deliberately installed. Treat each hit as something to check.
+host is Forgejo/Gitea (`scripts/with-repo-cwd.sh host` -> `forgejo`; declare a
+self-hosted instance in `SGE_FORGEJO_HOSTS`), and `azure-pipelines.yml` plus
+`.azure-pipelines/**` when the host is Azure DevOps (`azdo`). It prints a
+`CI_PORTABILITY_WARN` line (file:line, with a one-line fix) for each
+`actions/github-script` use (Forgejo), each `actions/*` or `GitHub*@N` task
+(Azure Pipelines) and each bare `gh <subcommand>` call. It is skipped on a
+GitHub host, is advisory and never gates fan-out. Grep-based, so it can miss a
+`gh` call built dynamically, and it can flag a `gh` step you deliberately
+installed. Treat each hit as something to check.
+
+## Portable replacements
+
+Placeholders only: `<host>`, `<owner>`, `<repo>`, `<n>`, `<token>` are yours to
+supply, from a masked CI secret. Never inline a real token.
+
+### Forgejo / Gitea (`/api/v1`, PRs are issues for labels and comments)
+
+```bash
+API="https://<host>/api/v1/repos/<owner>/<repo>"
+# apply a label (labels are addressed by numeric id: list them first)
+curl -fsS -H "Authorization: token <token>" "$API/labels"
+curl -fsS -X POST -H "Authorization: token <token>" -H "Content-Type: application/json"   -d '{"labels":[<label-id>]}' "$API/issues/<n>/labels"
+# post a PR comment
+curl -fsS -X POST -H "Authorization: token <token>" -H "Content-Type: application/json"   -d '{"body":"comment text"}' "$API/issues/<n>/comments"
+```
+
+### Azure DevOps (`dev.azure.com`; labels are PR labels, comments are threads)
+
+```bash
+API="https://dev.azure.com/<org>/<project>/_apis/git/repositories/<repo>/pullRequests/<n>"
+AUTH="Authorization: Bearer $SYSTEM_ACCESSTOKEN"   # or: -u ":<pat>"
+# apply a label
+curl -fsS -X POST -H "$AUTH" -H "Content-Type: application/json"   -d '{"name":"label-name"}' "$API/labels?api-version=7.1"
+# post a PR comment (a new thread with one comment)
+curl -fsS -X POST -H "$AUTH" -H "Content-Type: application/json"   -d '{"comments":[{"parentCommentId":0,"content":"comment text","commentType":1}],"status":1}'   "$API/threads?api-version=7.1"
+```
+
+In a pipeline step, map the token explicitly:
+`env: { SYSTEM_ACCESSTOKEN: $(System.AccessToken) }`.
 
 ## SGE's own templates
 

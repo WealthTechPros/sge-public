@@ -3525,5 +3525,321 @@
   "comments": [],
   "sha": "",
   "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist keys: a 'Commit:' key is the commit key (keys are ASCII case-insensitive)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\nCommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+  "verdict": "pass"
+ },
+ {
+  "name": "SPEC-090 allowlist keys: a 'COMMIT:' key is the commit key",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\nCOMMIT: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+  "verdict": "pass"
+ },
+ {
+  "name": "SPEC-090 allowlist keys: a 'Verdict:' key is the verdict key",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nVerdict: fail\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+  "verdict": "fail"
+ },
+ {
+  "name": "SPEC-090 allowlist keys: 'Mode:' and 'MODE:' are one key twice => malformed",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\nMode: full\nMODE: shadow\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist keys: 'commit:' and 'Commit:' are one key twice => malformed",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\nCommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist keys: a case-folded key does not relax the value: 'Commit: ' + short hex => malformed",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\nCommit: abc\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "SPEC-090 allowlist keys: a non-ASCII-cased key (dotless i in Verdıct) is unknown => malformed",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nVerdıct: pass\ncommit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "malformed"
+ },
+ {
+  "name": "sge#3032: a SHA-less pass is not a verdict for any head (no wildcard)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "pass",
+  "head": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "for_head": {
+   "sha": "",
+   "verdict": ""
+  }
+ },
+ {
+  "name": "sge#3032: a newer SHA-less pass never masks the verdict that judged another head",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "```sge-verdict\nverdict: pass\n```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "pass",
+  "head": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "for_head": {
+   "sha": "",
+   "verdict": ""
+  }
+ },
+ {
+  "name": "sge#3032: a SHA-less fail is kept: it can only block, never admit",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "```sge-verdict\nverdict: fail\n```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "fail",
+  "head": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "for_head": {
+   "sha": "",
+   "verdict": "fail"
+  }
+ },
+ {
+  "name": "sge#3032: a SHA-less pass between a head pass and nothing does not change the head's own pass",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   },
+   {
+    "body": "```sge-verdict\nverdict: pass\n```",
+    "submitted_at": "2026-10-01T11:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "",
+  "verdict": "pass",
+  "head": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "for_head": {
+   "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+   "verdict": "pass"
+  }
+ },
+ {
+  "name": "sge#3032: a pass that names the head matches it (control)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "verdict": "pass",
+  "head": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "for_head": {
+   "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+   "verdict": "pass"
+  }
+ },
+ {
+  "name": "sge#3032: a pass for a different head does not match (control)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: deadbeefcafefeed0123456789abcdef01234567\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "deadbeefcafefeed0123456789abcdef01234567",
+  "verdict": "pass",
+  "head": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "for_head": {
+   "sha": "",
+   "verdict": ""
+  }
+ },
+ {
+  "name": "sge#3032: a head that is too short to normalise reads unreadable (rc 3), never 'no verdict'",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "verdict": "pass",
+  "head": "86b710",
+  "for_head_rc": 3
+ },
+ {
+  "name": "sge#3032: a non-hex head reads unreadable (rc 3)",
+  "reviews": [
+   {
+    "body": "```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\n```",
+    "submitted_at": "2026-10-01T10:00:00Z",
+    "state": "COMMENTED",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "comments": [],
+  "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "verdict": "pass",
+  "head": "not-a-sha-at-all",
+  "for_head_rc": 3
  }
 ]
