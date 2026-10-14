@@ -4,8 +4,8 @@
 # executable.
 #
 # Owns `pass`, `fail` and `shadow-pass` (logic in ../pr-labels-forgejo-verdict.sh,
-# REST verbs in scripts/forgejo-adapter.d/verdict.sh). The other four verdict
-# subcommands (sync-check, stale, review-coverage, excluded-reviewer) belong to
+# REST verbs in scripts/forgejo-adapter.d/verdict.sh). The other two verdict
+# subcommands (review-coverage, excluded-reviewer) belong to
 # other slices and remain fail-closed stubs: exit 75 with the stub marker, so
 # pr-labels.sh runs its pre-existing inline path for them.
 _prl_fj_verdict() { # <subcommand> <pr> [args...]
