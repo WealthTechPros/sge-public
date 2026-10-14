@@ -10,9 +10,9 @@
 #   claim.sh    start-review release-review claim-fix release-fix heartbeat
 #               status claim-status claim-work release-work
 #               reconcile-orphaned-claim
-#   verdict.sh  pass fail shadow-pass sync-check stale review-coverage
+#   verdict.sh  pass fail shadow-pass review-coverage
 #               excluded-reviewer
-#   hold.sh     held apply-hold release-hold
+#   hold.sh     held apply-hold release-hold sync-check stale
 #   merge.sh    `pass --auto-merge` arming (no subcommand of its own; called
 #               by the verdict slice)
 #
@@ -47,8 +47,8 @@ _prl_fj_not_implemented() {
 _prl_fj_slice_of() { # <subcommand> -> slice name, or non-zero when unsupported
   case "$1" in
     start-review|release-review|claim-fix|release-fix|heartbeat|status|claim-status|claim-work|release-work|reconcile-orphaned-claim) echo claim ;;
-    pass|fail|shadow-pass|sync-check|stale|review-coverage|excluded-reviewer) echo verdict ;;
-    held|apply-hold|release-hold) echo hold ;;
+    pass|fail|shadow-pass|review-coverage|excluded-reviewer) echo verdict ;;
+    held|apply-hold|release-hold|sync-check|stale) echo hold ;;
     *) return 1 ;;
   esac
 }
