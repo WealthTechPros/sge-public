@@ -18,7 +18,7 @@ Runtime QA (`/sge:qa-audit`), fixing CI (`/sge:pr-fix`), feature work/refactorin
 
 ## Tool sequencing
 
-Read/Grep/Glob for diff/spec files → Bash for the quality suite → `gh` for the API → Agent for review specialists → `pr-labels.sh` for every label change → `search_nodes`/`create_entities` for cortex (below). Bundled: **`pr-labels.sh`** (label owner), **`review-lib.sh`** (`rl_*` helpers; header documents each).
+Read/Grep/Glob for diff/spec files → Bash for the quality suite → `gh` for the API → Agent for review specialists → `pr-labels.sh` for every label change → `search_nodes`/`create_entities` for cortex (below). Bundled: `pr-labels.sh` (label owner), `review-lib.sh` (`rl_*` helpers).
 
 **Cortex discipline (SPEC-108 §2.4, #1929).** At start `search_nodes` (review-lane gotchas); at every terminal path `create_entities` for any `pattern`/`convention`/`gotcha`. Skip if sge-memory unavailable. [`../lib/cortex-review-lane.md`](../lib/cortex-review-lane.md).
 
@@ -44,7 +44,7 @@ Default = merge-gate owner (claims gate, moves labels, fixes safe issues inline,
 
 ### Context (collected at invocation)
 
-- PR snapshot: !`gh pr view "$ARGUMENTS" --json number,title,body,url,headRefName,baseRefName,state,isDraft,additions,deletions,changedFiles,labels 2>/dev/null || echo "NO_PR_SNAPSHOT — pass a PR number (from another repo, export GH_REPO or cd first). Phase 1 re-resolves regardless."`
+- PR snapshot: !`. "$CLAUDE_PLUGIN_ROOT/skills/lib/azdo-gh-pr.sh" && sge_gh_pr view "$ARGUMENTS" --json number,title,body,url,headRefName,baseRefName,state,isDraft,additions,deletions,changedFiles,labels 2>/dev/null || echo "NO_PR_SNAPSHOT — Phase 1 re-resolves."`
 
 ### Phases at a glance
 
@@ -59,8 +59,8 @@ Stage 0 (resolve + gate) runs the two `pulls/$PR` reads concurrently, then evalu
 ```bash
 SGE_ROOT="$(bash ./scripts/resolve-sge-root.sh 2>/dev/null || bash "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-sge-root.sh")" || exit 1
 source "$SGE_ROOT/skills/pr-review/review-lib.sh"   # rl_* helpers
-REPO="${GH_REPO:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"; export GH_REPO="$REPO"
-PR="${1:-$(gh pr view --json number --jq .number 2>/dev/null)}"   # orchestrators pass it positionally
+REPO="$(rl__repo)"; [ "$(sge_pr_host)" = azdo ] || export GH_REPO="$REPO"   # azdo: no gh, no GH_REPO (#3028)
+PR="${1:-$(sge_gh_pr view --json number --jq .number 2>/dev/null)}"   # orchestrators pass it positionally
 [ -n "$PR" ] || { echo "NO_PR — pass a PR number"; exit 1; }
 REVIEW_MODE="default"  # #754; order matters (#2653). No export: env is per-call (#2656)
 case " $ARGUMENTS " in
@@ -309,7 +309,7 @@ else
   AUTOMERGE_FLAG="--auto-merge"; [ "$REVIEW_MODE" = "no-automerge" ] && AUTOMERGE_FLAG=""
   SGE_REVIEW_ADVISORY=$ADV SGE_REVIEW_SHADOW=$SHD "$PL" pass $PR $AUTOMERGE_FLAG --expect-head "$REVIEWED_HEAD"
 fi
-SGE_REVIEW_ADVISORY=$ADV "$PL" fail $PR
+SGE_REVIEW_ADVISORY=$ADV "$PL" fail $PR --expect-head "$REVIEWED_HEAD"
 ```
 
 The script enforces label mutual exclusion, refuses `pass` on drafts, **refuses (exit 7) to promote a PR that never claimed the gate** (#981; `--skip-claim-check` bypasses loudly), honours branch protection, and runs a **3-way head-convergence check** (#288). Drafts: [`hold-handling.md`](references/hold-handling.md#draft-prs-at-the-phase-6-gate).
@@ -332,7 +332,7 @@ A `pass` must not open the gate over red CI. `rl_failing_checks "$PR"` > 0 (afte
 
 > **If advisory → this phase does not run (issue #754).** A review-only dispatch never promotes/undrafts/arms auto-merge; guard: `[ "$REVIEW_MODE" = "advisory" ] && { echo "advisory: no promote/auto-merge"; exit 0; }` (exit 4 backstop). `--no-fix`/`--no-automerge`/`--shadow` run Phase 8 normally (Phase 6).
 
-Run the [`pre-merge-checklist.md`](references/pre-merge-checklist.md); confirm `gh pr view $PR --json mergeable` is `MERGEABLE` (else resolve conflicts).
+Run the [`pre-merge-checklist.md`](references/pre-merge-checklist.md); confirm `sge_gh_pr view $PR --json mergeable` is `MERGEABLE` (else resolve conflicts).
 
 > **Hard rule (issue #1291): the reviewer NEVER runs `gh pr ready`.** Stage 0's draft check should stop us before here; if the PR went draft mid-review (a race), `pr-labels.sh pass` refuses drafts — leave it draft, post it via `rl_post_verdict_comment`, stop.
 

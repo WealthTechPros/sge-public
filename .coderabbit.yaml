@@ -1,0 +1,16 @@
+# CodeRabbit opt-out for the public release mirror (sge#3065, SPEC-090 s2.7).
+#
+# Published as the root .coderabbit.yaml of the release-mirror repo by
+# .github/workflows/publish-public.yml. Do NOT copy it to this repo's root: that
+# would switch CodeRabbit off here too.
+#
+# A repo-local config replaces the organisation's central CodeRabbit config
+# wholesale. The mirror's only pull requests are the automated sync PR, which its
+# own workflow merges after the clean-room install smoke test, so a model review
+# adds cost and a stuck thread, not assurance.
+# Every key is a documented CodeRabbit option.
+reviews:
+  auto_review:
+    enabled: false
+  # No "review skipped" status comment on the sync PR.
+  review_status: false

@@ -923,9 +923,31 @@ _fa_main() {
       _fa_usage
       ;;
     *)
+      # Per-slice verb files (scripts/forgejo-adapter.d/*.sh, #3067) each
+      # register one `_fa_verb_<slice>` handler. A handler returns 0 when it
+      # handled <cmd>, 127 when the verb is not its own. Nothing handling the
+      # verb is the existing unknown-command refusal (non-zero, fail closed).
+      local _fa_h _fa_hrc
+      for _fa_h in ${_FA_VERB_HANDLERS:-}; do
+        _fa_hrc=0
+        "$_fa_h" "$@" || _fa_hrc=$?
+        [ "$_fa_hrc" -eq 127 ] && continue
+        return "$_fa_hrc"
+      done
       _fa_usage "unknown command '$cmd'"
       ;;
   esac
 }
+
+# Source the per-slice verb files so each slice of the Forgejo review-gate port
+# (#3029) adds its REST verbs in its own file instead of editing this one. A
+# missing directory or file set is fine (the stubs ship empty and fail closed).
+_FA_VERB_HANDLERS=""
+for _fa_vf in "$_FA_SCRIPT_DIR"/forgejo-adapter.d/*.sh; do
+  [ -f "$_fa_vf" ] || continue
+  # shellcheck disable=SC1090
+  . "$_fa_vf"
+done
+unset _fa_vf
 
 _fa_main "$@"

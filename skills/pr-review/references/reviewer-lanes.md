@@ -19,9 +19,13 @@ Phase 2 reviewers get one prompt and return one structured reply, so prefer one-
 a repo agent genuinely needs multi-turn; if named dispatch is unavoidable, the bounded-wait rule
 still applies.
 
-**Model tier** (`docs/agent-registry.md`): `@code-reviewer` → **sonnet**, escalating to
-**opus** on a security-path match; `@security-auditor` is CRITICAL-path and runs at **opus**.
-Never route a security review below opus.
+**Model class** (`references/model-roles.md`, `docs/agent-registry.md`): `@code-reviewer` →
+class `standard`, escalating to `deep` on a security-path match; `@security-auditor` is
+CRITICAL-path and always `deep`. Resolve a concrete id with
+`skills/pr-review/resolve-model.sh --role <role> [--security]` and spawn with `Agent(model: <id>)`
+(never the bare `sonnet`/`opus` alias). A non-zero exit means that lane is **not run**: still
+`rl_reviewer_dispatch` it and leave it PENDING (or do the check inline) so `pass` refuses. Never
+route a security review below the `deep` class.
 
 **Layer 3 repo specialists** join the same parallel batch only when the repo ships the agent AND
 the trigger matches: **@contract-auditor-api** (API routes/handlers changed),
