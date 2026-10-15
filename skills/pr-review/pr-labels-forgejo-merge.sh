@@ -77,11 +77,11 @@ _prl_fjm_protection_gate() {
     return 1
   fi
   # #3127: branch protection must itself require the review verdict, or it does
-  # not enforce "no merge without a pass". Name defaults to sge/pr-review and is
-  # configurable per repo; SGE_FORGEJO_ALLOW_UNREQUIRED_REVIEW_CONTEXT=1 is the
-  # explicit operator override.
+  # not enforce "no merge without a pass". The context is the fixed one the verdict
+  # producer writes (sge/pr-review); SGE_FORGEJO_ALLOW_UNREQUIRED_REVIEW_CONTEXT=1 is
+  # the explicit operator override.
   if [ "${SGE_FORGEJO_ALLOW_UNREQUIRED_REVIEW_CONTEXT:-}" != "1" ]; then
-    local rctx="${SGE_FORGEJO_REVIEW_CONTEXT:-sge/pr-review}" rpat found=0
+    local rctx="sge/pr-review" rpat found=0
     while IFS= read -r rpat; do
       rpat="$(printf '%s' "$rpat" | tr -d '\r')"
       # shellcheck disable=SC2254  # Gitea contexts allow glob patterns
