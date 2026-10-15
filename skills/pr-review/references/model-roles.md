@@ -83,3 +83,22 @@ that a subagent `model` can be set at spawn there, and that `gpt-6-sol` is a
 removing it from `deep` makes an OpenAI-only catalog fail closed for security).
 The daemon's own tier table (`services/review-daemon-poc/model_routing.py`) is
 unchanged and still maps tiers to its own ids.
+
+## Live Copilot CLI check (opt-in, sge#3081)
+
+`skills/tests/pr-review-copilot-live.test.sh` launches `code-reviewer` and
+`security-auditor` (the latter with the `--security` floor) against a small
+fixture diff through a real `copilot -p ... --model <id>` session and asserts
+that the id from `resolve-model.sh` is accepted, the reply carries a structured
+findings array, and the specialist used a tool.
+
+- **Run it** on a host with Copilot CLI installed and authenticated, manually
+  before a release: `SGE_LIVE_COPILOT=1 SGE_MODEL_CATALOG_JSON='[...host model ids...]' bash skills/tests/pr-review-copilot-live.test.sh`.
+  Optional: `SGE_LIVE_COPILOT_TIMEOUT` (seconds, default 300).
+- **Never in CI.** Without `SGE_LIVE_COPILOT=1` and `copilot` on PATH it prints
+  `SKIP` and exits 0.
+- **Exit codes:** 0 pass (or skip), 1 assertion failed, 2 BLOCKED. A failed launch,
+  a model the harness rejects, a timeout or a zero-tool reply is BLOCKED, never a pass.
+- **Tool-use attestation:** Copilot CLI's tool count is not machine-readable, so
+  the fixture carries a random nonce the specialist must read with a tool and
+  echo back; the echo is the tool-use signal fed to `rl_reviewer_ran`.

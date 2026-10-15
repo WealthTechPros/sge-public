@@ -76,6 +76,22 @@ _prl_fjm_protection_gate() {
     _prl_fjm_err "branch protection for '$branch' requires no status checks (enable_status_check=$en, contexts=$ctxs_n) — the gate cannot be enforced; refusing to arm merge"
     return 1
   fi
+  # #3127: branch protection must itself require the review verdict, or it does
+  # not enforce "no merge without a pass". Name defaults to sge/pr-review and is
+  # configurable per repo; SGE_FORGEJO_ALLOW_UNREQUIRED_REVIEW_CONTEXT=1 is the
+  # explicit operator override.
+  if [ "${SGE_FORGEJO_ALLOW_UNREQUIRED_REVIEW_CONTEXT:-}" != "1" ]; then
+    local rctx="${SGE_FORGEJO_REVIEW_CONTEXT:-sge/pr-review}" rpat found=0
+    while IFS= read -r rpat; do
+      rpat="$(printf '%s' "$rpat" | tr -d '\r')"
+      # shellcheck disable=SC2254  # Gitea contexts allow glob patterns
+      case "$rctx" in $rpat) [ -z "$rpat" ] || found=1 ;; esac
+    done < <(printf '%s' "$bp" | jq -r '.status_check_contexts[]?' 2>/dev/null)
+    if [ "$found" -ne 1 ]; then
+      _prl_fjm_err "branch protection for '$branch' does not require the '$rctx' status context — branch protection would not enforce the review verdict; add it to the required status checks (or set SGE_FORGEJO_ALLOW_UNREQUIRED_REVIEW_CONTEXT=1 to override); refusing to arm merge"
+      return 1
+    fi
+  fi
   statuses="$(bash "$_PRL_FJM_ADAPTER" pr-statuses "$_PRL_FJM_ORIGIN" "$head" 2>/dev/null)" || {
     _prl_fjm_err "could not read commit statuses for ${head:0:9} — refusing to arm merge"
     return 1
