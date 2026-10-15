@@ -95,6 +95,22 @@ Then delete the root file and its `-wal`/`-shm` siblings.
 picks up the server automatically when the plugin is installed; tools appear
 under the `sge-memory` MCP namespace.
 
+## Facts vs governance
+
+Cortex and the governance DAG hold different things and change under different rules.
+
+| | Cortex (this server) | Governance DAG |
+|---|---|---|
+| Holds | working facts: project facts, known sources, decisions in flight | Vision, capability model, specs, ADRs (`docs/sge-dag.json`) |
+| Changes | any session, as facts are learned | only when a fact changes a spec, a capability or a decision |
+| Route | `create_entities`, taxonomy-gated (pattern / convention / gotcha) | the change protocol: spec amendment, ADR, reviewed PR |
+
+A recalled fact never edits governance by itself. When a fact does change a spec,
+capability or decision, amend that artefact through the change protocol and let the
+DAG regenerate. `/sge:sge-align` check C43 (SPEC-108 section 2.4b) flags a repo that
+has Cortex installed but no `cortex-recall.sh` SessionStart hook, so stored facts
+are never recalled.
+
 ## Conventions
 
 When skills use it, they should:
