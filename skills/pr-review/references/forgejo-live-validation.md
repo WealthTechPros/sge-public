@@ -6,9 +6,9 @@ live run of #3073 (S6 of #3029) so that the human part is about half an hour of
 supplying an instance and reading a results block, not designing the pass.
 
 The Forgejo gate (slices E1, S1-S4: claim, verdict, hold, merge) is tested
-offline against a stateful curl stub only. It is **not live-validated** until
-this runbook has been run against a real instance and its results pasted into
-`host-adapter-routing.md`. **No agent runs this.** The driver refuses to run
+offline against a stateful curl stub and was live-validated once (2026-10-14 and
+2026-10-15, below), apart from two gaps. Re-run this runbook against a real
+instance and paste the results into `host-adapter-routing.md` after a change to the gate. **No agent runs this.** The driver refuses to run
 without an explicit human opt-in, never runs in CI, and writes only to a
 throwaway repo the operator names twice.
 
@@ -91,8 +91,8 @@ as listed.
   write-collaborator token records the verdict, then the arm fails closed
   ("no readable branch protection", exit 1). Run step 6 (and the protection
   preflight) with an admin token as identity A; until #3122 is fixed, a FAIL
-  there with a non-admin token is this finding, not a new bug. The "Not
-  live-validated" marker stays for `pass --auto-merge` until then.
+  there with a non-admin token is this finding, not a new bug. The non-admin arm
+  stays listed as not validated in the `host-adapter-routing.md` marker.
 - **F3:** a stale claim taken by one token identity needs `--force-claim` from
   another identity; the same identity with a different `SGE_AGENT_ID` takes over
   without it. Intended.
@@ -105,6 +105,20 @@ as listed.
 - Not exercised by the driver: orphan-ref takeover (needs a claimant that dies
   between the ref and record writes).
 
+## Re-run 2026-10-15 (Forgejo 16.0.2, `git.example.invalid`, sge PR #3144 code; results on #3073)
+
+All executed steps passed. Claim race (A exit 0, B exit 3); a 120 s claim stays live
+past its TTL while heartbeats extend it, then goes stale; a different token identity
+cannot take a stale claim without `--force-claim` (exit 3), the same identity with a new
+`SGE_AGENT_ID` takes generation 2, and `--force-claim` takes it (exit 0). `pass`
+refusals: no claim (7), no `--expect-head` (1), CI `none` (1), moved head (1), red CI
+(1), unresolved thread (1). `pass` and `fail` set their labels and commit statuses. Hold:
+`apply-hold` 0, `pass` 8, `release-hold` 9 with the label kept. Merge arm (#3127): with
+`sge/pr-review` not among the required contexts the arm refused (exit 1, nothing merged);
+with it required, an admin identity squash-merged pinned to the head. The four unported
+work-lane verbs exit 2 and never call `gh` (#3123). Not exercised: orphan-ref takeover.
+The non-admin arm still fails closed (HTTP 403, #3122).
+
 ## What a human must do, and look at
 
 1. Provision the instance, repo, protection and the PRs above.
@@ -114,11 +128,13 @@ as listed.
    commit is the expected head. Commit statuses `sge/pr-review` /
    `sge/pr-review-shadow` written on the PR heads **remain** (a status cannot be
    deleted); that is expected on a throwaway repo.
-4. Paste the results into `host-adapter-routing.md` (below) and, only if every
-   executed step passed and none were skipped, remove its "Not live-validated"
-   marker as #3073 describes.
+4. Paste the results into `host-adapter-routing.md` (below). A clean driver run does
+   not remove the "live-validated, with two gaps" marker: the driver needs an admin
+   identity for the merge step and never exercises orphan-ref takeover, so drop the
+   marker only once both the non-admin merge arm and orphan-ref takeover have
+   recorded results.
 
-If a step FAILs, do not remove the marker: file the gap on #3073 with the
+If a step FAILs, do not change the marker: file the gap on #3073 with the
 results block and the Forgejo version.
 
 ## Results template
