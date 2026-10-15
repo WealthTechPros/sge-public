@@ -28,13 +28,14 @@ routing here and its own gate state machine (next section).
 
 ## Forgejo/Gitea — the gate model (SPEC-094 §2.2a, #3029)
 
-> **Forgejo gate: not live-validated.** The gate as a whole has not run against a real instance. Every
-> behaviour below is exercised only against offline stubs
-> (`skills/tests/pr-labels-forgejo-*.test.sh`), except one targeted live run
-> on Forgejo 16.0.2 (2026-10-14) that covered only the admin-versus-write branch-protection
-> read (see the merge-arm note below). The full gate has not run against a real
-> Forgejo instance; slice S6 (#3073) is that run. Do not make a Forgejo
-> repo's merge depend on this gate until S6 has run and this marker is removed.
+> **Forgejo gate: live-validated, with two gaps.** The gate ran against a real instance
+> (`git.feaw.co.uk`, Forgejo 16.0.2, 2026-10-14 and 2026-10-15, #3073): the claim race,
+> stale takeover and `--force-claim`, heartbeat TTL, verdict, hold, every `pass` refusal, and
+> the admin-identity merge arm including the required-context refusal (#3127). The unported
+> work-lane verbs refuse without calling `gh` (#3123). **Not validated:** the non-admin merge
+> arm (it fails closed with HTTP 403, see the merge-arm note below, #3122) and orphan-ref
+> takeover (needs a claimant that dies between the ref write and the record write). Do not
+> rely on those two paths.
 
 When `host` reports `forgejo`, `pr-labels.sh` dispatches to `pr-labels-forgejo.sh`
 (modules under `pr-labels-forgejo.d/`, REST verbs under `scripts/forgejo-adapter.d/`).
