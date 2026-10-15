@@ -7,12 +7,16 @@
 # status (logic in ../pr-labels-forgejo-claim.sh, mutex in
 # scripts/forgejo-adapter.d/claim.sh). The four subcommands the work lane and
 # the orphan reconciler need (claim-status, claim-work, release-work,
-# reconcile-orphaned-claim) remain fail-closed stubs: exit 75 with the stub
-# marker, so pr-labels.sh runs its pre-existing inline path for them.
+# reconcile-orphaned-claim) are not ported: they refuse with exit 2 (#3123) and
+# no stub marker, so pr-labels.sh never falls through to its gh-based inline path.
 _prl_fj_claim() { # <subcommand> <pr> [args...]
   local lib="$_PRL_FJ_DIR/../pr-labels-forgejo-claim.sh" cmd="$1" pr="$2"
   case "$cmd" in
     start-review|release-review|claim-fix|release-fix|heartbeat|status) : ;;
+    claim-status|claim-work|release-work|reconcile-orphaned-claim)
+      # Final refusal (no stub marker, so no fall-through to the gh inline path).
+      _prl_fj_err "'$cmd' is not implemented on forgejo — refusing without calling gh"
+      return 2 ;;
     *) _prl_fj_not_implemented claim "$cmd"; return ;;
   esac
   [[ "$pr" =~ ^[0-9]+$ ]] || { _prl_fj_err "<pr> must be a PR number, got '$pr'"; return 2; }

@@ -48,7 +48,7 @@ Default = merge-gate owner (claims gate, moves labels, fixes safe issues inline,
 
 ### Phases at a glance
 
-**1** Discovery · **2** Parallel review · **3** Quality gates (‖ 2) · **4** Issue validation · **5** Aggregate · **6** Post + gate · **6.5** Direct fix · **7** CI to green · **8** Promote · **9** Cleanup. Optional (6.5, 7); a clean read-only review goes 1 → 6 → 8. [`phases-overview.md`](references/phases-overview.md). Non-GitHub: [`host-adapter-routing.md`](references/host-adapter-routing.md).
+**1** Discovery · **2** Parallel review · **3** Quality gates (‖ 2) · **4** Issue validation · **5** Aggregate · **6** Post + gate · **6.5** Direct fix · **7** CI to green · **8** Promote · **9** Cleanup. Optional (6.5, 7); a clean read-only review goes 1 → 6 → 8. [`phases-overview.md`](references/phases-overview.md). Non-GitHub, incl. the Forgejo gate model: [`host-adapter-routing.md`](references/host-adapter-routing.md).
 
 ## Phase 1: Discovery (staged: gate → parallel reads → conditional write → parallel reads)
 

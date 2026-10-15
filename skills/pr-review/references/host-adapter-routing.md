@@ -23,31 +23,76 @@ source "$SGE_ROOT/skills/lib/forgejo-pr-read.sh"
 agent dispatch input, Phase 3 quality gates CI read, Phase 4 issue validation) are
 routed here.
 
-**Azure Repos** has the full review lane (below); **Forgejo/Gitea** has the read/diff
-routing here plus the bare mutators, and its gate state machine is still
-GitHub-only.
+**Azure Repos** has the full review lane (below). **Forgejo/Gitea** has the read/diff
+routing here and its own gate state machine (next section).
 
-**Mutating ops, Forgejo — partially deferred still (issue #2582).** `pr-labels.sh`'s full
-review-gate STATE MACHINE (`start-review` claim mutex, stale-claim takeover,
-`pr-reviewing`/`pr-reviewed`/`changes-requested`/`hold` transitions, heartbeats,
-`sync-check`, `sge-verdict` coverage tracking, follow-up preservation gate, `gh pr
-review`, `gh pr ready`) is **NOT ported to Forgejo** — that is a materially larger
-slice than #2582's budget covered and remains GitHub-only. On a Forgejo repo, skip
-any action that needs that state machine and log the deferral, exactly as before.
+## Forgejo/Gitea — the gate model (SPEC-094 §2.2a, #3029)
 
-What #2582 **did** ship, reusable by a simplified Forgejo review flow if one is
-built later: `skills/lib/forgejo-pr-mutate.sh` gives bare `fpr_add_label` /
-`fpr_remove_label` (direct label add/remove, no claim semantics), `fpr_merge_ready`
-(a degrading linked/reviewed-label/CI-green check — the reviewed-label gate only
-applies when `SGE_FORGEJO_REVIEWED_LABEL` is configured for the repo) and
-`fpr_merge` (squash-merge, TOCTOU-pinned to the current head SHA), plus `fpr_rerun`
-(CI retrigger — Forgejo has no native failed-only rerun, only a full-retrigger
-empty commit). See [`pr-monitor`'s copy of this
-doc](../../pr-monitor/references/host-adapter-routing.md#mutating-ops-rerun--merge--label--issue-2582)
-for the full routing table and the open cancelled-vs-failed question — this file
-does not duplicate it. **Not live-validated** against a real Forgejo instance
-(built without `git.feaw.co.uk` credentials or `mcp__forgejo__*` access); needs a
-manual pass before any Forgejo repo's pr-review flow depends on it.
+> **Forgejo gate: not live-validated.** The gate as a whole has not run against a real instance. Every
+> behaviour below is exercised only against offline stubs
+> (`skills/tests/pr-labels-forgejo-*.test.sh`), except one targeted live run
+> on Forgejo 16.0.2 (2026-10-14) that covered only the admin-versus-write branch-protection
+> read (see the merge-arm note below). The full gate has not run against a real
+> Forgejo instance; slice S6 (#3073) is that run. Do not make a Forgejo
+> repo's merge depend on this gate until S6 has run and this marker is removed.
+
+When `host` reports `forgejo`, `pr-labels.sh` dispatches to `pr-labels-forgejo.sh`
+(modules under `pr-labels-forgejo.d/`, REST verbs under `scripts/forgejo-adapter.d/`).
+No `gh` call is made on this path, and an adapter or API error is a non-zero exit,
+never a pass. Writes need `FORGEJO_ADAPTER_ALLOW_WRITE=1`, which the modules set for
+their own calls only. Auth is `FORGEJO_API_TOKEN` then `GITEA_TOKEN`.
+
+| Step | Forgejo mechanism |
+|---|---|
+| Claim (`start-review`, `claim-fix`) | A **git ref** `refs/heads/sge-claims/pr-<n>-<reviewing\|fixing>-g<k>`, created through the branches API. Gitea answers 409 when the ref exists, so two racers resolve to exactly one 201 (server-side compare-and-swap). Labels `pr-reviewing` / `pr-fixing` are display only. |
+| Liveness | A comment `<!-- sge-claim: {...} -->` written by the winner carries the owner; its **server** `created_at` and the response `Date` header give the age (never the local clock). `heartbeat` posts a second comment that extends the TTL, never past the max lifetime. |
+| Takeover | A stale top generation is raced for as generation k+1 (one taker wins the CAS). A live or unknowable claim is lost (exit 3), with one exception: an armed live claim whose lane label is gone is taken over at once, only if the label list is readable and well-formed. A ref with no record is taken over once a `sge-claim-orphan` observation is older than the TTL. |
+| Verdict (`pass`, `fail`, `shadow-pass`) | A **commit status** on the reviewed head: context `sge/pr-review` (success / failure) or `sge/pr-review-shadow`. A status names its commit, so it cannot describe another head, and it works when the agent authored the PR (Gitea refuses a self-approval review). Only a status created by the token's own user counts. |
+| Hold (`held`, `apply-hold`, `sync-check`, `stale`) | The `hold` label stops `pass` (exit 8) and merge arming. `release-hold` always refuses (exit 9): no delegation policy is wired for Forgejo, so a human removes the label. |
+| Merge arm (`pass --auto-merge`) | After the pass is recorded, one squash-merge request pinned to the reviewed head (`head_commit_id`), refused unless branch protection can enforce the gate. A refusal leaves the pass standing and, once the PR has been read, attempts to cancel any scheduled merge (best-effort; refusals on bad arguments, advisory/shadow dispatch, missing `jq` or path setup return before that). |
+
+**Claim defaults.** `SGE_REVIEW_CLAIM_TTL` (900 s) for review, `SGE_FIX_CLAIM_TTL_MIN`
+(30 min) for fixing, `SGE_FORGEJO_CLAIM_MAX_LIFETIME` (14400 s). A malformed TTL
+refuses. The owner id is `SGE_AGENT_ID`, defaulting to the hostname.
+
+**Pass refusals** (`pass <pr> --expect-head <sha>`, in order): advisory dispatch (4),
+shadow dispatch (9), unattested reviewer (5), no claim held (7) (waived only by an explicit `--skip-claim-check` for a deliberately unclaimed inline review), no `--expect-head`,
+PR not open or a draft, `hold` present (8), head moved since review, CI not exactly
+`success` (`none`, `pending`, `unknown` all refuse), unresolved review threads,
+declared follow-up with no issue (6). The PR is re-read before the verdict is
+written and again after the labels move; if the head moves after the status was written, or the PR is closed, drafted or held, cleanup is best-effort: the command attempts to post a failure status for the reviewed head and remove `pr-reviewed`, and either call can fail and leave stale state.
+
+**`--expect-head`.** Required by `pass`, `fail` and the merge arm. `pass` and `fail`
+accept a prefix of at least 7 hex characters; the merge arm needs the full 40-hex id
+and compares it by exact equality. The merge request itself is pinned to that SHA.
+
+**Exit codes.** 2 usage / subcommand not ported, 3 claim lost or held by another
+owner, 4 advisory dispatch, 5 reviewer attestation missing, 6 follow-up gate (a head
+that moved is exit 1 here, not 6), 7 claim not held, 8 hold, 9 shadow dispatch / not
+eligible / `release-hold`, 1 any other refusal.
+
+**No label-based required check.** Forgejo cannot require a *label* to merge, so
+`pr-reviewed` is a signal only. The gate is enforced by the base branch's protection
+rule, which `pass --auto-merge` reads (`branch-protection`) before arming:
+
+| Protection field | Required value |
+|---|---|
+| `enable_status_check` | `true`, with a non-empty `status_check_contexts` (the script requires only that and does not check that `sge/pr-review` is in the list; list it so the server enforces the verdict itself) |
+| `status_check_contexts` | every context (globs allowed) must be `success` at the reviewed head |
+| `required_approvals` | must be readable; the gate does not set it. A human approval count is the repo owner's policy, separate from the commit-status verdict |
+
+An unreadable rule, a rule requiring no status checks, or a non-green or missing
+required context refuses to arm the merge. Setting the rule is repo configuration, not
+something these scripts do.
+
+**Still stubs (exit 75, then the pre-existing inline path):** `claim-status`,
+`claim-work`, `release-work`, `reconcile-orphaned-claim`, `review-coverage`,
+`excluded-reviewer`. The inline path does not see a claim taken by the ref mutex.
+
+**Bare mutators.** `skills/lib/forgejo-pr-mutate.sh` still provides `fpr_add_label`,
+`fpr_remove_label`, `fpr_merge_ready`, `fpr_merge` and `fpr_rerun`; the gate modules
+reuse the label and readiness ones. See [`pr-monitor`'s copy of this
+doc](../../pr-monitor/references/host-adapter-routing.md#mutating-ops-rerun--merge--label--issue-2582).
 
 **Forgejo merge arm (`pass --auto-merge`) — required permission (#3122).** Before it
 merges, the arm reads the base branch's protection rule (`status_check_contexts`,
@@ -63,6 +108,24 @@ it is the safety pre-check that required contexts are satisfied. (The cause is i
 from the admin-versus-write difference seen in the 2026-10-14 live run on Forgejo
 16.0.2; it was not isolated further.) The message shows only the numeric status, never a
 response body or token.
+
+**Forgejo merge arm — required status context (#3127).** The arm also refuses unless the
+base branch's `status_check_contexts` includes the review verdict context `sge/pr-review`
+(a glob that matches it counts), so branch protection itself enforces "no merge without a
+pass verdict". The refusal is exit 1, names the missing context and merges nothing.
+`SGE_FORGEJO_REVIEW_CONTEXT` renames the required context per repo, and
+`SGE_FORGEJO_ALLOW_UNREQUIRED_REVIEW_CONTEXT=1` is the explicit operator override.
+
+**Forgejo claims and merge method (#3124).** A claim taken by one token identity that has
+gone stale cannot be taken over by a different identity without `--force-claim`: the
+foreign record reads `live=unknown`. Same-identity takeover with a different
+`SGE_AGENT_ID` works (generation 2). The Forgejo merge arm is squash-only
+(`pr-merge-squash`); a repo that forbids squash merges refuses the request, so the arm
+exits 1 with `merge request failed` and nothing is armed or merged.
+
+**Unported work-lane verbs (#3123).** On a Forgejo host `claim-status`, `claim-work`,
+`release-work` and `reconcile-orphaned-claim` refuse with exit 2 ("not implemented on
+forgejo") and never call `gh`.
 
 **Forgejo PR fields mapping** (from Gitea JSON to the names this skill references):
 
