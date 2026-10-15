@@ -77,7 +77,7 @@ rule, which `pass --auto-merge` reads (`branch-protection`) before arming:
 
 | Protection field | Required value |
 |---|---|
-| `enable_status_check` | `true`, with a non-empty `status_check_contexts` (the script requires only that and does not check that `sge/pr-review` is in the list; list it so the server enforces the verdict itself) |
+| `enable_status_check` | `true`, with a non-empty `status_check_contexts` that includes `sge/pr-review` (a glob that matches it counts), so the server enforces the verdict itself; the arm refuses otherwise unless `SGE_FORGEJO_ALLOW_UNREQUIRED_REVIEW_CONTEXT=1` overrides that check |
 | `status_check_contexts` | every context (globs allowed) must be `success` at the reviewed head |
 | `required_approvals` | must be readable; the gate does not set it. A human approval count is the repo owner's policy, separate from the commit-status verdict |
 
@@ -113,8 +113,9 @@ response body or token.
 base branch's `status_check_contexts` includes the review verdict context `sge/pr-review`
 (a glob that matches it counts), so branch protection itself enforces "no merge without a
 pass verdict". The refusal is exit 1, names the missing context and merges nothing.
-`SGE_FORGEJO_REVIEW_CONTEXT` renames the required context per repo, and
-`SGE_FORGEJO_ALLOW_UNREQUIRED_REVIEW_CONTEXT=1` is the explicit operator override.
+The context name is fixed (the verdict producer always writes `sge/pr-review`).
+`SGE_FORGEJO_ALLOW_UNREQUIRED_REVIEW_CONTEXT=1` is the explicit operator override; with it set,
+branch protection no longer enforces the verdict.
 
 **Forgejo claims and merge method (#3124).** A claim taken by one token identity that has
 gone stale cannot be taken over by a different identity without `--force-claim`: the
