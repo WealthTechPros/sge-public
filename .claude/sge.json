@@ -1,7 +1,3 @@
 {
-  "intakeApprovers": [
-    "robaduncan",
-    "Howarddj01",
-    "FraserDuncan-FEAW"
-  ]
+  "intakeApprovers": ["robaduncan", "Howarddj01", "FraserDuncan-FEAW"]
 }
