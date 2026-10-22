@@ -152,13 +152,25 @@ git fetch -q origin "refs/heads/$DEFAULT:refs/remotes/origin/$DEFAULT" 2>/dev/nu
 BASE="refs/remotes/origin/$DEFAULT"
 
 # Approver allow-list: committed on the default branch only.
+# A missing file is an empty config: on GitHub the org team can still approve (SPEC-126 DR1).
 CFG_OID="$(tree_entry "$BASE" .claude/sge.json | awk '$2 == "blob" {print $3}')"
-[ -n "$CFG_OID" ] || fail "no .claude/sge.json on origin/$DEFAULT — $ADOPT"
-CFG="$(git cat-file blob "$CFG_OID")" || fail "cannot read .claude/sge.json on origin/$DEFAULT"
+CFG='{}'
+[ -z "$CFG_OID" ] || CFG="$(git cat-file blob "$CFG_OID")" || fail "cannot read .claude/sge.json on origin/$DEFAULT"
 APPROVERS_JSON="$(printf '%s' "$CFG" | jq -c '[.intakeApprovers // [] | if type == "array" then .[] else empty end | strings | ascii_downcase | select(length > 0)]' 2>/dev/null)" \
   || fail "unparseable .claude/sge.json on origin/$DEFAULT"
-[ "$(printf '%s' "$APPROVERS_JSON" | jq 'length')" -gt 0 ] \
-  || fail "no intakeApprovers in .claude/sge.json on origin/$DEFAULT — $ADOPT"
+# Configured = anything but an absent/null/empty-array value; a configured list whose
+# entries normalise to nothing valid rejects everyone and never falls to the team.
+LIST_SET="$(printf '%s' "$CFG" | jq -r 'if .intakeApprovers == null or .intakeApprovers == [] then 0 else 1 end' 2>/dev/null)" || fail "unparseable .claude/sge.json on origin/$DEFAULT"
+# Team fallback (GitHub only, when the repo has no list): a slug outside GitHub's
+# slug alphabet is never queried.
+TEAM="$(printf '%s' "$CFG" | jq -r '(.intakeApproverTeam // "sge-intake-approvers") | if type == "string" then . else "" end' 2>/dev/null)"
+printf '%s' "$TEAM" | grep -Eq '^[a-z0-9][a-z0-9_-]*$' || TEAM=""
+ORG="${REPO%%/*}"
+ADOPT="$ADOPT, or add the login to the GitHub org team $ORG/${TEAM:-sge-intake-approvers}"
+if [ "$LIST_SET" = 0 ] && { [ "$ALM" = azdo ] || [ -z "$TEAM" ]; }; then
+  fail "no intakeApprovers in .claude/sge.json on origin/$DEFAULT — $ADOPT"
+fi
+SOURCE=repo-list
 
 if [ "$ALM" = azdo ]; then
 # ── Azure DevOps Boards (rules 1-3) ──────────────────────────────────────────
@@ -199,8 +211,21 @@ PICK="$(printf '%s\n' "$COMMENTS" | jq -s 'map(select(.body | contains("<!-- sge
 LOGIN="$(printf '%s' "$PICK" | jq -r '.login')"
 printf '%s' "$PICK" | jq -e '.type == "User" and .app == null and ((.login | ascii_downcase | endswith("[bot]")) | not)' >/dev/null \
   || fail "newest intake marker is bot- or app-authored ($LOGIN) — only an approver's own non-bot GitHub account counts; the approver must re-run /sge:issue-intake $N from their own session"
-printf '%s' "$PICK" | jq -e --argjson ok "$APPROVERS_JSON" '(.login | ascii_downcase) as $l | $ok | index($l) != null' >/dev/null \
-  || fail "newest intake marker author $LOGIN is not on the approver allow-list"
+if [ "$LIST_SET" = 1 ]; then
+  printf '%s' "$PICK" | jq -e --argjson ok "$APPROVERS_JSON" '(.login | ascii_downcase) as $l | $ok | index($l) != null' >/dev/null \
+    || fail "newest intake marker author $LOGIN is not on the approver allow-list"
+else
+  # No repo list: the author must be an ACTIVE member of the org team. Any error,
+  # odd login or non-"active" answer is "not an approver".
+  LL="$(printf '%s' "$LOGIN" | tr 'A-Z' 'a-z')"
+  STATE=""
+  if printf '%s' "$LL" | grep -Eq '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'; then
+    STATE="$(gh api "orgs/$ORG/teams/$TEAM/memberships/$LL" --jq 'if type == "object" then .state else "" end' 2>/dev/null)" || STATE=""
+  fi
+  [ "$STATE" = active ] \
+    || fail "no intakeApprovers in .claude/sge.json on origin/$DEFAULT and $LOGIN is not an active member of org team $ORG/$TEAM (not on the approver allow-list) — $ADOPT"
+  SOURCE="team:$TEAM"
+fi
 printf '%s' "$PICK" | jq -e '.created_at == .updated_at' >/dev/null \
   || fail "intake comment by $LOGIN was edited after posting — re-run /sge:issue-intake $N"
 fi
@@ -352,4 +377,4 @@ if [ -n "$GT_OUT" ] && printf '%s' "$MARKER" | jq -e '.govtrace | type == "objec
   mv -f -- "$TMP_GT" "$GT_OUT"
 fi
 
-printf '%s' "$MARKER" | jq -c --arg by "$LOGIN" '. + {approvedBy: $by}'
+printf '%s' "$MARKER" | jq -c --arg by "$LOGIN" --arg src "$SOURCE" '. + {approvedBy: $by, approvalSource: $src}'
