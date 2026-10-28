@@ -13,10 +13,10 @@
 #
 # PASSES (exit 0, the marker JSON on stdout) only when ALL hold:
 #   1. the NEWEST marker comment on the issue — by anyone — is the one judged:
-#      a later marker from a bot or non-approver invalidates an earlier build;
+#      a later marker from a bot invalidates an earlier build;
 #   2. its author is a human (user.type User, no `[bot]` login, not posted via
-#      a GitHub App) listed in `intakeApprovers` of .claude/sge.json read from
-#      the remote default branch (never the working tree);
+#      a GitHub App). Any human account counts: the approver allow-list and
+#      org-team controls were removed (SPEC-126 DR1, amended 2026-10-28);
 #   3. the comment was not edited after posting;
 #   4. the marker (the LAST `<!-- sge-intake:` opener in the comment) is
 #      well-formed JSON for THIS issue and repo, with an ISO approvedAt no
@@ -45,8 +45,8 @@
 # any of the above (tests stub `gh` and `date` on PATH instead).
 #
 # What a pass proves (issue #2913): the newest marker was posted, unedited, by
-# an allow-listed approver's own non-bot, non-App GitHub account. It does NOT
-# prove a human typed it: an agent session holding that approver's `gh` login
+# a human's own non-bot, non-App GitHub account. It does NOT
+# prove a human typed it: an agent session holding a human's `gh` login
 # would pass. Unattended sessions (SGE_UNATTENDED=1) are blocked from posting a
 # marker by hooks/intake-marker-guard.sh; an ATTENDED agent session using a
 # human's login is kept out by policy (agents write as the agentBotLogin App), not by
@@ -76,9 +76,8 @@
 #   1. newest marker among the work item's comments (item-comments);
 #   2. author must be a human Azure DevOps identity — descriptor `aad.` or
 #      `msa.`; a service principal (`aadsp.`), build service / service
-#      identity (`svc.`) or any other subject type is rejected — and listed in
-#      intakeApprovers by descriptor or by unique name (an entry containing
-#      `@`, so a GitHub login can never match an ADO identity);
+#      identity (`svc.`) or any other subject type is rejected. Any human
+#      identity counts (the approver allow-list was removed);
 #   3. the comment was never edited (version 1, modifiedDate == createdDate)
 #      and is not deleted;
 #   6. no System.Title change after approval, and System.Description at
@@ -94,7 +93,6 @@ SKEW_SECONDS=300
 
 fail() { printf 'intake-check: FAIL %s\n' "$*" >&2; exit 1; }
 usage() { printf 'usage: intake-check.sh <issue-number> [--govtrace-out <file>]\n' >&2; exit 2; }
-ADOPT='to adopt the intake gate, add "intakeApprovers": ["<github-login>", ...] to .claude/sge.json on the default branch (SPEC-126 DR1)'
 
 N="${1:-}"
 case "$N" in ''|*[!0-9]*) usage ;; esac
@@ -151,26 +149,11 @@ DEFAULT="$(git ls-remote --symref origin HEAD 2>/dev/null | sed -n 's#^ref: refs
 git fetch -q origin "refs/heads/$DEFAULT:refs/remotes/origin/$DEFAULT" 2>/dev/null || fail "cannot fetch origin/$DEFAULT"
 BASE="refs/remotes/origin/$DEFAULT"
 
-# Approver allow-list: committed on the default branch only.
-# A missing file is an empty config: on GitHub the org team can still approve (SPEC-126 DR1).
-CFG_OID="$(tree_entry "$BASE" .claude/sge.json | awk '$2 == "blob" {print $3}')"
-CFG='{}'
-[ -z "$CFG_OID" ] || CFG="$(git cat-file blob "$CFG_OID")" || fail "cannot read .claude/sge.json on origin/$DEFAULT"
-APPROVERS_JSON="$(printf '%s' "$CFG" | jq -c '[.intakeApprovers // [] | if type == "array" then .[] else empty end | strings | ascii_downcase | select(length > 0)]' 2>/dev/null)" \
-  || fail "unparseable .claude/sge.json on origin/$DEFAULT"
-# Configured = anything but an absent/null/empty-array value; a configured list whose
-# entries normalise to nothing valid rejects everyone and never falls to the team.
-LIST_SET="$(printf '%s' "$CFG" | jq -r 'if .intakeApprovers == null or .intakeApprovers == [] then 0 else 1 end' 2>/dev/null)" || fail "unparseable .claude/sge.json on origin/$DEFAULT"
-# Team fallback (GitHub only, when the repo has no list): a slug outside GitHub's
-# slug alphabet is never queried.
-TEAM="$(printf '%s' "$CFG" | jq -r '(.intakeApproverTeam // "sge-intake-approvers") | if type == "string" then . else "" end' 2>/dev/null)"
-printf '%s' "$TEAM" | grep -Eq '^[a-z0-9][a-z0-9_-]*$' || TEAM=""
-ORG="${REPO%%/*}"
-ADOPT="$ADOPT, or add the login to the GitHub org team $ORG/${TEAM:-sge-intake-approvers}"
-if [ "$LIST_SET" = 0 ] && { [ "$ALM" = azdo ] || [ -z "$TEAM" ]; }; then
-  fail "no intakeApprovers in .claude/sge.json on origin/$DEFAULT — $ADOPT"
-fi
-SOURCE=repo-list
+# Approver controls removed (SPEC-126 DR1, amended 2026-10-28):
+# any human account's marker counts. `intakeApprovers` / `intakeApproverTeam`
+# in .claude/sge.json are ignored; the human-vs-bot/App/service-identity checks
+# below remain the control against agents approving their own work.
+SOURCE=any-human
 
 if [ "$ALM" = azdo ]; then
 # ── Azure DevOps Boards (rules 1-3) ──────────────────────────────────────────
@@ -193,11 +176,7 @@ LOGIN="$(printf '%s' "$PICK" | jq -r '.login')"
 # (aadsp.), build service and other service identities (svc.), and every other
 # subject type fail closed, as does a display name of a build service.
 printf '%s' "$PICK" | jq -e '(.descriptor | test("\\A(aad|msa)\\.[A-Za-z0-9_=-]+\\z")) and ((.display | test("build service"; "i")) | not)' >/dev/null \
-  || fail "newest intake marker on work item $N is authored by a service identity ($LOGIN) — only an approver's own human Azure DevOps account counts; the approver must re-run /sge:issue-intake $N from their own session"
-printf '%s' "$PICK" | jq -e --argjson ok "$APPROVERS_JSON" '
-  ((.descriptor | ascii_downcase) as $d | $ok | index($d) != null)
-  or ((.login | ascii_downcase) as $u | ($u | contains("@")) and ($ok | index($u) != null))' >/dev/null \
-  || fail "newest intake marker author $LOGIN is not on the approver allow-list"
+  || fail "newest intake marker on work item $N is authored by a service identity ($LOGIN) — only a human's own Azure DevOps account counts; a human must re-run /sge:issue-intake $N from their own session"
 printf '%s' "$PICK" | jq -e '.version == 1 and .created_at == .updated_at' >/dev/null \
   || fail "intake comment by $LOGIN was edited after posting — re-run /sge:issue-intake $N"
 else
@@ -210,22 +189,7 @@ PICK="$(printf '%s\n' "$COMMENTS" | jq -s 'map(select(.body | contains("<!-- sge
 
 LOGIN="$(printf '%s' "$PICK" | jq -r '.login')"
 printf '%s' "$PICK" | jq -e '.type == "User" and .app == null and ((.login | ascii_downcase | endswith("[bot]")) | not)' >/dev/null \
-  || fail "newest intake marker is bot- or app-authored ($LOGIN) — only an approver's own non-bot GitHub account counts; the approver must re-run /sge:issue-intake $N from their own session"
-if [ "$LIST_SET" = 1 ]; then
-  printf '%s' "$PICK" | jq -e --argjson ok "$APPROVERS_JSON" '(.login | ascii_downcase) as $l | $ok | index($l) != null' >/dev/null \
-    || fail "newest intake marker author $LOGIN is not on the approver allow-list"
-else
-  # No repo list: the author must be an ACTIVE member of the org team. Any error,
-  # odd login or non-"active" answer is "not an approver".
-  LL="$(printf '%s' "$LOGIN" | tr 'A-Z' 'a-z')"
-  STATE=""
-  if printf '%s' "$LL" | grep -Eq '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'; then
-    STATE="$(gh api "orgs/$ORG/teams/$TEAM/memberships/$LL" --jq 'if type == "object" then .state else "" end' 2>/dev/null)" || STATE=""
-  fi
-  [ "$STATE" = active ] \
-    || fail "no intakeApprovers in .claude/sge.json on origin/$DEFAULT and $LOGIN is not an active member of org team $ORG/$TEAM (not on the approver allow-list) — $ADOPT"
-  SOURCE="team:$TEAM"
-fi
+  || fail "newest intake marker is bot- or app-authored ($LOGIN) — only a human's own non-bot GitHub account counts; a human must re-run /sge:issue-intake $N from their own session"
 printf '%s' "$PICK" | jq -e '.created_at == .updated_at' >/dev/null \
   || fail "intake comment by $LOGIN was edited after posting — re-run /sge:issue-intake $N"
 fi

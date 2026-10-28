@@ -9,7 +9,6 @@ variable always wins over the file. (SPEC-130.)
 ```json
 {
   "gateOwner": "pod",
-  "intakeApprovers": ["octocat"],
   "agentBotLogin": "acme-agent[bot]",
   "decisionOwner": "Jane Doe",
   "secretsStore": "Vault",
@@ -22,10 +21,8 @@ variable always wins over the file. (SPEC-130.)
 | Key | Env override | Default (neutral) | What it does |
 |-----|--------------|-------------------|--------------|
 | `gateOwner` | `SGE_GATE_OWNER` | unset (self-drive) | `pod` hands the `pr-reviewed` gate to a review pod or daemon. See `/sge:sge-implement`'s pod-gate mode. |
-| `intakeApprovers` | — | none (falls back to the org team below) | Optional repo-level **override**: GitHub logins (or Azure DevOps identities) whose `## SGE intake` record unlocks a build. When present and non-empty it is the whole allow-list and the org team is not consulted. Read from the default branch only, by `scripts/intake-check.sh` (SPEC-126 DR1). Azure DevOps uses this list only. |
-| `intakeApproverTeam` | — | `sge-intake-approvers` | GitHub only. Slug of the org team (in the repo owner's org) whose **active** members are intake approvers when the repo has no `intakeApprovers` list. Checked with `gh api orgs/<org>/teams/<slug>/memberships/<login>`; any API error means not an approver. With neither a list nor a resolvable team membership the gate is not adopted (fails closed). The approval source (`repo-list` or `team:<slug>`) is printed as `approvalSource`. Read from the default branch only. |
 | `agentBotLogin` | `SGE_AGENT_BOT_LOGIN` | none | The GitHub App login your agents author PRs and comments as (for example `acme-agent[bot]`). An App has repo association `NONE`, so the shared PR claim protocol trusts its claims only when it is named here. With no value, no extra App is trusted. Only a comment whose author account type is `Bot` matches. Read by `skills/pr-review/pr-labels.sh` from the base repository's default branch only, fetched through the GitHub API each time it is needed: never from the working tree, a fork remote or a local ref that may be stale, so a PR cannot trust its own author and a removed login stops being trusted at once. |
-| `decisionOwner` | — | "the repo owner" | The person skills name when a decision needs an owner (for example in a `needs-decision` rationale). Prose only. Who may actually approve is `intakeApprovers`, else the `intakeApproverTeam` org team. |
+| `decisionOwner` | — | "the repo owner" | The person skills name when a decision needs an owner (for example in a `needs-decision` rationale). Prose only. Intake approval itself is open to any human with repository access (SPEC-126 DR1, amended 2026-10-28); the legacy `intakeApprovers` / `intakeApproverTeam` keys are ignored. |
 | `secretsStore` | — | "your secrets manager" | The name of the secrets manager that injects tokens into the environment. SGE never reads secrets from a file or a store directly; skills only name the store when they tell you a token is missing. |
 | `podsRegistry` | `SGE_PODS_REGISTRY` | `~/.sge/pods/pods.json` | The fleet pod registry: `pods[]` entries with `type: "review-daemon"` mark repos a review daemon covers, so `hooks/pr-created.sh` does not race it with a session-local review. A leading `~/` means `$HOME`. |
 
@@ -33,10 +30,9 @@ variable always wins over the file. (SPEC-130.)
 
 - **The file.** Scripts read `.claude/sge.json` from the root of the git repo
   they run in (`git rev-parse --show-toplevel`, else the current directory).
-  `intakeApprovers`, `intakeApproverTeam` and `agentBotLogin` are the exceptions: they are read from
-  the default branch (`intakeApprovers` freshly fetched, `agentBotLogin` read from the base
-  repository's default branch through the GitHub API at read time), so a branch cannot
-  approve itself or make its own author a trusted claimant.
+  `agentBotLogin` is the exception: it is read from the base
+  repository's default branch through the GitHub API at read time, so a branch
+  cannot make its own author a trusted claimant.
 - **The environment.** Every key with an env override can be set per host, for
   example in the service unit of a review daemon that covers many repos. Set
   the variable to an empty string to force the neutral default.

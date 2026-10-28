@@ -30112,10 +30112,12 @@ function runDoctor() {
       `backups: ${backups.length}${backups.length ? ` (latest ${backups[backups.length - 1]})` : ""}`
     );
   }
+  let dir = dirname4(path);
+  while (!existsSync3(dir) && dirname4(dir) !== dir) dir = dirname4(dir);
   try {
-    accessSync(existsSync3(path) ? path : dirname4(path), constants.W_OK);
+    accessSync(dir, constants.W_OK);
   } catch {
-    fail("DB directory is not writable");
+    fail(`cannot write under ${dir}`);
   }
   return { ok, lines };
 }
