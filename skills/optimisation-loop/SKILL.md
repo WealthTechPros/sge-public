@@ -1,5 +1,6 @@
 ---
-description: Use when optimising a system whose output is gated by a measurable bottleneck and each unit of effort should yield the maximum, *verified* improvement — e.g. "grow/optimise metric X", "size a data-coverage or backlog effort before doing it", "prove this intervention works". The pattern: find the REAL bottleneck (measure, don't assume the logic is at fault), build a leverage-ranked lever, PREDICT the effect, intervene against the REAL system, and verify predicted == actual so the prediction can be trusted. Produces a ranked work-list plus a closing feedback harness (the SGD-052 claim). Not for bug-fixing or feature work — this is for making an existing system's numbers move, provably.
+description: >-
+  Use when optimising a system whose output is gated by a measurable bottleneck and each unit of effort should yield the maximum, *verified* improvement — e.g. "grow/optimise metric X", "size a data-coverage or backlog effort before doing it", "prove this intervention works". The pattern: find the REAL bottleneck (measure, don't assume the logic is at fault), build a leverage-ranked lever, PREDICT the effect, intervene against the REAL system, and verify predicted == actual so the prediction can be trusted. Produces a ranked work-list plus a closing feedback harness (the SGD-052 claim). Not for bug-fixing or feature work — this is for making an existing system's numbers move, provably.
 argument-hint: "<the metric or bottleneck to optimise, e.g. 'grow the eligible class'>"
 context: fork
 allowed-tools: Read, Grep, Glob, Agent, Bash

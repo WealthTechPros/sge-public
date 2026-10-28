@@ -34,7 +34,7 @@ you are building a bespoke fan-out that is not `/sge:team-pipeline`.
 ### Why
 
 Nothing is built without a human yes. `/sge:issue-intake` records that yes as a
-`## SGE intake` comment posted from the approver's own login, and
+`## SGE intake` comment posted from the approving human's own login, and
 `scripts/intake-check.sh <N>` verifies it mechanically (newest marker, allow-listed
 human, unedited, fresh, decision `build` or `rescope`). The record also carries the
 human-approved governance verdict (`govtrace`), so a lane that adopts it skips its
