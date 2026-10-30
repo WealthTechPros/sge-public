@@ -550,7 +550,8 @@ _aa_item_comments() { # <id>
     raw="$(_aa_call "item-comments" GET "${route}${token:+&continuationToken=$(_aa_urlencode "$token")}")" || return 1
     page="$(printf '%s' "$raw" | jq -c 'if type == "object" and (.comments | type) == "array" then .comments else error("malformed") end' 2>/dev/null)" \
       || { _aa_err "item-comments: malformed comments payload"; return 1; }
-    all="$(jq -cn --argjson a "$all" --argjson b "$page" '$a + $b')" || return 1
+    all="$(printf '%s\n%s\n' "$all" "$page" | jq -cs '
+      if length == 2 then .[0] + .[1] else error("malformed pagination arrays") end')" || return 1
     token="$(printf '%s' "$raw" | jq -r '.continuationToken // empty' | tr -d '\r')"
     if [ -z "$token" ]; then printf '%s\n' "$all"; return 0; fi
   done
@@ -568,7 +569,8 @@ _aa_item_updates() { # <id>
     raw="$(_aa_call "item-updates" GET "/_apis/wit/workItems/$1/updates?\$top=$size&\$skip=$((p * size))&api-version=7.1")" || return 1
     page="$(printf '%s' "$raw" | jq -c 'if type == "object" and (.value | type) == "array" then .value else error("malformed") end' 2>/dev/null)" \
       || { _aa_err "item-updates: malformed updates payload"; return 1; }
-    all="$(jq -cn --argjson a "$all" --argjson b "$page" '$a + $b')" || return 1
+    all="$(printf '%s\n%s\n' "$all" "$page" | jq -cs '
+      if length == 2 then .[0] + .[1] else error("malformed pagination arrays") end')" || return 1
     n="$(printf '%s' "$page" | jq 'length' | tr -d '\r')"
     if [ "$n" -lt "$size" ]; then printf '%s\n' "$all"; return 0; fi
   done
