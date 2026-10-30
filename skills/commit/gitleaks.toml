@@ -1,0 +1,67 @@
+title = "SGE offline staged credential policy"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "sge-credential-assignment"
+description = "Credential-named literal assignment, including typed configuration"
+regex = '''(?i)[a-z0-9_.-]*(?:secret|token|passw(?:or)?d|passwd|pwd|api[_-]?key|apikey|private[_-]?key|credential|access[_-]?key|auth[_-]?key)[a-z0-9_.-]*["'`]?(?:[ \t]*:[ \t]*[a-z_][a-z0-9_.]*(?:\[[a-z0-9_. ,]+\])?)?[ \t]*(?::=|=>|=|:)[ \t]*("[^"\r\n ]{8,}"|'[^'\r\n ]{8,}'|`[^`\r\n ]{8,}`|[a-z0-9][a-z0-9!@#$%^&*_.:/+=?~-]{7,})(?:[ \t\r\n;,]|\}|\]|\)|$)'''
+secretGroup = 1
+
+[[rules.allowlists]]
+description = "References and numbers are not embedded credential literals"
+regexTarget = "secret"
+regexes = [
+  '''^["'`]?[\$<{\[]''',
+  '''^["'`]?[0-9]+["'`]?$''',
+  '''^["'`]?[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+["'`]?$''',
+]
+
+[[rules.allowlists]]
+description = "Only entirely dummy values in test/fixture paths"
+condition = "AND"
+paths = [
+  '''(?:^|/)(?:tests?|__tests__|specs?|fixtures?|__fixtures__|testdata)/''',
+  '''(?:\.test\.|\.spec\.|_test\.|(?:^|/)test_)''',
+]
+regexTarget = "secret"
+regexes = [
+  '''(?i)^["'`]?(?:(?:fixture|test|testing|dummy|example|changeme|placeholder|redacted|fake|mock|sample|token|secret|password|key|value|todo|tbd|none|null|foo|bar|abc|xxxx)[-_.0-9]*)+["'`]?$''',
+]
+
+[[rules]]
+id = "sge-credential-argument"
+description = "Quoted credential value in a command argument or explicit prose assignment"
+regex = '''(?i)(?:password|passwd|pwd|token|secret|api[_-]?key|credential)[ \t]+(?:(?:is|was|equals?|set[ \t]+to)[ \t]+)?["']([^"' \t\r\n]{8,})["']'''
+secretGroup = 1
+
+[[rules]]
+id = "sge-credential-prose"
+description = "Unquoted mixed-character credential after an explicit assignment phrase"
+regex = '''(?i)(?:password|passwd|pwd|token|secret|api[_-]?key|credential)[ \t]+(?:is|was|equals?|set[ \t]+to)[ \t]+([a-z0-9,;][a-z0-9!@#$%^&*_,.;:/+=?~-]{7,})'''
+secretGroup = 1
+[[rules.allowlists]]
+description = "Ordinary words, references and numbers are not credential evidence"
+regexTarget = "secret"
+regexes = [
+  '''^[a-zA-Z]+$''',
+  '''^[0-9]+$''',
+  '''^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$''',
+]
+
+[[rules]]
+id = "sge-auth-header"
+description = "Literal bearer/basic authentication material"
+regex = '''(?i)\b(?:bearer[ \t]+([a-z0-9._~+/=-]{20,})|basic[ \t]+([a-z0-9+/=]{16,}))'''
+
+[[rules]]
+id = "sge-url-userinfo"
+description = "Credentials embedded in a URL"
+regex = '''[a-zA-Z][a-zA-Z0-9+.-]*://[^/ \t\r\n:@$<{]+:([^/ \t\r\n:@$<{]{4,})@'''
+secretGroup = 1
+
+[[rules]]
+id = "sge-private-key-header"
+description = "Private-key material begins here, even if the staged block is incomplete"
+regex = '''-----BEGIN [A-Z0-9 -]*PRIVATE KEY-----'''
