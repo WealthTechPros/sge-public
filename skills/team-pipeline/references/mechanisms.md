@@ -225,9 +225,8 @@ RECONCILED=$(node "${CLAUDE_PLUGIN_ROOT:-.}/scripts/reconcile-worklist.mjs" \
 
 echo "$RECONCILED" | \
   jq -r '.dropped[] | "[Reconcile] dropped #\(.item) — \(.reason)"'
-# Partly built (a merged `Part of #N` PR, #2793): kept, but the intake gate
-# below drops it unless its intake was approved after the newest such PR
-# merged (intake-check.sh rule 9, #2796) — a fresh intake covers the remainder.
+# Partly built (a merged `Part of #N` PR): re-evaluate the remaining ACs
+# against current source before dispatch. No human re-intake is required.
 echo "$RECONCILED" | \
   jq -r '.partial[]? | "[Reconcile] partial #\(.item) — merged Part-of PR(s) \(.prs | map("#\(.)") | join(", "))"'
 
@@ -254,47 +253,35 @@ result as an ordered array in `/tmp/team-pipeline-queue.json`.
 
 ---
 
-## Phase 1.5 — Intake gate
+## Phase 1.5 — Queue validation
 
-### Intake gate
+### Queue validation
 
-**MANDATORY, every queue build and every re-fill (SPEC-126, #2793).** Keep only
-issues whose `scripts/intake-check.sh` passes: a fresh, unedited `## SGE intake`
-record by an allow-listed human deciding Build or Re-scope. Everything else is
-dropped before any claim, lock or worktree and reported as awaiting intake (a
-human runs `/sge:issue-intake`). This replaces the old batch governance
-pre-classification: the governance verdict now travels in the intake record, and
-each lane adopts it from there (dispatch-prompts Step 3).
-`SGE_GOVTRACE_VERDICT` is never injected or adopted — its provenance cannot be checked.
-
-Resolve `SGE_ROOT` first, as `/sge:sge-implement` does
-(`scripts/resolve-sge-root.sh`). The check is never looked up relative to the
-checkout's cwd: with `SGE_ROOT` unset the block stops instead.
+**Every queue build and re-fill:** preserve dispatch labels, dependency checks,
+reconciliation and source-owned `/sge:build-ready-audit` selection criteria.
+Incomplete or blocked issues remain paused, not always READY. Eligible labelled
+issues without a marker are dispatchable; optional readiness analysis is not
+authorisation. Each lane runs fresh Phase 0.5 governance classification for its
+current scope. Never adopt `SGE_GOVTRACE_VERDICT` or comment-cached verdicts.
 
 ```bash
-IC="${SGE_ROOT:?SGE_ROOT unset - resolve it with scripts/resolve-sge-root.sh first}/scripts/intake-check.sh"
-INTAKE_OK=""
+VALID_QUEUE=""
 while IFS= read -r n; do   # one entry per line: never word-split or glob-expanded
-  if ! [[ "$n" =~ ^[0-9]+$ ]]; then echo "[Intake] skip #$n — not an issue number"; continue; fi
-  if why="$(bash "$IC" "$n" 2>&1 >/dev/null)"; then
-    INTAKE_OK="$INTAKE_OK
+  if ! [[ "$n" =~ ^[0-9]+$ ]]; then echo "[Queue] skip #$n — not an issue number"; continue; fi
+  VALID_QUEUE="$VALID_QUEUE
 $n"
-  else
-    echo "[Intake] skip #$n — ${why#intake-check: }"
-  fi
 done < <(printf '%s\n' "$QUEUE" | tr -s ' \t' '\n\n' | awk 'NF && !seen[$0]++')   # dedupe, keep order
-QUEUE="$(printf '%s\n' "$INTAKE_OK" | awk 'NF')"
+QUEUE="$(printf '%s\n' "$VALID_QUEUE" | awk 'NF')"
 ```
 
 Run it on the reconciled queue **before** it is stored to
-`/tmp/team-pipeline-queue.json`. Record each skipped issue in `failedIssues`
-with reason `awaiting-intake`. Run the check from the **tracking** repo's
-checkout (the issue and its intake comment live there, SPEC-057). The lane re-runs the same check before writing code, so a
-record that goes stale between queueing and spawning still blocks.
+`/tmp/team-pipeline-queue.json`. Record invalid entries in `failedIssues`.
+This normalisation is not a readiness decision: keep independent blockers and
+selection criteria from the tracking repo, and recheck current ACs in the lane.
 
 ### Per-lane model tier (#2488)
 
-**Same Phase 1.5 pass, after the intake gate above:** resolve each queued issue's
+**Same Phase 1.5 pass, after queue validation above:** resolve each queued issue's
 model tier and merge it into the same state file, so the map exists before
 Phase 3c dispatches any lane:
 
@@ -706,12 +693,11 @@ backend to post to.
 Primary steps (core SKILL.md summarises the decision rule): (1) **Discover** via
 `/sge:available-issues --parallel --count <pool_size>`; (2) **Reconcile**
 (MANDATORY — the Phase 1 reconcile pre-flight, on the candidates); (3) **Gate**
-each candidate through the [intake gate](#intake-gate) (MANDATORY — no passing
-intake → drop as `awaiting-intake`) and `/sge:build-ready-audit <issue>`
+each candidate through [queue validation](#queue-validation) and `/sge:build-ready-audit <issue>`
 **before any claim** — READY → queue, NOT_READY → drop (record the blocker in
 `failedIssues`; never lock/spawn), TOO_LARGE → decompose; (4) **Decompose**
-TOO_LARGE via `/sge:decompose-issue`, re-gate each child (a new child has no
-intake record, so it waits for `/sge:issue-intake`), merge READY children into the queue
+TOO_LARGE via `/sge:decompose-issue`, audit each child's current ACs and dependencies,
+merge eligible labelled READY children into the queue without a marker prerequisite
 (record the parent in `decomposed`; never claim it; dedupe by issue number so a
 relaunch never re-decomposes). **Re-fill** when the queue runs low, but only if
 `time_remaining >= MIN_AGENT_RUNWAY`.
@@ -721,10 +707,10 @@ When the gated front-end tools are unavailable, each step degrades safely:
 1. **Discover** — fallback: the raw Phase 1 discovery above (dispatch label applied).
 2. **Reconcile** — unchanged; the Phase 1 reconcile pre-flight always runs on
    the candidates.
-3. **Gate** — the intake gate has no fallback: it always runs, and an issue
-   without a passing intake is never queued. When `/sge:build-ready-audit` is
-   unavailable, queue only intake-passing issues and use a size heuristic
-   (body length / AC count) to flag TOO_LARGE.
+3. **Gate** — preserve existing labels and selection criteria. When
+   `/sge:build-ready-audit` is unavailable, check bounded ACs, dependencies,
+   unresolved decisions and size directly; pause incomplete/unknown cases.
+   Never assume READY. No marker is required; lanes freshly classify governance.
 4. **Decompose** (`/sge:decompose-issue`) — fallback when unavailable: skip the
    oversized issue, comment that it needs manual decomposition, add to
    `failedIssues` with reason `too-large-no-decomposer` — never let a lane

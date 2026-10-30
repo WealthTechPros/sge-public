@@ -278,9 +278,15 @@ Then report the created issue numbers and the comment URL back in chat.
 
 ## Phase 7: Hand-Off
 
-The decomposition is done — building is a separate step. **Children need their own intake (SPEC-126, #2793):** a child inherits nothing from the parent's intake record — `intake-check.sh` judges only a marker on the child itself — so every build path refuses a child until a human approves it with `/sge:issue-intake`. Offer the next move via AskUserQuestion:
+The decomposition is done — building is a separate step. Audit each child's ACs,
+dependencies and scope with `/sge:build-ready-audit`, preserving dispatch labels
+and existing selection criteria. Incomplete or blocked children stay paused.
+Eligible labelled children need no approval marker; each implementation lane
+freshly classifies its own current scope at Phase 0.5, never inheriting a parent
+or comment-cached verdict. Offer the next move via AskUserQuestion (unattended:
+report eligible children and blockers without inventing authority):
 
-- **"Approve the children for build now"** (recommended while the human is here) — `/sge:issue-intake <E1>,<S1>,…`, then any option below.
+- **"Analyse the children's readiness"** — optional `/sge:issue-intake <E1>,<S1>,…`; AC mapping only, not authorisation or automatic labels/closure.
 - **"Fan out via the pipeline"** — `/sge:team-pipeline` discovers the enabler and slices, respects the `DependsOn` edges (the enabler unblocks the slices once it merges), and works the parallel lanes concurrently.
 - **"Start with the enabler"** — `/sge:sge-implement <E1>` (it takes the spec or no-spec lane itself), then the slices once it merges.
 - **"Leave them for later"** — the children exist with full metadata; anyone can pick them up.

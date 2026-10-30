@@ -16,8 +16,8 @@
  * The Part-of search is best-effort (#2796): it reads at most 100 merged PRs
  * per issue, and when the `gh` search fails the issue is kept and listed under
  * "partialUnchecked" with the error, never silently treated as untouched.
- * intake-check.sh runs its own search and fails closed, so this flag is a
- * report, not the gate.
+ * Dispatchers must inspect this uncertainty before selecting remaining work;
+ * it is not evidence that the issue is untouched.
  *
  * Returns only genuinely-remaining work so dispatch skills never re-do
  * completed work.

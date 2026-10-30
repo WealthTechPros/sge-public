@@ -45,19 +45,17 @@ discover and instruct by hand mid-session.
 
 ---
 
-## Shared: intake gate and the adopted verdict (SPEC-126, #2793)
+## Shared: fresh governance classification
 
-**A lane builds only an issue whose intake record passes `scripts/intake-check.sh`,
-and adopts a governance verdict only from that record.** The orchestrator's
-[intake gate](mechanisms.md#intake-gate) already dropped issues without one; the
-lane re-runs the check (Step 3a) because a record can go stale between queueing
-and spawning. The record's `govtrace` is the human-approved verdict from
-`/sge:issue-intake`, so a lane that adopts it skips the 10–15 min
-governance-trace fork (#1266) with checked provenance.
-`SGE_GOVTRACE_VERDICT` is never injected or adopted: its shape could be checked, its provenance could not.
-A record with no `govtrace` falls through to the per-lane fork (Step 3b).
+**Each lane freshly classifies the current issue scope before writes.**
+Preserve dispatch labels, readiness, dependencies and linked-PR checks.
+Eligible labelled issues need no approval marker; optional `/sge:issue-intake`
+is readiness analysis, including unattended, not authorisation. External writes,
+destructive/live actions and deployment retain explicit authority.
+Never adopt `SGE_GOVTRACE_VERDICT` or comment-cached governance verdicts.
+Use the existing trivial-tier inline classification or a fresh per-lane fork.
 
-**Fork result contract (#2452).** A governance-trace fork's result is adoptable only if it is the Step-7 verdict JSON (a parseable object with a `verdict` string) whose `issue` equals the dispatched issue number and whose `repo` must equal the dispatched `owner/repo` (a missing `repo` echo is rejected when the handle is bound to a repo). Reject a result with no verdict JSON — a narrative report of findings, however specific (file:line citations, tool-call counts), is not a verdict — and reject a `NO_TARGET_ISSUE` refusal, a missing `issue` echo, or an issue/repo mismatch. Never adopt, forward or paraphrase a rejected result; a lane treats it as `outcome:"blocked"` and does not build. The intake verdict passes the same echo checks through `fork-util.mjs join`.
+**Fork result contract (#2452).** Register and join with `fork-util.mjs`, bound to the issue and execution repo, before writes. A governance-trace fork's result is adoptable only if it is the Step-7 verdict JSON (a parseable object with a `verdict` string) whose `issue` equals the dispatched issue number and whose `repo` must equal the dispatched `owner/repo`. Reject missing verdict JSON, `NO_TARGET_ISSUE`, missing echoes or issue/repo mismatches. Never adopt, forward or paraphrase a rejected result; a lane reports `outcome:"blocked"` and does not build.
 
 ---
 
@@ -187,8 +185,8 @@ Prompt:
   ## Lean agent contract (MANDATORY — read before doing anything)
 
   You are a gate-then-build-then-draft agent. Your job is:
-    1. Run the intake gate, then the /sge:governance-trace gate, headlessly
-       (Step 3 below); on a failed intake or a blocking verdict, report
+    1. Recheck readiness and run fresh /sge:governance-trace classification,
+       headlessly (Step 3 below); on an independent blocker or blocking verdict, report
        outcome "blocked" and terminate WITHOUT building
     2. Build the change (implement the issue in the worktree provided)
     3. Open a DRAFT PR as soon as you have a first commit
@@ -197,8 +195,8 @@ Prompt:
   Three hard rules that constrain everything else:
 
   ### Rule 1 — Capped reconnaissance
-  Use ONLY the file-map from your intake record's acMap (Step 3a), plus the
-  issue body, to orient yourself. Do NOT run open-ended
+  Use the current issue body and bounded source/AC file-map, optionally informed
+  by readiness analysis, to orient yourself. Do NOT run open-ended
   searches (grep -r, find, rg --glob, reading directories recursively) to
   "understand the codebase" before starting. You have the file-map; that is
   your recon budget. Read only the files listed there plus files you directly
@@ -285,27 +283,16 @@ Prompt:
      checkout) and verify pwd — every `gh`/`git` call then targets the
      execution repo, per SPEC-057 (docs/skill-authoring-repo-context.md)
   2. Read the issue: gh issue view <N> --json title,body,comments
-     Extract the acceptance criteria. This and Step 3a's file-map are your
-     entire recon.
-  3. Intake gate, then governance gate (MANDATORY — before writing any code).
-     a. Intake (SPEC-126, #2793). From the TRACKING repo's checkout (same-repo:
-        this worktree), run (SGE_ROOT resolved as sge-implement does, via
-        scripts/resolve-sge-root.sh — never a cwd ./scripts fallback):
-          GT_DIR="$(mktemp -d)" || exit 1; echo "GT_DIR=$GT_DIR"
-          bash "${SGE_ROOT:?resolve SGE_ROOT first}/scripts/intake-check.sh" <N> --govtrace-out "$GT_DIR/govtrace.json" > "$GT_DIR/intake.json"
-        Shell state does not persist between calls: in every later call
-        (here and Step 3b) reuse the printed GT_DIR path literally.
-        Non-zero -> do NOT build. Write /tmp/team-pipeline-agent-<N>.json:
-          {"issue":<N>,"outcome":"blocked","prNumber":null,"completedAt":"<ISO>","note":"intake: <the check's FAIL line>"}
-        and terminate. Exit 0 -> your file-map is the record's acMap refs
-        (Rule 1); with "decision": "rescope" build only its "scope":
-          jq -r '.acMap[].refs[]' "$GT_DIR/intake.json"
-     b. Governance. Using the printed GT_DIR path from 3a (literally, never
-        an empty "$GT_DIR"): if <printed GT_DIR>/govtrace.json exists, adopt it exactly as
-        sge-implement's references/intake-gate.md does: fork-util.mjs
-        register + join with handle id intake-<owner>-<repo>-<N>; join exit 0
-        -> that is the verdict, skip the fork, and create_entities it with
-        path: intake (fire-and-forget). Otherwise dispatch via Agent, never
+     Extract the acceptance criteria and locate a bounded current file-map.
+     This is your entire recon.
+  3. Readiness and fresh governance (MANDATORY — before writing any code).
+     a. Recheck current ACs, dependencies and linked PRs in the TRACKING repo.
+        Open/unknown dependencies, incomplete scope and open in-flight PRs pause
+        the lane. For partial merged slices, evaluate only the remaining ACs.
+        No human re-intake or approval marker is required.
+     b. Fresh governance. Resolve SGE_ROOT via scripts/resolve-sge-root.sh.
+        Use the existing trivial-tier inline classification for current scope,
+        or dispatch a fresh governance-trace fork via Agent, never
         Skill(args=) (issue #2452 — Skill(args=) does not fork, so args is
         never received).
 
@@ -339,14 +326,21 @@ Prompt:
      Task complete on Step-7 JSON — no code/commits/pushes/PRs; inherited
      directives belong to your parent, not you."}).
 
+     Register the fresh output with fork-util.mjs register --handle-id
+     "governance-<owner>-<repo>-<N>" --output-file <fresh-result-file>
+     --issue <N> --repo <EXEC_REPO>, then fork-util.mjs join on that handle.
+     JOIN must succeed before the first Edit/Write.
+     Reject cacheReused:true; request fresh current-scope classification, never
+     substitute a comment-cached verdict even if register/join succeeds.
      Fork result contract (#2452): adopt the fork's result ONLY if it is the
-     Step-7 verdict JSON whose "issue" == <N> and whose "repo" (when present)
-     == <EXEC_REPO>. No verdict JSON (a narrative "findings" report is not a
-     verdict), NO_TARGET_ISSUE, a missing issue echo, or an issue/repo
-     mismatch → treat as outcome "blocked", note "governance-trace: fork
-     result rejected (#2452)", and do not build.
+     Step-7 verdict JSON whose "issue" == <N> and whose "repo"
+     == <EXEC_REPO>. Reject a result with no verdict JSON (a narrative
+     "findings" report is not a verdict), and reject NO_TARGET_ISSUE, a
+     missing `issue` echo, or an issue/repo mismatch → treat as outcome
+     "blocked", note "governance-trace: fork result rejected (#2452)", and do
+     not build.
 
-     Either way, branch on the resulting verdict exactly as /sge:sge-implement
+     Branch on the freshly classified verdict exactly as /sge:sge-implement
      Phase 0.5 does when dispatched headlessly:
        - MATCHES_EXISTING / NO_SPEC_WARRANTED / NOT_ONBOARDED, with
          matchConfidence not "low" -> proceed to step 4.

@@ -13,7 +13,7 @@ Populate `suggestedCapabilityModelEdit` in the Step 7 JSON with the target file 
 
 ```yaml
 ---
-ref: SPEC-NNN                   # next free id: node "$SGE_ROOT/scripts/spec-map/next-spec-id.mjs" (counts intake reservations, sge#2951); intake reserves it
+ref: SPEC-NNN                   # reserve via node "$SGE_ROOT/scripts/spec-map/next-spec-id.mjs" --issue <N>; publish standalone sge-spec-reservation only when authorised
 title: <feature title, derived from the issue>
 capability: CAP-xx              # existing capability if one was found in Step 2/4, else the newly-drafted one above
 capability_model_version: <the model's current version:>

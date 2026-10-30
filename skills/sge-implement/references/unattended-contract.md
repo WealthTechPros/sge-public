@@ -13,6 +13,6 @@ On any ambiguity, resolve it by this three-tier policy, tried **strictly in orde
 
 **Blocked-fast at the regulated boundary.** A regulated-output boundary is **always** tier (c), **never** tier (b) — the most-reversible-option fallback does not apply there, and the run must never auto-continue past it. Blocked-fast is the correct behaviour, not a failure.
 
-Every AskUserQuestion option gate in the skill becomes a tier (a)/(b)/(c) decision under this contract. The intake gate (Phase −1) and a blocking governance verdict (Phase 0.5) are always tier (c): never run `/sge:issue-intake` headless and never auto-approve a spec change.
+Every AskUserQuestion option gate in the skill becomes a tier (a)/(b)/(c) decision under this contract. A blocking governance verdict (Phase 0.5) is always tier (c): never auto-approve a spec change. Optional `/sge:issue-intake` may run headlessly as readiness analysis; it is not authorisation. No approval marker is required. Independent blockers and explicit authority for external writes, destructive/live actions and deployment remain unchanged.
 
 Attended runs (neither `SGE_UNATTENDED=1` nor `--unattended`) are unchanged and may still end a turn with a clarifying question. The `Stop`-hook backstop, the spec-template "Decision rules & defaults" section, and the questions-per-run metric are sibling slices of the same epic (#1120) — this contract is the behaviour they enforce and measure.

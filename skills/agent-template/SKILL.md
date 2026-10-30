@@ -1,5 +1,5 @@
 ---
-description: Reference template and convention guide for custom orchestrators that dispatch SGE implementation lanes. Use when building a bespoke fan-out orchestrator (not /sge:team-pipeline) and you need to know the correct way to gate dispatch on the human intake record (intake-check.sh), adopt the intake record's governance verdict, and wire the governance gate into dispatched lanes.
+description: Reference template for custom orchestrators that dispatch eligible issues and run fresh issue-bound governance classification before writes.
 argument-hint: ""
 disable-model-invocation: true
 ---
@@ -9,9 +9,9 @@ disable-model-invocation: true
 ## Role
 
 Documents the canonical conventions a **custom orchestrator** must follow when
-it dispatches SGE implementation lanes — specifically the intake gate (SPEC-126,
-#2793): dispatch only issues with a valid human intake record, and let each lane
-adopt the governance verdict carried in that record. Use this as a checklist when
+it dispatches SGE implementation lanes: preserve repository dispatch labels,
+readiness and dependency checks, and let each lane freshly classify its current
+scope before writes. Use this as a checklist when
 you are building a bespoke fan-out that is not `/sge:team-pipeline`.
 
 > **Note:** `/sge:team-pipeline` and its Duration Mode (`--duration`) already
@@ -23,58 +23,47 @@ you are building a bespoke fan-out that is not `/sge:team-pipeline`.
 
 - Running or dispatching lanes itself — this is a reference template, not an
   orchestrator; use `/sge:team-pipeline` or `/sge:fleet-dispatch`.
-- Recording the intake decision (that is `/sge:issue-intake`) or classifying an
+- Optional readiness analysis (that is `/sge:issue-intake`) or classifying an
   issue against governance (that is `/sge:governance-trace`).
 - Implementing issues (that is `/sge:sge-implement`).
 
 ---
 
-## Intake gate convention (SPEC-126, #2793)
+## Dispatch eligibility convention
 
 ### Why
 
-Nothing is built without a human yes. `/sge:issue-intake` records that yes as a
-`## SGE intake` comment posted from the approving human's own login, and
-`scripts/intake-check.sh <N>` verifies it mechanically (newest marker, allow-listed
-human, unedited, fresh, decision `build` or `rescope`). The record also carries the
-human-approved governance verdict (`govtrace`), so a lane that adopts it skips its
-~73k-token governance-trace fork with provenance it can check.
+Use existing dispatch labels and `/sge:build-ready-audit`, dependency and
+in-flight PR checks. No human approval marker or readiness report is required.
+`/sge:issue-intake` is optional AC mapping, usable unattended, not authorisation.
+External writes, destructive/live actions and deployment retain explicit authority.
 
-The retired convention — batch-classify the wave and inject the verdict into each
-lane as `SGE_GOVTRACE_VERDICT` — is removed: its shape could be checked, its
-provenance could not, so the env verdict is never adopted.
+### Orchestrator side: dispatch eligible issues
 
-### Orchestrator side: dispatch only intake-passing issues
-
-After the dependency gate and reconcile, filter the queue exactly as
-team-pipeline's [intake gate](../team-pipeline/references/mechanisms.md#intake-gate)
-does: run `bash "$SGE_ROOT/scripts/intake-check.sh" <N>` (`SGE_ROOT` from
-`scripts/resolve-sge-root.sh`, never a cwd fallback) per issue
-from the tracking repo's checkout, keep exit 0, and report the rest as awaiting
-intake. Never claim, lock or spawn a lane for an issue that fails, and never pass
-a verdict in the lane prompt.
+After dependency checks and reconciliation, use team-pipeline's
+[queue validation](../team-pipeline/references/mechanisms.md#queue-validation).
+Keep numeric validation and deduplication. Never claim incomplete or blocked
+issues, assume READY when evidence is unavailable, or pass a cached verdict in
+the lane prompt. Eligible labelled issues without a marker are dispatchable.
 
 ---
 
 ## Lane-side guard (what the impl lane does before any code)
 
-The impl lane (running `/sge:sge-implement`, whose Phase −1 does this, or the Lean
-Agent Contract) re-runs the check — a record can go stale between queueing and
-spawning — and adopts the verdict only from it:
+The impl lane (running `/sge:sge-implement` Phase 0.5 or the Lean Agent Contract)
+rechecks current scope and independently classifies governance:
 
 ```
-GT_DIR = mktemp -d
-intake-check.sh <N> --govtrace-out "$GT_DIR/govtrace.json" > "$GT_DIR/intake.json"
-  non-zero → outcome "blocked", note "intake: <FAIL reason>"; terminate, no code
-file-map  = jq -r '.acMap[].refs[]' "$GT_DIR/intake.json"   (rescope → build only .scope)
-if $GT_DIR/govtrace.json exists:
-  fork-util.mjs register --handle-id intake-<owner>-<repo>-<N> --output-file it ...; join
-  join exit 0 → adopt; skip fork; log "adopted from intake record"
-  else        → dispatch per-lane fork as normal
-else          → dispatch per-lane fork as normal
+reconcile current ACs, dependencies and linked PRs
+file-map = bounded current issue/source analysis, optional readiness refs
+fresh trivial-tier inline classification OR per-lane governance-trace fork
+fork-util.mjs register --issue <N> --repo <owner/repo> --output-file <fresh-result>; join
+  invalid/missing verdict or issue/repo echo → blocked; no writes
+  blocking verdict → existing decision process; headless blocked
 ```
 
-Commands: [`intake-gate.md`](../sge-implement/references/intake-gate.md).
+Boundaries: [`readiness.md`](../sge-implement/references/readiness.md).
+Never adopt `SGE_GOVTRACE_VERDICT` or comment-cached governance verdicts.
 
 > **Dispatch tool for the per-lane fork — `Agent`, never `Skill(args=)`
 > (issue #2452).** "Dispatch per-lane fork as normal" above names an
@@ -100,17 +89,16 @@ Commands: [`intake-gate.md`](../sge-implement/references/intake-gate.md).
 
 **Fork result contract (#2452).** A governance-trace fork's result is adoptable only if it is the Step-7 verdict JSON (a parseable object with a `verdict` string) whose `issue` equals the dispatched issue number and whose `repo` must equal the dispatched `owner/repo` (a missing `repo` echo is rejected when the handle is bound to a repo). Reject a result with no verdict JSON — a narrative report of findings, however specific (file:line citations, tool-call counts), is not a verdict — and reject a `NO_TARGET_ISSUE` refusal, a missing `issue` echo, or an issue/repo mismatch. Never adopt, forward or paraphrase a rejected result; treat it as a failed dispatch — re-fork once, and if that also fails park the lane `outcome:"blocked"`; never build on it.
 
-**Reuse is never a bypass.** An adopted verdict enters the exact same
+**Fresh classification is never a bypass.** A validated current verdict enters the exact same
 branch-on-`verdict` logic — a blocking verdict (`MATCHES_EXISTING_MODIFIED`,
 `NOT_SGE_SCOPE`, low `matchConfidence`) pauses and surfaces to the user before
 writing any code; in headless dispatch it writes `outcome:"blocked"` and
 terminates without building. The orchestrator's Phase 4 branch 4a parks it for
 a human decision.
 
-**Caller-owned cortex write (SPEC-108 §2.4a, #1938).** On the `join exit 0 →
-adopt; skip fork` branch, `/sge:governance-trace` never runs, so its Step W write
-can never fire — the adopting lane owns it. When it adopts the intake verdict,
-`create_entities` the adopted verdict with `path: intake`, reinforcing the
+**Caller-owned cortex write (SPEC-108 §2.4a, #1938).** On the fresh inline-trivial
+classification branch, `/sge:governance-trace` never runs, so the lane owns Step W.
+`create_entities` the current verdict with `path: tier-gate`, reinforcing the
 stable `govtrace-<owner>-<repo>-<issue>` entity — fire-and-forget, never blocking
 the lane on the write, skipped silently if sge-memory is unavailable. This is the
 #1664 silent-write-loss defect one level up: an optimisation that skips the work
@@ -152,9 +140,9 @@ gate's decision strands a worktree.
 ```
 [ ] Reconcile worklist before building queue (${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/reconcile-worklist.mjs)
 [ ] Dependency gate: drop issues with unresolved blockers
-[ ] Intake gate: queue only issues whose $SGE_ROOT/scripts/intake-check.sh <N> exits 0 (SPEC-126); never claim the rest
-[ ] Lane re-runs intake-check.sh before any code; file-map from the intake acMap; no verdict in the lane prompt
-[ ] Lane adopts the intake verdict → caller-owned cortex write, path: intake (SPEC-108 §2.4a, #1938)
+[ ] Preserve dispatch labels, build-ready-audit, numeric validation and deduplication; no marker prerequisite
+[ ] Lane freshly classifies current issue scope; fork-util.mjs register/join validates issue/repo before writes
+[ ] Fresh inline-trivial classification → caller-owned cortex write, path: tier-gate (SPEC-108 §2.4a, #1938)
 [ ] Stoppable-only: every spawned agent is a named Task (not remote/detached)
 [ ] Per-Task budget ceiling stated in every Task prompt
 [ ] Draft PR after first commit (lane Rule 2); stale-lane kill on no-PR timeout
@@ -177,6 +165,6 @@ The details, including the review handoff env, are in
 
 - `/sge:team-pipeline` — the reference orchestrator that implements every convention here
 - `/sge:team-pipeline --duration` — the time-boxed swarm (Duration Mode)
-- `/sge:issue-intake` — records the human approval (and governance verdict) the intake gate checks
-- `/sge:governance-trace` — the per-issue classifier, dispatched by lanes whose intake record carries no verdict
-- `/sge:sge-implement` — implementation lane; Phase −1 runs the intake gate, Phase 0.5 adopts its verdict
+- `/sge:issue-intake` — optional readiness and AC mapping, including unattended
+- `/sge:governance-trace` — fresh per-issue classifier
+- `/sge:sge-implement` — implementation lane; Phase 0.5 owns fresh classification

@@ -50,5 +50,5 @@ Tested by `skills/tests/pr-labels-followup-gate.test.sh` (cases 13–19).
   test; QA-only observations (cosmetic, unrelated) are minors recorded in the
   QA report, never filed.
 - **`/sge:issue-intake`** — gaps found while mapping acceptance criteria are
-  recorded in the intake comment or folded into the recommended scope; intake
+  recorded in the readiness report or folded into the recommended scope; analysis
   does not file new issues for minors.

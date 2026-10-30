@@ -22,7 +22,7 @@ variable always wins over the file. (SPEC-130.)
 |-----|--------------|-------------------|--------------|
 | `gateOwner` | `SGE_GATE_OWNER` | unset (self-drive) | `pod` hands the `pr-reviewed` gate to a review pod or daemon. See `/sge:sge-implement`'s pod-gate mode. |
 | `agentBotLogin` | `SGE_AGENT_BOT_LOGIN` | none | The GitHub App login your agents author PRs and comments as (for example `acme-agent[bot]`). An App has repo association `NONE`, so the shared PR claim protocol trusts its claims only when it is named here. With no value, no extra App is trusted. Only a comment whose author account type is `Bot` matches. Read by `skills/pr-review/pr-labels.sh` from the base repository's default branch only, fetched through the GitHub API each time it is needed: never from the working tree, a fork remote or a local ref that may be stale, so a PR cannot trust its own author and a removed login stops being trusted at once. |
-| `decisionOwner` | — | "the repo owner" | The person skills name when a decision needs an owner (for example in a `needs-decision` rationale). Prose only. Intake approval itself is open to any human with repository access (SPEC-126 DR1, amended 2026-10-28); the legacy `intakeApprovers` / `intakeApproverTeam` keys are ignored. |
+| `decisionOwner` | — | "the repo owner" | The person skills name when a decision needs an owner (for example in a `needs-decision` rationale). Prose only; not a build-approval role. |
 | `secretsStore` | — | "your secrets manager" | The name of the secrets manager that injects tokens into the environment. SGE never reads secrets from a file or a store directly; skills only name the store when they tell you a token is missing. |
 | `podsRegistry` | `SGE_PODS_REGISTRY` | `~/.sge/pods/pods.json` | The fleet pod registry: `pods[]` entries with `type: "review-daemon"` mark repos a review daemon covers, so `hooks/pr-created.sh` does not race it with a session-local review. A leading `~/` means `$HOME`. |
 
@@ -38,6 +38,11 @@ variable always wins over the file. (SPEC-130.)
   the variable to an empty string to force the neutral default.
 
 ## Publisher values never ship
+
+There is no mandatory build-intake gate or approver configuration. Legacy
+`intakeApprovers` / `intakeApproverTeam` keys have no effect and may be removed.
+`/sge:issue-intake` is optional readiness analysis, not authorisation. PR review,
+governance classification and separate operational approvals remain in place.
 
 The public distribution is linted at publish time
 (`.github/scripts/public-hooks.sh brand-lint` against

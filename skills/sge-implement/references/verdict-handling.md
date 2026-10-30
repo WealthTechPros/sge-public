@@ -13,7 +13,7 @@ prompt wording. Every gate remains a real AskUserQuestion, never a dead-end stop
 
 ## Size pre-score — the outermost gate (#1265, #1342)
 
-Before *any* governance work (tier, reuse, or fork), cheaply pre-score the issue
+Before *any* governance work (tier or fork), cheaply pre-score the issue
 body with the Phase 2 sizing rubric — no fork, no preflight, ≤ 500 tokens of
 inline work — via the bundled scorer:
 
@@ -30,17 +30,17 @@ around the Large boundary of 30). Branch on `tier`:
 
 | Tier | Action |
 |---|---|
-| **`LARGE`** | **Decompose first** via `/sge:decompose-issue`; classify the children **once** through `/sge:build-ready-audit`'s #872 fold — the parent's governance fork is **skipped, not run-then-discarded** (decomposition immediately invalidates it). |
+| **`LARGE`** | **Decompose first** via `/sge:decompose-issue`; audit the children through `/sge:build-ready-audit` — the parent's fork is **skipped, not run-then-discarded**. Each child implementation lane freshly classifies its current scope before writes. |
 | **`AMBIGUOUS`** | Near the Large/Medium boundary; **fall through to the full sizing + governance sequence** to avoid false early decomposition. |
 | **`SMALL`** / **`MEDIUM`** | Fall through to the pre-fork tier gate below unchanged. |
 
-Precedence: **size > tier > reuse > fork.** An empty or unparseable body scores
+Precedence: **size > tier > fork.** An empty or unparseable body scores
 `AMBIGUOUS` (fail-safe: never falsely decompose), so the gate always falls back to
 the full sequence rather than skipping classification.
 
 ## Pre-fork tier gate (inline classification)
 
-Before Phase 0.5 forks (or reuses) the full `/sge:governance-trace` — which costs
+Before Phase 0.5 forks the full `/sge:governance-trace` — which costs
 ~73k tokens even to conclude "MATCHES_EXISTING, additive" on a docs-only sign-off
 task — tier the issue's *predicted* touched paths and, for a **trivial** tier,
 classify inline instead of forking. This reuses the **same** classifier Phase 2.5
@@ -64,7 +64,7 @@ already runs; it invents no new tier logic.
    - **`trivial`** (docs/config/test-only **and** low complexity) → **inline path**
      below. No fork.
    - **`standard`** or **`critical`** → fall through to the full governance-trace
-     fork (or the reused front-loaded verdict) in SKILL.md Phase 0.5, unchanged.
+     fresh fork in SKILL.md Phase 0.5, unchanged.
      The heavier the change, the more it is worth the full trace.
 
 ### Safety — the gate can never under-classify a risky change
@@ -143,7 +143,18 @@ body; `suggestedCapabilityModelEdit` (when `layers.feature`/`layers.capability`
 is `new`) carries the model row that must land alongside it — never approve the
 spec stub without its accompanying model edit, or you create an orphan spec.
 
-**Spec id (sge#2951).** When the adopted intake marker carries `reservedSpecId` (printed by `intake-check.sh`), write the spec under exactly that id, overriding the stub's own `SPEC-NNN`: it was reserved at intake so a parallel new-spec PR cannot take it. No reservation (an older record): reserve one now with `node "$SGE_ROOT/scripts/spec-map/next-spec-id.mjs" --issue <N>`, never "highest file + 1". A gap in the `SPEC-` range is expected (an unmerged reservation); `verify-map.test.mjs` requires uniqueness, not contiguity.
+**Spec id (sge#2951).** Reserve through the existing helper:
+`node "$SGE_ROOT/scripts/spec-map/next-spec-id.mjs" --issue <N> --repo-root "$(git rev-parse --show-toplevel)"`.
+Use its returned id, never "highest file + 1"; stop if open reservations cannot
+be read. When explicitly authorised to write a tracker comment, record the
+standalone non-approval marker
+`<!-- sge-spec-reservation: {"issue":N,"reservedSpecId":"SPEC-NNN"} -->`
+using the actual issue and returned id, then verify saved content before
+parallel work relies on it. If write authority is absent, pause reservation
+publication rather than silently posting. No intake is required. The helper also
+honours legacy intake reservations solely to prevent ID collisions, not to
+approve work. Existing governance/spec approval rules still apply. Gaps are
+expected; uniqueness, not contiguity, is required.
 
 - **Standalone (interactive):** AskUserQuestion — "This issue needs a new spec: <stub title>. <one-line body summary>.<if suggestedCapabilityModelEdit non-null: ' This also needs a new capability-model entry: <description>.'> How do you want to proceed?" — Option A: "Approve as drafted" (write the spec file **and** the capability-model edit, when present, in the **same** commit with a `Spec: SPEC-NNN` trailer, then continue to **Phase 1** as the just-created spec); Option B: "Edit first" (show the full drafted markdown for both, take edits, then proceed as Option A); Option C: "Cancel".
 - **Dispatched (headless — team-pipeline):** treat as a requirement change — write the completion file with `outcome: "blocked"`; a human approves the stub + model edit later.

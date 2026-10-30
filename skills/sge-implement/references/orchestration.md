@@ -1,7 +1,7 @@
-# sge-implement — orchestrator dispatch & front-loaded-verdict reuse (reference)
+# sge-implement — orchestrator dispatch & fresh classification (reference)
 
 Extended rationale and mechanics for the two dispatch guardrails and the
-front-loaded governance-verdict reuse path. The operational rules live in
+fresh governance classification path. The operational rules live in
 `SKILL.md` (Usage note + Phase 0.5); this file carries the full "why" and the
 passing-shape detail.
 
@@ -41,10 +41,9 @@ save time" — the two do not race harmlessly: it doubles the classification cos
 (each trace is a fresh ~75k-token investigation) for a step this skill runs
 anyway, and the standalone trace can return a blocking verdict *after* this skill
 has already started coding, forcing an out-of-band mid-flight correction rather
-than a clean gate. If you want to front-load classification for a whole batch of
-issues in one pass, run `/sge:issue-intake` on them (up to 4 per question) —
-its human-confirmed record carries the verdict Phase 0.5 adopts (reuse path
-below) — do not spawn a competing trace.
+than a clean gate. Optional `/sge:issue-intake` may analyse a batch's readiness,
+including unattended, but each lane still freshly classifies its current scope.
+Do not spawn a competing trace or pass cached verdicts to a lane.
 
 ## Dispatch tool — `Agent`, never `Skill(args=)` (issue #2452)
 
@@ -77,34 +76,15 @@ against a fork continuing past classification.
 
 **Fork result contract (#2452).** A governance-trace fork's result is adoptable only if it is the Step-7 verdict JSON (a parseable object with a `verdict` string) whose `issue` equals the dispatched issue number and whose `repo` must equal the dispatched `owner/repo` (a missing `repo` echo is rejected when the handle is bound to a repo). Reject a result with no verdict JSON — a narrative report of findings, however specific (file:line citations, tool-call counts), is not a verdict — and reject a `NO_TARGET_ISSUE` refusal, a missing `issue` echo, or an issue/repo mismatch. Never adopt, forward or paraphrase a rejected result; treat it as blocking — halt before any Edit/Write and re-fork synchronously. `fork-util.mjs join` enforces this mechanically for the async path (register with `--issue` and `--repo`; see below).
 
-## Reuse a front-loaded verdict — intake record only (SPEC-126, #2782)
+## Fresh classification, not cached authority
 
-Phase 0.5 still skips the governance-trace fork when the verdict for **this**
-issue already exists — but the only adoptable source is now the `govtrace`
-inside a validated `## SGE intake` record (posted by an allow-listed human,
-checked by `scripts/intake-check.sh` at Phase −1, re-validated by
-`fork-util.mjs join`). Commands: [`intake-gate.md`](intake-gate.md).
-
-- **`SGE_GOVTRACE_VERDICT` is no longer adopted.** Its shape and issue echo
-  were checked (#872, #1344), its provenance never was: any orchestrator, or a
-  prompt, could set it. Orchestrators still inject or adopt it until #2782
-  Phase 2: `team-pipeline/SKILL.md`, `team-pipeline/references/dispatch-prompts.md`
-  (the lane-side adoption block), `team-pipeline/references/mechanisms.md`,
-  `agent-template/SKILL.md` (lane-side guard),
-  `build-ready-audit/references/dispatch-tool.md` and this skill's
-  `child-splitting.md`. Lanes that run `/sge:sge-implement` fork instead of
-  skipping and are blocked at Phase −1 without an intake record; **lean
-  team-pipeline lanes do not run sge-implement at all, so they still adopt
-  the env verdict and skip Phase −1** — safe only while the swarm is paused.
-  Children created by `/sge:decompose-issue` each need their
-  own intake record (Phase 2 defines how).
-- **Reuse is not a bypass.** An adopted verdict enters the **exact same**
-  branch-on-`verdict` logic in Phase 0.5, including the low-confidence check: a
-  reused `MATCHES_EXISTING_MODIFIED`, `NEEDS_NEW_SPEC`, `NOT_SGE_SCOPE`, or
-  `matchConfidence: "low"` still pauses/blocks exactly as a freshly-forked one.
-  Intake runs governance-trace with `--no-comment`, so when pausing on an
-  adopted blocking verdict with no govtrace comment on the issue, post the block
-  rationale yourself.
+Phase 0.5 freshly classifies the current issue scope, using the existing
+inline-trivial classification or a fresh standard/critical fork. Never adopt
+`SGE_GOVTRACE_VERDICT`, readiness-report verdicts or comment-cached verdicts.
+No approval marker is required. See [`readiness.md`](readiness.md).
+`MATCHES_EXISTING_MODIFIED`, `NEEDS_NEW_SPEC`, `NOT_SGE_SCOPE` and low confidence
+still pause before writes; headless lanes report blocked. Spec-change/non-goal
+decisions and explicit authority for external writes remain unchanged.
 
 ## Async fork dispatch with join-on-verdict (#1264)
 
@@ -115,8 +95,8 @@ depend on the classification, so blocking on the fork before any of them wastes
 the full fork latency on the happy path (`MATCHES_EXISTING` /
 `NO_SPEC_WARRANTED`, the overwhelming majority). Instead:
 
-- **Dispatch, don't await.** Fire the `/sge:governance-trace` fork (or, on the
-  reuse path, resolve the front-loaded verdict) and *immediately* continue —
+- **Dispatch, don't await.** Fire a fresh `/sge:governance-trace` fork and
+  *immediately* continue —
   Phase 3 worktree creation, the Phase 2.5 scoped reads, the Phase 4 baseline run
   proceed in parallel with the fork rather than after it.
 - **This applies only on the fork path.** The **trivial** tier already classifies
@@ -195,11 +175,12 @@ the low-confidence check. `MATCHES_EXISTING_MODIFIED`, `NEEDS_NEW_SPEC`,
 any Edit/Write; headless writes `outcome: "blocked"`; standalone asks via
 AskUserQuestion.
 
-If Phase 0.5 used the **trivial inline** or **reused front-loaded** path, the
-verdict is already resolved — skip the join call and proceed directly.
+If Phase 0.5 used **fresh trivial inline** classification, the verdict is
+already resolved — skip the join call. Reject `cacheReused: true` fork results;
+rerun fresh classification before writes rather than trusting a comment cache.
 
 Record `governance: async fork joined, verdict <VERDICT>, specId <S>` (or
-`governance: inline trivial` / `governance: reused front-loaded`) in the Phase 3
+`governance: inline trivial`) in the Phase 3
 starting map.
 
 ## Headless completion contract (Phase 0.5 governance pause)

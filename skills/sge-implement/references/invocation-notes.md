@@ -10,4 +10,4 @@ Moved verbatim from `SKILL.md` (issue #2917, 24 KB size budget).
 
 ## Pipeline overview
 
-Pipeline: intake gate (−1) → governance-trace (0.5) → entry criteria (`/sge:sge-preflight`) → complexity sizing → TDD (`/sge:tdd-workflow`) → verify → forked review (`/sge:sge-review`) → commit + PR (`/sge:commit`) → PR-review + fix loop to `pr-reviewed` + auto-merge → post-merge L6 UPDATE.
+Pipeline: current issue/readiness checks → fresh governance-trace (0.5) → entry criteria (`/sge:sge-preflight`) → complexity sizing → TDD (`/sge:tdd-workflow`) → verify → forked review (`/sge:sge-review`) → commit + PR (`/sge:commit`) → PR-review + fix loop to `pr-reviewed` + auto-merge → post-merge L6 UPDATE. Each external action retains its normal authority boundary.

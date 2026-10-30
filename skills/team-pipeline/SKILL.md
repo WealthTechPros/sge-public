@@ -78,12 +78,12 @@ Every spawned Task states its token-budget target in its prompt — `impl-<N>` *
 
 > Dispatched impl agents follow three rules, always. The contract is **not** a
 > full `/sge:sge-implement` dispatch, but keeps its non-negotiable gates:
-> before building, every lane passes `intake-check.sh` and the governance-trace
-> gate, parking the issue `outcome: "blocked"` on a failed intake or a blocking
+> before building, every lane runs fresh governance classification and readiness
+> checks, parking the issue `outcome: "blocked"` on an independent blocker or a blocking
 > verdict/low-confidence match (Phase 3c Step 2). Speed comes from capping recon and deferring the full
 > battery — never from skipping governance.
 
-**Rule 1 — Capped reconnaissance:** orient only from the intake acMap file-map, no open-ended searches.
+**Rule 1 — Capped reconnaissance:** orient from the current issue and bounded source/AC file-map, optionally informed by readiness analysis; no open-ended searches.
 
 **Rule 2 — Draft PR on first commit.** After the **first commit** (even if
 partial), immediately `git push origin "${SGE_BRANCH_PREFIX:-fix/issue-}<N>"` and
@@ -220,14 +220,17 @@ stale queue. **Never omit this guard.** Store the result as an ordered array in
 `/tmp/team-pipeline-queue.json`. Exact discovery, dependency-gate, and reconcile
 commands: [mechanisms](references/mechanisms.md).
 
-### Phase 1.5 — Intake gate (MANDATORY, SPEC-126)
+### Phase 1.5 — Queue validation
 
-Once the queue is reconciled, keep **only** issues whose `scripts/intake-check.sh`
-passes; the rest are `awaiting-intake` in `failedIssues` — never claimed. The
-human-approved governance verdict travels in the intake record and each lane
-adopts it there (Phase 3c Step 2), so no per-lane fork runs for it; no lane is
-ever handed an `SGE_GOVTRACE_VERDICT` (never adopted — provenance unknown).
-Commands: [intake gate](references/mechanisms.md#intake-gate).
+Once reconciled, validate numeric entries and deduplicate, preserving dispatch
+labels, `/sge:build-ready-audit` and existing selection criteria. Incomplete ACs,
+open/unknown dependencies and unresolved decisions remain paused; never assume
+READY. Eligible labelled issues without a marker are dispatchable. Each lane
+runs fresh Phase 0.5 governance classification for its current scope.
+Never adopt `SGE_GOVTRACE_VERDICT` or comment-cached verdicts. Optional
+`/sge:issue-intake` is readiness analysis, including unattended, not authorisation.
+External writes, destructive/live actions and deployment retain explicit authority.
+Commands: [queue validation](references/mechanisms.md#queue-validation).
 **Same pass, run `resolve-tier.sh` per issue, store the result** (#2488) — [commands](references/mechanisms.md#per-lane-model-tier-2488).
 
 ---
@@ -265,10 +268,10 @@ budget target, the full **Lean Agent Contract** (Rules 1–3), and these Steps
 (full template: [dispatch-prompts](references/dispatch-prompts.md)):
 
 1. Export `SGE_AGENT_ID=impl-<N>` + `SGE_UNATTENDED=1` if unattended (#2487); cd worktree; read issue.
-2. **Intake + governance-trace gate (MANDATORY, before writing any code):** run
-   `intake-check.sh <N>` before any code — non-zero → `blocked` (`note:"intake: …"`);
-   file-map = its acMap. Adopt the record's verdict via `fork-util.mjs`
-   join, else run `/sge:governance-trace <N>` via `Agent`, never `Skill(args=)`
+2. **Fresh governance classification (MANDATORY, before writing any code):**
+   recheck current ACs, dependencies and linked PRs; partial merged slices cause
+   re-evaluation of remaining ACs, not human re-intake. Use the existing trivial-tier
+   inline classification or run `/sge:governance-trace <N>` via `Agent`, never `Skill(args=)`
    (#2452); branch per `/sge:sge-implement` Phase 0.5's *Headless completion contract*.
    MATCHES_EXISTING
    / NO_SPEC_WARRANTED / NOT_ONBOARDED with `matchConfidence` not low → proceed.
@@ -276,9 +279,11 @@ budget target, the full **Lean Agent Contract** (Rules 1–3), and these Steps
    `/tmp/team-pipeline-agent-<N>.json` (`"outcome":"blocked","prNumber":null`,
    `note:"governance-trace: <why>"`) and **terminate WITHOUT building** (Phase 4
    4a parks it; never auto-override). **Caller owns Step W (§2.4a, #1938):** on
-   adoption `create_entities` the adopted verdict, `path: intake`
+   inline-trivial classification `create_entities` the current verdict, `path: tier-gate`
    (fire-and-forget).
-   **Fork result contract (#2452):** no verdict JSON / no `issue` echo / issue-repo mismatch → blocked ([ref](references/dispatch-prompts.md)).
+   **Fork result contract (#2452):** `fork-util.mjs register` with issue/repo binding
+   then `join` before writes; no verdict JSON / missing issue or repo echo /
+   issue-repo mismatch → blocked ([ref](references/dispatch-prompts.md)).
 3. Implement the change (TDD per AC) per the Lean Agent Contract — draft PR on
    first commit (`Part of #<N>`; cross-repo `Part of owner/repo#<N>` — #2241), cheap inline
    gates, write the completion file (no self-reported token count, #857), no

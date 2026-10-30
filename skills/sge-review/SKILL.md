@@ -89,7 +89,7 @@ Classify as **lightweight** only when **all** of the following hold:
   `AclService`), `cookie`, `csrf`, `cors`, `oidc`, `saml`, `sso`,
   `encrypt`/`cipher`, `cert`/`tls`, `webhook`, `.env`, `.github/workflows/`,
   and the gate's own enforcement files: `hooks/`, `hooks.json`,
-  `intake-check`, `review-lib.sh`)
+  `linked-prs.sh`, `review-lib.sh`)
 - No changes to exported types, public API contracts, or shared-utility interfaces
   (a change used only within a single component is not a public contract change)
 - No changes to payment, billing, permission, or data-isolation logic

@@ -100,7 +100,7 @@ belief that nesting cannot work.
 If the `Agent` tool is genuinely unavailable in your toolset (not in your tool
 list, or the call is refused), record **every** audited issue as
 `DISPATCH_FAILED` with `dispatchError: "Agent tool unavailable in this
-context"` — a per-issue, visible failure, never a silent skip. The only
-adoptable precomputed verdict is the one in an issue's validated intake record
-(`scripts/intake-check.sh --govtrace-out`, SPEC-126); an orchestrator never
-passes one in, and `SGE_GOVTRACE_VERDICT` is never adopted.
+context"` — a per-issue, visible failure, never a silent skip. Run fresh
+classification for current scope; never adopt `SGE_GOVTRACE_VERDICT` or
+comment-cached verdicts. No approval marker is required. Preserve independent
+readiness blockers; failed dispatch is not READY.

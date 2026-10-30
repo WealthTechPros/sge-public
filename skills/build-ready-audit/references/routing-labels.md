@@ -9,7 +9,9 @@ Moved verbatim from `SKILL.md` (issue #2917, 24 KB size budget).
    verdicts do not stack.
 2. **READY issues get no verdict label** — their recorded state is `sge-ready`
    (which they already carry to have entered the audit). An unlabelled READY
-   issue gets its label from `/sge:issue-intake`, never from this audit.
+   issue remains subject to the repository's existing dispatch-label policy;
+   this audit does not automatically add that label. Optional readiness analysis
+   does not label or close it either. No approval marker is required.
 3. **TOO_LARGE issues get `needs-decomposition`** — the label already exists on
    this repo and is the recorded state for "route to `/sge:decompose-issue`".
    Leaving them bare would reopen the accumulation gap this step closes: an

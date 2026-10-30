@@ -26,8 +26,11 @@ front end over the raw list: discover via `/sge:available-issues`, reconcile
 `/sge:build-ready-audit` before any claim** — **READY** → queue, **NOT_READY** →
 drop (blocker in `failedIssues`; never lock/spawn), **TOO_LARGE** →
 `/sge:decompose-issue` (re-gate children, merge READY ones, never claim the
-parent). The [intake gate](mechanisms.md#intake-gate) drops every
-candidate without a passing `intake-check.sh` before any claim — no fallback. **Re-fill** when the queue runs low, only if
+parent). Preserve [queue validation](mechanisms.md#queue-validation), dispatch
+labels and existing selection criteria. Incomplete ACs, open/unknown dependencies
+and unresolved decisions stay paused; no always-READY fallback. Eligible labelled
+issues without a marker are dispatchable; lanes run fresh Phase 0.5 governance
+classification before writes. **Re-fill** when the queue runs low, only if
 `time_remaining >= MIN_AGENT_RUNWAY`. [Full steps + fallbacks](mechanisms.md).
 
 **Spawn gate overlay (Phase 3).** A new impl lane spawns only if `now < DEADLINE`
