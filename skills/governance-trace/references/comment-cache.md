@@ -9,6 +9,10 @@ Do **not** short-circuit in these cases (fall through to Step 1 as normal):
 
 - `--spec` (verify mode) was passed — the caller wants a fresh Step 3 requirement-change check against a specific spec; do not reuse a cached classify-mode verdict for it.
 - `--no-comment` was passed — the caller has opted out of the comment audit trail; honour that intent and do not read prior comments as a cache either.
+- A build caller (sge-implement, team-pipeline including lean/duration lanes,
+  issue-loop or an agent-template implementation lane) needs fresh classification
+  for current scope. Do not return a comment-cached verdict; run Step 0.6 or
+  Steps 1–5. Readiness reports are context, not authority.
 
 Otherwise, run the short-circuit check with the shared IO helper. `skills/lib/governance-cache.mjs check-fresh` does the whole decision in **one** command: it fetches the newest `## Governance trace` comment on the issue via `gh`, resolves each named governance artefact's **commit SHA** both now and as-of the comment's `createdAt` via `git log`, and reports whether every artefact is unchanged. This skill does **not** re-implement comment parsing or the freshness comparison — those live in the enabler modules (`scripts/govtrace-cache.mjs` pure primitives, #1261; `skills/lib/governance-cache.mjs` IO layer, #1337).
 
@@ -34,5 +38,4 @@ FRESH=$(echo "$DECISION" | jq -r .fresh)
 **d. On a cache miss (`fresh == false`, or no prior comment):** proceed to Step 0.6 (tier gate) and from there to Step 1.
 
 A short-circuited run does not change any downstream posting rule: the Step 6 rules — post by default, and `--no-comment` suppresses every comment for every verdict — apply only on the full-depth path (Step 6), which a cache hit never reaches. A cache hit posts nothing at all (the prior comment already carries whichever of those verdicts it recorded).
-
 

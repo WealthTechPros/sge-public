@@ -42,7 +42,7 @@ Pipeline overview: [invocation notes](references/invocation-notes.md#pipeline-ov
 ```
 
 - `--unattended` (or `SGE_UNATTENDED=1`): never end a turn with a question; resolve by the SPEC-093 three-tier policy — [`unattended-contract.md`](references/unattended-contract.md).
-- `--sentry <ID>`: production-bug pre-context from Sentry (attended hotfix intake: `/sge:issue-intake <N> --hotfix`, SPEC-126 DR8) — [`sentry-precontext.md`](references/sentry-precontext.md).
+- `--sentry <ID>`: production-bug pre-context from Sentry — [`sentry-precontext.md`](references/sentry-precontext.md). The same readiness and governance controls apply.
 
 **Invocation notes.** Run from the target checkout or apply [`gh-repo`](../gh-repo/SKILL.md) (Forgejo needs `SGE_FORGEJO_HOSTS`); a dispatching orchestrator must not run a second `/sge:pr-review`; `SGE_GATE_OWNER=pod` skips Phases 7/8. [Detail](references/invocation-notes.md).
 
@@ -62,17 +62,11 @@ Pipeline overview: [invocation notes](references/invocation-notes.md#pipeline-ov
 
 ---
 
-## Phase −1: Intake gate (SPEC-126, #2782)
-
-First, before any fork, worktree or code: `bash "$SGE_ROOT/scripts/intake-check.sh" <N> --govtrace-out "$(mktemp -d)/govtrace.json"` (exact sequence: intake-gate.md). It passes only for a fresh, unedited `## SGE intake` record by an allow-listed human deciding Build or Re-scope (`rescope` → build only its `scope`). Fails → **interactive:** run `/sge:issue-intake <N>` inline, then re-check; **headless:** `outcome: "blocked"` with the check's reason, stop. The record is never skipped; emergencies use `/sge:issue-intake --hotfix`. Detail: [`intake-gate.md`](references/intake-gate.md).
-
----
-
 ## Phase 0: Cortex pre-flight + route
 
 **Cortex lookup:** `search_nodes` first; on a miss `create_entities` (fire-and-forget); count `cortexHits`/`cortexMisses` ([detail](references/phase0-route.md#cortex-lookup)).
 
-**Step 0 — in-flight PR check (after Phase −1, before any fork).** Closed issue → stop. `scripts/linked-prs.sh <N>` finds an open PR → shepherd it, never open a second lane; exit 2 → stop, never read as "none". Detail: [`references/in-flight-check.md`](references/in-flight-check.md).
+**Step 0 — in-flight PR check (before any fork).** Closed issue → stop. `scripts/linked-prs.sh <N>` finds an open PR → shepherd it, never open a second lane; exit 2 → stop, never read as "none". Re-evaluate remaining acceptance criteria after a partial merged slice; do not rebuild completed work. Incomplete scope or unresolved dependencies remain blocked. Optional `/sge:issue-intake` can help map readiness, including unattended; no approval marker or reapproval is required. Detail: [`references/in-flight-check.md`](references/in-flight-check.md).
 
 **Reproduce-first (#2512).** Confirm on main before routing/coding; mismatch = stop + comment, no build. Detail: `references/reproduce-first.md`.
 
@@ -84,15 +78,15 @@ First, before any fork, worktree or code: `bash "$SGE_ROOT/scripts/intake-check.
 
 This phase **owns** the governance classification — folded in by default, not optional.
 
-**Size pre-score — the outermost gate (#1265, #1342).** Before *any* governance work, pre-score the issue body (no fork/preflight) → `{tier, score}`. **`LARGE`** → decompose first, children classified once via `/sge:build-ready-audit`'s #872 fold (parent fork skipped, not run-then-discarded); **`AMBIGUOUS`**/empty-body → full sequence; **`SMALL`**/**`MEDIUM`** → tier gate below. Precedence: size > tier > reuse > fork. Bash + thresholds: [`verdict-handling.md`](references/verdict-handling.md#size-pre-score--the-outermost-gate-1265-1342).
+**Size pre-score — the outermost gate (#1265, #1342).** Before *any* governance work, pre-score the issue body (no fork/preflight) → `{tier, score}`. **`LARGE`** → decompose first and audit the children (parent fork skipped, not run-then-discarded); each implementation lane classifies its current child scope. **`AMBIGUOUS`**/empty-body → full sequence; **`SMALL`**/**`MEDIUM`** → tier gate below. Precedence: size > tier > fork. Bash + thresholds: [`verdict-handling.md`](references/verdict-handling.md#size-pre-score--the-outermost-gate-1265-1342).
 
-**Pre-fork tier gate (skip the ~73k fork for trivial work).** Tier the issue's predicted paths with the same classifier Phase 2.5 uses: **`trivial`** classifies **inline** — no fork; **`standard`**/**`critical`** fall through to the full fork (CRITICAL never down-tiers). Contract: [`verdict-handling.md`](references/verdict-handling.md#pre-fork-tier-gate-inline-classification). **Caller owns Step W (SPEC-108 §2.4a, #1938):** the inline-trivial tier-gate and an adopted intake verdict never run `/sge:governance-trace`, so write Cortex directly — `create_entities` with `path: tier-gate` or `path: intake` (fire-and-forget). [`cortex-write.md`](../governance-trace/references/cortex-write.md).
+**Pre-fork tier gate (skip the ~73k fork for trivial work).** Tier the issue's predicted paths with the same classifier Phase 2.5 uses: **`trivial`** classifies **inline** for the current scope — no fork; **`standard`**/**`critical`** fall through to the full fork (CRITICAL never down-tiers). Contract: [`verdict-handling.md`](references/verdict-handling.md#pre-fork-tier-gate-inline-classification). **Caller owns Step W (SPEC-108 §2.4a, #1938):** the inline-trivial tier-gate never runs `/sge:governance-trace`, so write Cortex directly — `create_entities` with `path: tier-gate` (fire-and-forget). [`cortex-write.md`](../governance-trace/references/cortex-write.md).
 
-> **Orchestrator dispatch — do not double-dispatch governance-trace.** Phase 0.5 already runs the mandatory gate — the orchestrator must **not** *also* fire a parallel `/sge:governance-trace` on the same issue (doubles the ~75k cost; can block *after* coding started). To front-load verdicts, record them with `/sge:issue-intake` — the only adoptable source.
+> **Orchestrator dispatch — do not double-dispatch governance-trace.** Phase 0.5 owns fresh classification before writes; the orchestrator must **not** also fire a parallel classifier on the same issue.
 
-**Front-loaded verdict — intake record only (check BEFORE any fork).** If Phase −1 wrote a verdict file, adopt it via `fork-util.mjs register` + `join` (re-validates verdict value + issue/repo echo) and **do not re-run `/sge:governance-trace`**. `SGE_GOVTRACE_VERDICT` is **never** adopted — unverifiable provenance; ignore it and fork. **Reuse is not a bypass** — a reused blocking verdict still pauses before any code is written. Commands: [`intake-gate.md`](references/intake-gate.md#phase-05--adopt-a-verdict-only-from-the-intake-record).
+**Fresh classification, not cached authority.** `SGE_GOVTRACE_VERDICT` is **never** adopted. Do not adopt governance verdicts from issue comments, readiness reports or legacy approval records. Run fresh governance classification (or the inline-trivial classification above) for the current issue scope. Readiness is not authority for external writes, destructive actions, live access or deployment; those retain their explicit approval boundaries. See [`readiness.md`](references/readiness.md).
 
-If no intake verdict was adopted, dispatch `/sge:governance-trace <issue-number> [--spec SPEC-NNN]` as a **forked, headless** subagent — verify mode when a spec was cited/entered, else classify mode. **Thread the target repo into the fork prompt (SPEC-057, #1558)** — it must `cd`/`assert-repo` there before any read/write. It returns the Step-7 verdict object (`verdict`, `matchedSpec`, `matchConfidence`, `layers`, …).
+For standard/critical work, dispatch `/sge:governance-trace <issue-number> [--spec SPEC-NNN]` as a **forked, headless** subagent — verify mode when a spec was cited/entered, else classify mode. **Thread the target repo into the fork prompt (SPEC-057, #1558)** — it must `cd`/`assert-repo` there before any read/write. It returns the Step-7 verdict object (`verdict`, `matchedSpec`, `matchConfidence`, `layers`, …). Register and join through `fork-util.mjs`, bound to the current issue and repo, before the first Edit/Write; invalid or missing echoes block.
 
 > **Dispatch tool: `Agent`, never `Skill(args=)` (#2452)** — `Skill` inlines, not forks. **Fork result contract (#2452):** no verdict JSON / missing `issue` echo / issue-repo mismatch → blocking. Detail: [`orchestration.md`](references/orchestration.md#dispatch-tool--agent-never-skillargs-issue-2452).
 
@@ -157,7 +151,7 @@ Sibling worktree per [`worktrees`](../worktrees/SKILL.md) (`../<repo>-worktrees/
 
 ### JOIN gate — await governance verdict before any Edit/Write
 
-**Hard gate: no production file may be modified before the verdict is resolved and non-blocking.** If Phase 0.5 dispatched a fork async, join it and run the full Phase 0.5 verdict-branch logic; blocking verdicts halt execution, and trivial-inline/front-loaded paths skip the join. Bash command, exit codes, and starting-map record: [`references/orchestration.md#bash-sequence--register-and-join`](references/orchestration.md#bash-sequence--register-and-join).
+**Hard gate: no production file may be modified before the verdict is resolved and non-blocking.** If Phase 0.5 dispatched a fork async, join it and run the full Phase 0.5 verdict-branch logic; blocking verdicts halt execution, and only fresh trivial-inline classification skips the join. Reject `cacheReused: true` results and rerun fresh classification before writes. Bash command, exit codes, and starting-map record: [`references/orchestration.md#bash-sequence--register-and-join`](references/orchestration.md#bash-sequence--register-and-join).
 
 ### Step 2: Enabler work (technical foundation only, no TDD required)
 

@@ -46,7 +46,7 @@ for the constant/package rename that superseded the `sgd-init` entry above.
 | Skill | Command | Purpose |
 |---|---|---|
 | `sge-init` | `/sge:sge-init` | Interactive onboarding for a new product/repo — interviews the user, then proposes the SGE seed (Vision, capability model, anchor specs with Gherkin, ADR-0001, stakeholder questions) |
-| `sge-implement` | `/sge:sge-implement [N] [--unattended] [--sentry <ID>]` | End-to-end implementation of any issue (spec or no-spec) — intake gate, in-flight PR check, entry criteria, complexity sizing, TDD, review, PR. `--sentry` adds production-bug context; `--unattended` never stops to ask |
+| `sge-implement` | `/sge:sge-implement [N] [--unattended] [--sentry <ID>]` | End-to-end implementation of any issue (spec or no-spec) — in-flight PR check, governance classification, entry criteria, complexity sizing, TDD, review, PR. No separate build-intake approval. `--sentry` adds production-bug context; `--unattended` never stops to ask |
 | `sge-preflight` | `/sge:sge-preflight [SGD-NNN]` | Pre-implementation checklist — read spec, check deps, plan files |
 | `sge-review` | `/sge:sge-review [SGD-NNN]` | Review implementation against spec — acceptance criteria, degradation, patterns, quality gates |
 | `sge-align` | `/sge:sge-align [--apply]` | Bidirectional cascade alignment: forward (Vision → Capability → Spec → Tests → Code) raises a GitHub issue per drift gap; reverse reconciles existing open issues against current scope, proposing (and with `--apply`, closing/updating) when scope moves — idempotent, advisory-first, never auto-mutates human issues |

@@ -27,7 +27,7 @@ On a **Step 0.5 cache hit**, the same shape is returned from the reused comment,
 - `suggestedCapabilityModelEdit` — populated only when `layers.feature.status == "new"` or `layers.capability.status == "new"` (Step 5); `{ "path": "...", "description": "...", "yaml": "<block(s) to insert>" }`; `null` when the gap is spec-only.
 - `nonGoalConflict` — the quoted non-goal, only for `NOT_SGE_SCOPE`; `null` otherwise.
 - `commentPosted` / `commentUrl` — whether Step 6 actually posted (and where), so the caller doesn't re-post.
-- `cacheReused` — present and `true` only when Step 0.5 short-circuited on a fresh prior comment; absent/`false` on a full-depth run. A caller can treat a `cacheReused` verdict exactly as a fresh one (same routing signal), and `commentPosted` is always `false` for it (the audit comment already existed — no duplicate is posted).
+- `cacheReused` — present and `true` only when Step 0.5 short-circuited on a fresh prior comment; absent/`false` on a full-depth run. Non-build callers may use this routing signal; build callers must reject it and request fresh current-scope classification. `commentPosted` is always `false` for it (no duplicate comment).
 
 ## requirementChanges record
 

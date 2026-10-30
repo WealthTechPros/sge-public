@@ -1,17 +1,18 @@
 #!/usr/bin/env node
-// Next free spec id, counting ids reserved at intake (sge#2951).
+// Next free spec id, counting independent issue reservations (sge#2951).
 //
 // WHY. Parallel new-spec PRs used to collide on the next id: both took
 // "highest on disk + 1", and the second to merge had to renumber (#2939 ->
-// SPEC-131). /sge:issue-intake now reserves the id when it records a
-// NEEDS_NEW_SPEC issue's decision: it writes `reservedSpecId` into that
-// issue's `sge-intake:` marker. This script computes the id to reserve:
+// SPEC-131). A new-spec plan records `reservedSpecId` in the issue's
+// `sge-spec-reservation:` marker, independently of any approval. Legacy
+// intake reservations are read only to avoid reusing an outstanding id.
+// This script computes the id to reserve:
 //
 //   next = max(every spec number on disk, every id reserved by an open
-//              issue's newest intake marker) + 1
+//              issue's newest reservation marker) + 1
 //
 // and, with --issue N, hands back N's own reservation when it already holds one
-// that has not landed on disk yet (a re-intake keeps its id).
+// that has not landed on disk yet (a revised plan keeps its id).
 //
 // Spec homes: docs/specs/ (SPEC-NNN) and docs/sgd-build/specs/ (SGD-/SGE-NNN)
 // are ONE number line (docs/spec-numbering-supersession-map.md §1), so both
@@ -32,7 +33,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const SPEC_HOMES = ["docs/specs", "docs/sgd-build/specs"];
-const MARKER_OPEN = "<!-- sge-intake:";
+const MARKER_OPENS = ["<!-- sge-spec-reservation:", "<!-- sge-intake:"];
 const ID_RE = /^(?:SPEC|SGD|SGE)-(\d+)$/;
 
 /** Numbers a spec file name claims (handles NNN-to-MMM batch stubs). */
@@ -60,10 +61,14 @@ export function specNumbersOnDisk(repoRoot) {
   return [...nums].sort((a, b) => a - b);
 }
 
-/** Parse the JSON of the last `sge-intake:` marker in a comment body, or null. */
+/** Parse the last standalone or legacy reservation marker, or null. */
 function parseMarker(body) {
-  if (typeof body !== "string" || !body.includes(MARKER_OPEN)) return null;
-  const raw = body.split(MARKER_OPEN).pop().split("-->")[0];
+  if (typeof body !== "string") return null;
+  const marker = MARKER_OPENS
+    .map((open) => ({ open, at: body.lastIndexOf(open) }))
+    .sort((a, b) => b.at - a.at)[0];
+  if (marker.at < 0) return null;
+  const raw = body.slice(marker.at + marker.open.length).split("-->")[0];
   try {
     const obj = JSON.parse(raw);
     return obj && typeof obj === "object" ? obj : null;
@@ -73,8 +78,8 @@ function parseMarker(body) {
 }
 
 /**
- * Reservations held by issues: for each issue, its NEWEST intake marker (the one
- * intake-check.sh judges) decides; a newer marker with no reservedSpecId
+ * Reservations held by issues: for each issue, its NEWEST reservation marker
+ * decides; a newer marker with no reservedSpecId
  * releases an older one. A marker whose `issue` echo names a different issue,
  * or whose id is malformed, holds nothing.
  * @param {{number:number, comments:{body:string, createdAt:string}[]}[]} issues
@@ -112,11 +117,17 @@ export function nextSpecId({ existing, reserved, issue }) {
 export const formatSpecId = (n) => `SPEC-${String(n).padStart(3, "0")}`;
 
 function readIssuesViaGh(repo) {
-  const args = ["issue", "list", "--state", "open", "--limit", "1000",
-    "--search", "sge-intake in:comments", "--json", "number,comments"];
-  if (repo) args.push("--repo", repo);
-  const json = execFileSync("gh", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-  return JSON.parse(json);
+  const issues = new Map();
+  for (const term of ["sge-spec-reservation", "sge-intake"]) {
+    const args = ["issue", "list", "--state", "open", "--limit", "1000",
+      "--search", `${term} in:comments`, "--json", "number,comments"];
+    if (repo) args.push("--repo", repo);
+    const json = execFileSync("gh", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    const matches = JSON.parse(json);
+    if (!Array.isArray(matches)) throw new Error("issues source is not a JSON array");
+    for (const issue of matches) issues.set(issue.number, issue);
+  }
+  return [...issues.values()];
 }
 
 function main(argv) {
@@ -140,7 +151,7 @@ function main(argv) {
     issues = opts.issuesJson ? JSON.parse(readFileSync(opts.issuesJson, "utf8")) : readIssuesViaGh(opts.repo);
     if (!Array.isArray(issues)) throw new Error("issues source is not a JSON array");
   } catch (e) {
-    throw new Error(`cannot read intake reservations: ${e.message}`);
+    throw new Error(`cannot read spec reservations: ${e.message}`);
   }
   const id = nextSpecId({
     existing: specNumbersOnDisk(opts.repoRoot),

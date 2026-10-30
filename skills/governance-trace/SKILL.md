@@ -127,17 +127,23 @@ The cortex **write** is not conditional on this lookup's outcome — see [Step W
 
 **This step is not optional and not a tail of Step 5.** Before returning the Step 7 JSON, on **every** terminal path this skill can exit through, call `create_entities` with the verdict.
 
-Exit paths that write (incl. cache hit, tier gate, `NOT_ONBOARDED`, caller-adopted verdict) and reinforcement: [`references/cortex-write.md`](references/cortex-write.md#step-w-exit-paths).
+Exit paths that write (incl. cache hit, tier gate, `NOT_ONBOARDED`, caller-owned fresh inline classification) and reinforcement: [`references/cortex-write.md`](references/cortex-write.md#step-w-exit-paths).
 
 **Closed vocabulary.** Observations are enums, spec ids, and timestamps only — never issue titles, bodies, or comment text.
 
-Write shape, exemptions, front-loaded ownership, and the full regression history: [`references/cortex-write.md`](references/cortex-write.md). Fire-and-forget — never fail a classification because the write failed. Regression gate: `scripts/cortex-write-gate.mjs` (SPEC-108 §2.5).
+Write shape, exemptions, fresh inline ownership, and the full regression history: [`references/cortex-write.md`](references/cortex-write.md). Fire-and-forget — never fail a classification because the write failed. Regression gate: `scripts/cortex-write-gate.mjs` (SPEC-108 §2.5).
 
 ---
 
 ## Step 0.5: Comment-cache short-circuit (skip the fork when a fresh verdict exists)
 
 Before the expensive Steps 1-5 fork (~10-15 min, ~70k tokens; #1258), reuse a prior `## Governance trace` comment **only when its validity can be proven** - otherwise fall straight through to Step 1 at full depth. The gate stays authoritative; the cache only avoids re-running it. Preconditions, staleness rules and the cache-hit return shape: [`comment-cache.md`](references/comment-cache.md).
+
+**Build callers require fresh classification.** When invoked by sge-implement,
+team-pipeline (including lean/duration lanes), issue-loop or an agent-template
+implementation lane, skip this comment-cache short-circuit. Classify current
+scope via Step 0.6 or Steps 1–5. Never return `cacheReused: true` to authorise
+build writes; comments and readiness reports are context, not verdict authority.
 
 ---
 

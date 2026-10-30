@@ -79,23 +79,15 @@ Two distinct exemption classes write nothing:
 
 Every other terminal path writes.
 
-## Front-loaded verdicts — the caller owns the write
+## Fresh inline classification — the caller owns the write
 
-A **front-loaded verdict** is one recorded before the build rather than derived
-here: the `govtrace` in a validated `## SGE intake` record (SPEC-126), which
-`/sge:sge-implement`'s Phase 0.5, team-pipeline's lanes and agent-template
-orchestrators adopt — *skipping the fork entirely*. A bare
-`SGE_GOVTRACE_VERDICT` is no longer adopted anywhere (#2782, #2793).
-
-On that path **this skill never executes**, so it cannot write. The obligation
-does not vanish with it — the **adopting caller** owns the Step W write
-(`path: intake`, reinforcing the existing entity; `path: front-loaded` is the
-retired env-verdict path, kept in the vocabulary for existing entities). SKILL.md's Step W
-table records the contract; the caller-side wiring (#1938) lives in
-`/sge:sge-implement` Phase 0.5 (the intake-adopted path, `path: intake`, and, with
-`path: tier-gate`, the inline-trivial tier gate), `/sge:team-pipeline`'s
-implementation lane, and the `agent-template` lane-side guard (the reference
-contract for custom fan-out orchestrators).
+Builders freshly classify current scope. Never adopt `SGE_GOVTRACE_VERDICT`
+or comment-cached governance verdicts. The existing inline-trivial tier gate
+can avoid a fork, but still owes a caller-owned Step W write with
+`path: tier-gate`. The full fork writes its own Step W. This applies to
+`/sge:sge-implement` Phase 0.5, team-pipeline lanes and agent-template custom
+orchestrators. Historical `front-loaded` and `intake` path values remain in
+the closed vocabulary solely to read old entities, not as new adoption paths.
 
 This is the original #1664 defect one level up: an optimisation that skips the
 work also skips the memory of the work, and nothing in the skipped code can
@@ -120,9 +112,9 @@ Moved verbatim from `SKILL.md` Step W (issue #2917, 24 KB size budget).
 | **Step 0.5 comment-cache hit** | **reinforce** — same entity, `cacheReused: true` in the observation |
 | **Step 0.6 trivial-tier gate** (`NO_SPEC_WARRANTED` inline) | **reinforce/create** — with the `tierGate` marker |
 | **`NOT_ONBOARDED` early return** (Step 1, skips Steps 2–5) | create/reinforce — `path: not-onboarded` |
-| Front-loaded verdict adopted by the caller | create/reinforce — the adopted verdict |
+| Fresh inline classification by the caller | create/reinforce — current verdict, `path: tier-gate` |
 
-On the **front-loaded** path this skill never executes, so the **adopting caller** owns the write (wired in `/sge:sge-implement` Phase 0.5 and `/sge:team-pipeline`'s lane; #1938). Two exemption classes write nothing and must not be conflated: **no verdict produced** (`NO_TARGET_ISSUE`), and **verdict produced but the write is impossible** (sge-memory unavailable — skip silently; a memory failure must never block the gate).
+On the **fresh inline** path this skill never executes, so the **classifying caller** owns the write (wired in `/sge:sge-implement` Phase 0.5 and `/sge:team-pipeline`'s lane; #1938). Two exemption classes write nothing and must not be conflated: **no verdict produced** (`NO_TARGET_ISSUE`), and **verdict produced but the write is impossible** (sge-memory unavailable — skip silently; a memory failure must never block the gate).
 
 **Reinforcement, not duplication.** `create_entities` on an existing entity name is *already* an upsert that bumps `reinforcement_count` and `current_confidence` — keep the name stable (`govtrace-<owner>-<repo>-<issue>`) and let the store reinforce. Never guard the write with an existence check.
 

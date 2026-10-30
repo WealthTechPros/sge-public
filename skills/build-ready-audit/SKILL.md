@@ -20,9 +20,11 @@ both together: callers make **one skill hop, not two** (issue #872).
 - Implementing any issue
 - Writing to the repo beyond routing verdict labels (Step 3R) and optional
   comments. Governance runs headlessly (`--no-comment`, Step 2G).
-- Approving an issue for the build queue or writing the dispatch label — that
-  is `/sge:issue-intake`, the only approval path (SPEC-126 §2 item 5; the old
-  `--apply-sge-ready` flag was removed in #2915).
+- Granting authority to build, access live systems or deploy. Readiness is not
+  authorisation. Preserve source-owned routing labels (Step 3R) and existing
+  dispatch-label policy; optional `/sge:issue-intake` does not write that label.
+  External writes retain explicit authority. The former `--apply-sge-ready`
+  flag remains removed.
 
 Fast, read-only triage that classifies each GitHub issue **build-ready** vs
 **needs-spec** (vs **too-large**) — and, unless `--skip-governance` is passed,
@@ -369,7 +371,7 @@ Field semantics (incl. the audit-only `DISPATCH_FAILED` sentinel, always hold-fo
 
 ## Related Skills
 
-- `/sge:issue-intake` — the only path that approves an issue and writes the dispatch label
+- `/sge:issue-intake` — optional readiness and AC mapping, usable unattended; no automatic labels, closure or approval marker
 - `/sge:governance-trace` — the SGE five-way governance classifier; **folded into this audit's Step 2G** (opt-out with `--skip-governance`), and still runnable standalone for a governance-only check
 - [`gh-repo`](../gh-repo/SKILL.md) — the shared cross-repo / hub-dispatch repo-targeting convention every `gh` call in this audit follows
 - Also: `/sge:available-issues`, `/sge:team-pipeline --duration`, `/sge:decompose-issue`, `/sge:sge-preflight`, `/sge:sge-implement`, `/sge:deep-dive` — see [`references/related-skills.md`](references/related-skills.md).
