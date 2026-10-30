@@ -167,6 +167,39 @@ zero usage. Use Copilot's own usage
 reporting instead. See [`token-metering.md`](token-metering.md) for the
 details and for how to measure Cortex savings.
 
+## Deploying where Anthropic models are not permitted
+
+Copilot CLI is the usual SGE surface in organisations that exclude
+Anthropic/Claude models from their network and data. The component scope that
+makes that work (see
+[`external-install.md`](external-install.md#deploying-where-anthropic-models-are-not-permitted)
+for the full statement):
+
+- **Client-side, model-agnostic:** the plugin payload (skills/agents/hooks —
+  prose + helper scripts with no model access of their own; they run on
+  whatever model your Copilot CLI is configured to use) and the `sge-memory`
+  server (local Node + SQLite, no model calls, no network egress). WTP's
+  skill portability audit (July 2026; available to clients on request) found
+  no functional hard-coded model IDs in any skill prompt body.
+- **WTP-internal only, never deployed to clients:** the review daemon
+  (PR Warden), which embeds the Claude Code CLI
+  (`@anthropic-ai/claude-code`) in its container image and **must not be
+  deployed** in a no-Anthropic environment; plus WTP's CI workflows and docs
+  site.
+
+**Disable Anthropic models in Copilot policy** so "no Anthropic" is enforced
+rather than assumed — the Copilot model picker can otherwise offer Claude
+models to your engineers. An organization owner sets this on GitHub.com under
+**Organization settings → Copilot → Models** (each model beyond the base
+models, including the Anthropic Claude family, has its own availability
+policy); in an enterprise, policies are set at the enterprise level first
+(the enterprise **AI controls** tab) and an enterprise-set policy cannot be
+overridden by an organization. Also set the policy governing *unconfigured*
+generally-available models so newly released Anthropic models do not default
+to enabled. Verified against GitHub's documentation on 2026-10-30:
+[Managing policies for Copilot in your organization](https://docs.github.com/en/copilot/how-tos/administer-copilot/manage-for-organization/manage-policies)
+and [GitHub Copilot policies](https://docs.github.com/en/copilot/concepts/policies).
+
 ## Compatibility notes
 
 - Everything **upstream of install** (marketplace fetch, plugin install,

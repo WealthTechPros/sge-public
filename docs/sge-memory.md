@@ -37,8 +37,11 @@ runs the **vendored bundle** — no `npx`, no runtime fetch:
 ```
 
 - `dist/sge-cortex.bundle.mjs` is a committed, single-file esbuild bundle. It
-  has **zero runtime `node_modules`** (`@modelcontextprotocol/sdk` is bundled in;
-  `node:sqlite` is a Node core module). It runs in any checkout with no install.
+  has **zero runtime `node_modules`** (its two third-party direct dependencies,
+  `@modelcontextprotocol/sdk` and the `@libsql/client` web driver, are bundled
+  in — `mcp/sge-cortex/THIRD_PARTY_NOTICES` lists the full transitive set with
+  licence texts; `node:sqlite` is a Node core module). It runs in any checkout
+  with no install.
 - `${CLAUDE_PLUGIN_ROOT}` is substituted in plugin context (the install case —
   including when you work in this repo with the `sge` plugin installed). Claude
   Code does **not** substitute it in a project-scoped `.mcp.json` and the

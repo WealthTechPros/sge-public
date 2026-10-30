@@ -166,6 +166,80 @@ retained usage custody, see:
 
 - [`vendor-independence-and-data-custody.md`](vendor-independence-and-data-custody.md)
 
+## Deploying where Anthropic models are not permitted
+
+Some organisations exclude Anthropic/Claude models from their network and
+their data entirely. SGE supports that deployment: the parts of SGE that run
+on your machines call no model of their own, and the one SGE component that
+does embed Anthropic tooling never leaves WealthTech Pros' infrastructure.
+
+**What runs client-side (and is model-agnostic):**
+
+- **The plugin payload** — skills, agents and hooks. These are prose
+  instructions plus shell/Node helper scripts. They contain no model access of
+  their own and execute inside whichever agent CLI your organisation licenses
+  (e.g. GitHub Copilot CLI), using whatever model that CLI is configured to
+  use. WTP's skill portability audit (July 2026; available to clients on
+  request) verified there are **no functional hard-coded model IDs** in any
+  skill prompt body — the skills "prefer Anthropic, function on any model".
+- **The memory server (`sge-memory` / sge-cortex)** — a local Node process
+  over a local SQLite file. It makes no model calls and has no network
+  egress.
+
+**What is WTP-internal only (never deployed to clients):**
+
+- **The review daemon (PR Warden)** — depends on the Claude Agent SDK and
+  bakes the Claude Code CLI (`@anthropic-ai/claude-code`) into its container
+  image. **It must not be deployed in an environment where Anthropic models
+  are not permitted**, and it is not part of the client distribution in any
+  environment: it runs only on WealthTech Pros infrastructure.
+- **CI workflows and the documentation site** — WTP-internal tooling, not
+  part of what you install.
+
+**Make "no Anthropic" a policy, not a convention.** If your engineers use
+GitHub Copilot, the Copilot model picker can offer Anthropic Claude models
+unless an administrator disables them. We recommend your GitHub administrator
+disables the Anthropic model policies: on GitHub.com, an organization owner
+sets this under **Organization settings → Copilot → Models**, where each
+model beyond the base models (including the Anthropic Claude family) has its
+own availability policy; in an enterprise, Copilot policies are set at the
+enterprise level first (the enterprise **AI controls** tab) and an
+enterprise-set policy cannot be overridden at organization level. Also check
+the policy that controls whether *unconfigured* generally-available models
+default to enabled, so newly released Anthropic models do not appear
+automatically. Verified against GitHub's documentation on 2026-10-30:
+[Managing policies for Copilot in your organization](https://docs.github.com/en/copilot/how-tos/administer-copilot/manage-for-organization/manage-policies)
+and [GitHub Copilot policies](https://docs.github.com/en/copilot/concepts/policies)
+— the exact UI labels move occasionally, so confirm against those pages when
+you apply the setting.
+
+## Supply-chain assurance: skill security scanning
+
+Everything the plugin distributes to your machines — the skills, the agent
+definitions, the hooks, and the shipped MCP configuration — is statically
+scanned for the vulnerability classes that matter in LLM-executed artefacts
+(prompt-injection vectors, data-exfiltration patterns, dangerous inline code)
+by **two independent scanners** before any change can merge:
+
+- **NVIDIA SkillSpector** — run static-only over every skill and the shipped
+  `.mcp.json`.
+- **Cisco AI Defense Skill Scanner** — a second, independent static leg over
+  the skills (including a cross-skill overlap/relay analysis) plus the agent
+  and hook payloads.
+
+Both run as **blocking CI gates** on every pull request that touches the
+plugin payload: a critical- or high-severity finding fails the check, naming
+the file and the finding, unless it carries an explicit, dated, authored
+waiver in an audited registry — the gate is never disabled to pass a finding,
+and a scan that fails to produce a report fails the check rather than letting
+an unscanned change through. Both scanners are version-pinned and run only
+their local static analyzers: no code from your repositories, and no scanned
+content, is sent to any external service by the scanning pipeline.
+
+This does not make the plugin "verified safe" — no static scanner can promise
+that — but it does mean every distributed change has passed two independent,
+fail-closed static gates with an auditable waiver trail.
+
 ## Licence
 
 SGE is commercial software. Use is governed by the licence file published

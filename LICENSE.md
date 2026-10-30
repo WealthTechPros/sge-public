@@ -2,10 +2,11 @@
 
 SPDX-License-Identifier: LicenseRef-WTP-SGE-Commercial
 
-Copyright (c) 2026 WealthTech Pros Ltd. All rights reserved.
+Copyright (c) 2026 Wealth Tech Professionals Limited. All rights reserved.
 
 This repository contains the SGE platform distribution (the "Software") of
-WealthTech Pros Ltd ("WTP").
+Wealth Tech Professionals Limited (Company No. 17412331), trading as
+WealthTech Pros ("WTP").
 
 ## 1. Grant
 
