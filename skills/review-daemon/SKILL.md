@@ -152,7 +152,7 @@ cause (heartbeat posting failure, unexpectedly long reviews) should be fixed.
 | `REVIEW_DAEMON_CLAIM_TTL_SECONDS` | `2700` | Daemon's fallback reclaim TTL for label-only (pre-#1312) claims. |
 | `REVIEW_DAEMON_REPO` | unset | `owner/repo` single-repo mode. Wins over `REVIEW_DAEMON_ORGS` and App-scope enumeration. Mandatory on the PAT path. |
 | `GITHUB_APP_INSTALLATION_ID` | unset | The single App installation polled when `REVIEW_DAEMON_ORGS` is unset (legacy / default mode). Not read in multi-org mode. |
-| `REVIEW_DAEMON_ORGS` | unset | Comma-separated account logins (e.g. `WealthTechPros,Professional-Performance-Portfolio`): the **explicit allowlist** of App installations to poll, one installation token each. Unset/blank = single-installation mode (`GITHUB_APP_INSTALLATION_ID`). Requires App auth. See [Multiple orgs](#multiple-orgs). |
+| `REVIEW_DAEMON_ORGS` | unset | Comma-separated account logins (e.g. `WealthTechPros`): the **explicit allowlist** of App installations to poll, one installation token each. Unset/blank = single-installation mode (`GITHUB_APP_INSTALLATION_ID`). Requires App auth. Logins in `github_app_token.NEVER_POLL_ORGS` (e.g. `Professional-Performance-Portfolio`, dropped 2026-10-30 per sge#3204) are dropped even when listed here. See [Multiple orgs](#multiple-orgs). |
 
 ---
 
@@ -174,6 +174,16 @@ installation.
 - **Never add a client org.** Client orgs the App is installed on for other
   purposes (e.g. `MultreesInvestorServices`) must never appear in
   `REVIEW_DAEMON_ORGS`. Adding an org is an owner decision, not a config tweak.
+- **Never-poll set.** Logins in `github_app_token.NEVER_POLL_ORGS` are dropped
+  at selection time even when allowlisted, with the recorded decision in the
+  startup log (`[token] dropping installation for account '<login>' ...`), and
+  `REVIEW_DAEMON_REPO` refuses a repo in such an org.
+  `Professional-Performance-Portfolio` was dropped from the repo set on
+  2026-10-30 (sge#3204): the wtp-sge App cannot read its commit statuses
+  (every statuses GET returned 403) and PPP merges stay the owner's call per
+  sge#3019 — the owner decided to drop the org rather than grant the App
+  `Commit statuses: read`. Re-adding it needs both the code entry removed and
+  the permission granted, by owner decision.
 - **Per-installation tokens.** Every GitHub call for a repo — polling,
   claim/labels, comments, verdicts — uses that repo's own installation token,
   and a dispatched review receives (`GH_TOKEN` / `SGE_REVIEW_APP_TOKEN`) only
@@ -357,6 +367,32 @@ Each record is one `os.write` of one line (< 4096 bytes, PIPE_BUF) to a file
 opened `O_APPEND`, so concurrent workers never interleave. It never contains PR
 content, prompts, dispatch output or secrets. A write failure is logged and
 never reaches the dispatch path.
+
+**Per-cycle status snapshot (`cycle-status.json`, sge#3204).** Each
+**completed poll cycle** atomically replaces one sidecar snapshot file —
+`$PR_WARDEN_CYCLE_STATUS`, else `$REVIEW_DAEMON_LOG_DIR/cycle-status.json`,
+else not written. It is the truthful input for the ops_health status feed
+(tracked privately), which previously accumulated `needs_human` flags forever (32 of
+35 listed PRs were already merged/closed on 2026-10-25) and showed a stale
+`restarted (dead)` state. Deliberately **not** a runs.jsonl record kind:
+runs.jsonl's contract above is "one line per completed dispatch, last line =
+last dispatch" (the supervisor's `pw_compute_last_dispatch` is `tail -n1`),
+and a per-cycle append would make the last line a cycle record almost always.
+runs.jsonl is untouched by this feature. Snapshot fields (`kind` is `cycle`,
+`ts` the write time):
+
+| Field | Type | Meaning |
+|---|---|---|
+| `state` | string | always `running` — written only by a completing cycle, so a fresh snapshot after a restart IS the live state |
+| `eligible` | int | candidates this cycle considered for dispatch |
+| `dispatched` | int | changes actually dispatched this cycle |
+| `held` | int | open PRs this cycle's poll saw under `needs-human`/`hold`/`do-not-merge`/`blocked` |
+| `needs_human_prs` | list | those PRs as `owner/repo#N` — **verified open + still labelled by this same cycle's poll**, rebuilt every cycle, never accumulated; capped at 40 entries (`held` keeps the full count) |
+| `idle_reason` | string or null | why nothing was dispatched (e.g. `idle: 0 eligible, 3 held (needs-human)`), also logged beside the dispatch line; null on a dispatching cycle |
+
+A feed that surfaces `needs_human_prs` or `state` should read this snapshot
+(checking `ts` freshness against the poll interval) instead of accumulating
+per-dispatch `needs_human` flags.
 
 ## Org-wide poll and quiet hold logging (2026-09-28)
 

@@ -1,8 +1,8 @@
 {
   "name": "sge",
-  "version": "4.38.62",  "description": "Specification-Governed Engineering (SGE) methodology plugin — shared workflow skills for spec-governed repos",
+  "version": "4.38.64",  "description": "Specification-Governed Engineering (SGE) methodology plugin — shared workflow skills for spec-governed repos",
   "author": {
-    "name": "WealthTech Pros",
+    "name": "Wealth Tech Professionals Limited, trading as WealthTech Pros",
     "url": "https://wealthtechpros.com"
   },
   "repository": "https://github.com/WealthTechPros/sge-public",
