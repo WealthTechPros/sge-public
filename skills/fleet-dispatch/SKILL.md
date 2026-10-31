@@ -121,7 +121,7 @@ done
 
 ### Dispatch-label inheritance — per fleet member
 
-Each fleet member may declare a `dispatch-label:` key in its own `CLAUDE.md` (e.g. `dispatch-label: sge-ready`). `/sge:available-issues` reads this per-repo when it runs the per-repo Phases 1–4 pass inside `--fleet` mode — the label filter is applied inside that member's pass only, with no cross-repo spillover. fleet-dispatch never reads or overrides per-repo dispatch labels; it inherits them transparently through the `available-issues --fleet` contract. A fleet member with no declared label keeps the current unlabelled-pool behaviour (backwards-compatible).
+Each fleet member may declare a `dispatch-label:` key in its own `CLAUDE.md` (e.g. `dispatch-label: sge-ready`). `/sge:available-issues` reads this per-repo when it runs the per-repo Phases 1–4 pass inside `--fleet` mode — the label filter is applied inside that member's pass only, with no cross-repo spillover. fleet-dispatch never reads or overrides per-repo dispatch labels; it inherits them transparently through the `available-issues --fleet` contract. A fleet member with no declared label is filtered on the fleet default `sge-ready` (`--fleet` is autonomous; `issue-read.sh dispatch-label --autonomous`, #3243), never listed unfiltered.
 
 ---
 

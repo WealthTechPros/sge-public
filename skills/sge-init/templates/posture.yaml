@@ -50,10 +50,18 @@
 #                    exceptions.  A block list; each entry is ONE quoted line:
 #                      - "<gate> | <reason> | <approver> | <YYYY-MM-DD expiry>"
 #                    gate: commit-msg | tdd-guard | require-commit-trailer |
-#                          require-test-evidence | branch-protection
+#                          require-test-evidence | branch-protection |
+#                          governance-record | merge-review
 #                    approver: the GitHub login that approved it.
 #                    Commit-level overrides keep the SGE-Override: trailer.
 #                    Read it with scripts/read-enforcement-profile.sh.
+#
+# required_approvals (optional, SPEC-128) a DECLARATION that the base
+#                    branch's policy requires this many approving reviews
+#                    before merge (maker-checker).  The merge-review gate
+#                    verifies the real policy where its CI token can read it
+#                    (GitHub rulesets) and otherwise accepts this declaration,
+#                    reporting it as DECLARED ONLY.  A plain integer, 1 or more.
 #
 # Format: plain YAML — parsed by the reviewer-posture checks and
 # scripts/read-enforcement-profile.sh using dependency-free awk/grep/bash
@@ -70,5 +78,6 @@
 # review_independence: declared-exception
 # reviewer_identity: <github-login-of-dedicated-reviewer-bot>
 # enforcement: onboarding
+# required_approvals: 1
 # enforcement_exceptions:
 #   - "require-test-evidence | legacy importer has no harness yet | <approver-login> | 2026-12-31"

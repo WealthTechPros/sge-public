@@ -68,6 +68,9 @@
 #   jira-adapter.sh view-item <issueKey>                                 (read, P2)
 #       GET one work item's fields (summary, description, labels, assignee,
 #       status, issuelinks). Prints the Jira JSON.
+#   jira-adapter.sh item-comments <issueKey>                             (read)
+#       Every comment on the item (startAt pagination; fails closed on a
+#       malformed page or the page cap) as one JSON array of Jira comment objects.
 #   jira-adapter.sh item-dependencies <issueKey>                         (read, P7)
 #       Print, one per line, `<KEY>\t<open|closed>` for every issue this item
 #       is blocked by (link type "is blocked by"), state resolved via status
@@ -483,6 +486,28 @@ _ja_main() {
       [ -n "${2:-}" ] || _ja_usage 'view-item needs <issueKey>'
       _ja_require_issue_key "$2" || exit 1
       _ja_api_get "/rest/api/2/issue/$2?fields=summary,description,labels,assignee,status,issuelinks"
+      ;;
+    item-comments)
+      # P2b — every comment on one work item (paginated by startAt/total), as
+      # ONE JSON array of the raw Jira comment objects. Read-only. A malformed
+      # page or the page cap fails closed: a truncated list is never returned.
+      [ -n "${2:-}" ] || _ja_usage 'item-comments needs <issueKey>'
+      _ja_require_issue_key "$2" || exit 1
+      command -v jq >/dev/null 2>&1 || { _ja_err "jq not found — required for item-comments"; exit 1; }
+      local raw page all='[]' start=0 total p
+      for (( p=0; p<20; p++ )); do
+        raw="$(_ja_api_get "/rest/api/2/issue/$2/comment?startAt=$start&maxResults=100")" || exit 1
+        page="$(printf '%s' "$raw" | jq -c 'if type == "object" and (.comments | type) == "array" and (.total | type) == "number" then . else error("malformed") end' 2>/dev/null)" \
+          || { _ja_err "item-comments: malformed comments payload"; exit 1; }
+        all="$(printf '%s\n%s\n' "$all" "$(printf '%s' "$page" | jq -c .comments)" | jq -cs '.[0] + .[1]')" || exit 1
+        total="$(printf '%s' "$page" | jq -r .total)"
+        start="$(printf '%s' "$all" | jq 'length')"
+        if [ "$start" -ge "$total" ] || [ "$(printf '%s' "$page" | jq '.comments | length')" -eq 0 ]; then
+          printf '%s\n' "$all"; exit 0
+        fi
+      done
+      _ja_err "item-comments: page cap reached — comment set may be truncated; refusing"
+      exit 1
       ;;
     item-dependencies)
       # P7 — the resolved "is blocked by" set with each dependency's state,

@@ -139,6 +139,76 @@ every session with no retry/backoff and no user-visible error is a rough
 edge worth reporting upstream to the Copilot CLI team too, independent of
 SGE.
 
+## Hooks on Windows: "Denied by preToolUse hook from sge (hook errored)"
+
+Every SGE hook runs through `hooks/run-hook.cmd`, a launcher that finds a real Git Bash itself instead of trusting `bash` on PATH (sge#3264). Before it, a PATH whose first `bash` was `C:\Windows\System32\bash.exe` (the WSL launcher) or the WindowsApps stub made every hook exit 1, and the fail-closed PreToolUse hook then denied every edit and PowerShell call. The launcher skips those launchers and needs Git for Windows installed. If no working bash is found it still fails closed (exit 2), with stderr naming the hook script, what it tried and the remedy. Hooks stay on; a hook that cannot run is never treated as a pass.
+
+## Worktree lifecycle hooks (SPEC-139, best-effort)
+
+`hooks/copilot/worktree-lifecycle.sh` is a Copilot CLI adapter for the
+worktree-preservation family (epic #3216, SPEC-139 — an internal spec, not
+published here).
+It is **best-effort and never destructive**: it registers the session's linked
+worktree in the shared ownership registry, records a heartbeat and the end of
+the session, calls the checkpoint hook point (`skills/lib/checkpoint.sh`, when
+the #3234 slice provides it), and at the next *new* session start tells the
+agent which owned worktrees earlier sessions left open, each with its shared
+audit verdict. It never deletes, stashes, resets, commits, pushes, unregisters
+or opens a PR, never releases another session's claim, and never writes prompt
+text, file contents or secrets to its state or logs. Nothing it prints means
+"backed up" or "safe to remove".
+
+### Install (user-level hook file)
+
+Copilot CLI loads one hook source per plugin, and the plugin's
+`hooks/hooks.json` is the Claude PascalCase file, so the camelCase Copilot
+definition is installed as a separate hook source (Copilot combines sources):
+
+```
+bash <plugin>/hooks/copilot/install-worktree-lifecycle-hooks.sh        # -> ~/.copilot/hooks/sge-worktree-lifecycle.json
+bash <plugin>/hooks/copilot/install-worktree-lifecycle-hooks.sh --uninstall
+```
+
+The file embeds this plugin copy's absolute path: re-run the installer after a
+plugin update moves the install directory. `--dest <dir>` writes it elsewhere
+(for example `<repo>/.github/hooks`). Installing it from more than one source
+is safe: duplicate events are deduplicated per session.
+
+### Observed behaviour (Copilot CLI 1.0.105, Windows, headless `-p` runs)
+
+| Situation | Observed |
+|-----------|----------|
+| Startup | `sessionStart` fires with `source: "new"`; payload is camelCase (`sessionId`, `cwd`, `initialPrompt`). Flat `{"additionalContext": "..."}` stdout reaches the model; `hookSpecificOutput` and plain stdout did not. |
+| Resume (`--resume`) | `sessionStart` fires again with `source: "resume"` and the same `sessionId`. The adapter prints no handoff. |
+| Normal completion | `agentStop` at the end of each turn (with `stopReason`, `stop_hook_active`), then `sessionEnd` with `reason: "complete"`. `-p` and piped runs fire `sessionEnd` once per completed turn. |
+| Hook timeout | A hook over its `timeoutSec` is killed and Copilot logs "timed out; allowing processing to proceed". The other hooks and the session continue. |
+| Forced termination | Killing the Copilot process mid-turn fires neither `agentStop` nor `sessionEnd`. The registry entry and heartbeat survive, and the next start reports the session as "interrupted: no clean end recorded" once its heartbeat is older than `SGE_LIFECYCLE_STALE_SECS` (default 1800). |
+| Duplicate sources | Two hook files for the same event both run. The adapter does the work once (per-session lock and a 10 s dedupe window): one registry entry, one checkpoint call, one handoff. |
+| Interactive exit and `/clear` | **Not observed.** Headless runs cannot drive them. Per the Copilot CLI changelog `/clear` runs `sessionEnd` hooks, in the background, and `sessionEnd` output is not processed; the adapter does not rely on either. |
+
+### Known gaps (reported, not hidden)
+
+- Without `skills/lib/checkpoint.sh` nothing is copied: the state records
+  `checkpoint=unavailable` and the handoff says so. Even with it, the adapter
+  records only the exit status, never coverage.
+- A later session that merely reuses a worktree registered to an earlier
+  session does not take ownership (a foreign claim is never overwritten), so
+  its interruption is not reported under its own id; the worktree is still
+  listed and audited under the owner.
+- Liveness is a heartbeat heuristic. A single turn longer than
+  `SGE_LIFECYCLE_STALE_SECS` can look interrupted, and a killed session looks
+  active until the window passes.
+- The handoff audit calls the open-PR lookup, which needs network and `gh`
+  auth. On any failure the verdict is `KEEP` with the reason, never "no PRs".
+- The Claude Code adapters are out of scope for this slice. The adapter
+  already accepts the Claude/VS Code-style payload (`session_id`,
+  `SessionStart`/`Stop`/`SessionEnd`), so wiring it from `hooks/hooks.json`
+  later needs no code change there.
+- The installed definition runs `bash` from PATH, not the `run-hook.cmd`
+  launcher (which passes only a script path, while this adapter needs the event
+  name). On a PATH whose first `bash` is the WSL launcher the hook errors and
+  does nothing; Copilot continues, and no preservation or handoff happens.
+
 ## Memory (sge-memory) under Copilot CLI
 
 Copilot CLI does not set Claude Code's `CLAUDE_PROJECT_DIR`, so the

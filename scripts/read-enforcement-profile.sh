@@ -48,7 +48,7 @@ root="${1:-.}"
 [ -d "$root" ] || die no-such-repo-root "$root"
 file="$root/.sge/posture.yaml"
 
-GATES=" commit-msg tdd-guard require-commit-trailer require-test-evidence branch-protection "
+GATES=" commit-msg tdd-guard require-commit-trailer require-test-evidence branch-protection governance-record merge-review "
 KEY_RE='^enforcement[[:space:]]*:(.*)$'
 EXC_KEY_RE='^enforcement_exceptions[[:space:]]*:(.*)$'
 ITEM_RE='^[[:space:]]*-[[:space:]]+"([^"|]*)\|([^"|]*)\|([^"|]*)\|([^"|]*)"[[:space:]]*(#.*)?$'

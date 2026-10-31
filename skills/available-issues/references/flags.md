@@ -8,6 +8,7 @@ Moved verbatim from `SKILL.md` (issue #2917, 24 KB size budget).
 | `--count N` | unbounded (`--parallel`: pool budget) | Cap the returned set size |
 | `--setup` | off | After selecting, claim each issue and create its worktree (see *Setup*) |
 | `--mode autonomous-next` | off | Emit exactly **one** issue — the top-priority ready one — as machine-readable JSON for an autonomous loop |
+| `--autonomous` | off (on with `--mode autonomous-next` or `--fleet`) | The caller is an autonomous lane (e.g. `/sge:team-pipeline`): when the repo declares no dispatch label, filter on the fleet default `sge-ready` instead of listing everything (#3243). Interactive runs omit it and stay unfiltered |
 | `--blocking` | off | Report only blocked issues and their blockers (the inverse view) |
 | `--analyze N` | off | Deep-analyse a single issue `N` (dependencies, conflict surface) and stop |
 | `--module <name>` | all | Filter to the `module:<name>` GitHub label |

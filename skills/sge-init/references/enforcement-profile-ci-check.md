@@ -17,8 +17,24 @@ cp "$PLUGIN/.github/workflows/require-enforcement-profile.yml" .github/workflows
 cp "$PLUGIN/.github/scripts/check-enforcement-profile.sh" .github/scripts/
 ```
 
-The workflow runs on `pull_request` with `contents: read` and needs no secret
-or extra token. Install it in every onboarded repo, including onboarding ones:
+The two PR-time gates (below) read the issue through the ALM seam, so a repo
+that enforces them also vendors the seam scripts next to the check (any one
+directory, e.g. `scripts/`; the check finds `issue-read.sh` in the repo's
+`scripts/`, beside itself, or under `SGE_ISSUE_READ`):
+
+```bash
+cp "$PLUGIN"/scripts/{issue-read,with-repo-cwd,sge-env-compat,azdo-adapter,jira-adapter,forgejo-adapter}.sh scripts/
+```
+
+The check needs `jq`. Azure DevOps repos use
+`azure-pipelines/require-enforcement-profile.yml` (scaffolded by sge-init) and
+`docs/enforcement-profile.md`.
+
+The workflow runs on `pull_request` with `contents: read`,
+`pull-requests: read` and `issues: read` (the workflow token, no write
+permission; `issues: read` is what lets it read the issue and its comments), and needs no
+secret or extra token. It fetches the full history to diff the PR. Install it in
+every onboarded repo, including onboarding ones:
 there it only prints notices, and it is in place before the repo promotes.
 Once the repo is enforced, make `Require enforcement profile` a required check
 on the default branch alongside `Require commit trailer` and `Require test
@@ -53,6 +69,24 @@ Gates it can see from a checkout:
   and `.sge/test-map.yml` says `mode: blocking`, read exactly as that workflow
   reads it (so `mode: "blocking"`, trailing spaces or CRLF count as advisory,
   because the gate itself would only warn).
+
+Two more gates run on pull requests only (a `NOTE` elsewhere, including on
+`merge_group`, where they were checked on the PR head):
+
+- `governance-record`: a PR that closes or implements an issue (a closing
+  keyword, `Part of`, `Implements`, `AB#N`, a Jira key, or a sidebar link)
+  needs a governance record on it. The record is one comment holding
+  `<!-- sge-governance: {json} -->` (a legacy `sge-intake` marker counts),
+  posted by `/sge:sge-implement` or `/sge:issue-intake <N> --record`. It is
+  judged on existence and shape only; nothing reads who wrote it, an
+  association, or an approver list. A failed lookup fails closed under
+  `enforced`. `NEEDS_NEW_SPEC` and `MATCHES_EXISTING_MODIFIED` also need the PR
+  to add or amend a spec file.
+- `merge-review`: the base branch requires at least one approving review. On
+  GitHub it reads the ruleset (and classic protection if the credential can);
+  the read-only CI token usually cannot read classic protection, so a
+  `required_approvals: 1` line in `.sge/posture.yaml` is accepted and printed as
+  `DECLARED ONLY ... NOT verified`. With neither, it fails.
 
 The workflow also runs on `merge_group` and evaluates the merged tree there
 (it needs no token), so it can be a required check on a branch with a merge

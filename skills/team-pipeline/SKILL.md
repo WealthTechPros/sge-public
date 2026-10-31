@@ -205,7 +205,7 @@ and the canonical
 [dependency grammar](../decompose-issue/SKILL.md#dependency-metadata-grammar)),
 keeping decomposed children out until their enabler merges (`/available-issues`
 already does this — don't double-filter). Optional filters `--module` (label
-`module:<name>`), `--milestone`. Prefer `/available-issues --parallel --count
+`module:<name>`), `--milestone`. Prefer `/available-issues --autonomous --parallel --count
 <pool_size>` when shipped; `pool_size` defaults to `agentMax x 3`.
 
 ### Reconcile pre-flight (MANDATORY)
@@ -225,7 +225,7 @@ commands: [mechanisms](references/mechanisms.md).
 Once reconciled, validate numeric entries and deduplicate, preserving dispatch
 labels, `/sge:build-ready-audit` and existing selection criteria. Incomplete ACs,
 open/unknown dependencies and unresolved decisions remain paused; never assume
-READY. Eligible labelled issues without a marker are dispatchable. Each lane
+READY. Eligible issues carrying the dispatch label (declared, else `sge-ready`) without a marker are dispatchable. Each lane
 runs fresh Phase 0.5 governance classification for its current scope.
 Never adopt `SGE_GOVTRACE_VERDICT` or comment-cached verdicts. Optional
 `/sge:issue-intake` is readiness analysis, including unattended, not authorisation.

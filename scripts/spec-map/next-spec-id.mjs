@@ -35,6 +35,13 @@ import { fileURLToPath } from "node:url";
 const SPEC_HOMES = ["docs/specs", "docs/sgd-build/specs"];
 const MARKER_OPENS = ["<!-- sge-spec-reservation:", "<!-- sge-intake:"];
 const ID_RE = /^(?:SPEC|SGD|SGE)-(\d+)$/;
+// A legitimate parallel build reserves at most a few ids past the highest spec
+// on disk (one per spec-creating issue in flight). Reservations come from
+// comments by anyone, so a number further out than this is a squat or a typo,
+// not a plan: it is ignored (sge#3243). 100 is far above the handful of
+// concurrent new-spec issues seen in practice and far below a number that
+// could burn the line.
+export const HEADROOM = 100;
 
 /** Numbers a spec file name claims (handles NNN-to-MMM batch stubs). */
 function claimedNumbers(fileName) {
@@ -81,11 +88,15 @@ function parseMarker(body) {
  * Reservations held by issues: for each issue, its NEWEST reservation marker
  * decides; a newer marker with no reservedSpecId
  * releases an older one. A marker whose `issue` echo names a different issue,
- * or whose id is malformed, holds nothing.
+ * or whose id is malformed, holds nothing. So does one whose number is not a
+ * safe integer or is above `onDiskMax + HEADROOM` (a forged comment cannot
+ * squat the number line), and when several issues claim one id the
+ * lowest-numbered issue keeps it. No commenter identity is consulted.
  * @param {{number:number, comments:{body:string, createdAt:string}[]}[]} issues
+ * @param {{onDiskMax?: number}} [opts] highest spec number on disk; omitted = no cap
  * @returns {{issue:number, id:number}[]}
  */
-export function reservationsFromIssues(issues) {
+export function reservationsFromIssues(issues, { onDiskMax = Infinity } = {}) {
   const out = [];
   for (const issue of issues ?? []) {
     const markers = (issue.comments ?? [])
@@ -95,9 +106,12 @@ export function reservationsFromIssues(issues) {
     const newest = markers.at(-1)?.m;
     if (!newest || Number(newest.issue) !== Number(issue.number)) continue;
     const m = typeof newest.reservedSpecId === "string" ? newest.reservedSpecId.match(ID_RE) : null;
-    if (m) out.push({ issue: Number(issue.number), id: Number(m[1]) });
+    const id = m ? Number(m[1]) : NaN;
+    if (Number.isSafeInteger(id) && id <= onDiskMax + HEADROOM) out.push({ issue: Number(issue.number), id });
   }
-  return out;
+  const owner = new Map();
+  for (const r of out) owner.set(r.id, Math.min(owner.get(r.id) ?? Infinity, r.issue));
+  return out.filter((r) => owner.get(r.id) === r.issue);
 }
 
 /**
@@ -114,7 +128,10 @@ export function nextSpecId({ existing, reserved, issue }) {
   return all.length ? Math.max(...all) + 1 : 1;
 }
 
-export const formatSpecId = (n) => `SPEC-${String(n).padStart(3, "0")}`;
+export function formatSpecId(n) {
+  if (!Number.isSafeInteger(n) || n < 0) throw new RangeError(`not a spec number: ${n}`);
+  return `SPEC-${String(n).padStart(3, "0")}`;
+}
 
 function readIssuesViaGh(repo) {
   const issues = new Map();
@@ -153,9 +170,10 @@ function main(argv) {
   } catch (e) {
     throw new Error(`cannot read spec reservations: ${e.message}`);
   }
+  const existing = specNumbersOnDisk(opts.repoRoot);
   const id = nextSpecId({
-    existing: specNumbersOnDisk(opts.repoRoot),
-    reserved: reservationsFromIssues(issues),
+    existing,
+    reserved: reservationsFromIssues(issues, { onDiskMax: existing.at(-1) ?? 0 }),
     issue: opts.issue,
   });
   process.stdout.write(formatSpecId(id) + "\n");

@@ -108,6 +108,7 @@ failing-check reasons win when both apply.
 | `REVIEW_DAEMON_AUTO_MERGE_EXCLUDE_PATHS` | `{}` | Delegation policy: JSON `{"owner/repo" \| "*": [globs]}`; a PR touching a match is not auto-merged. Invalid JSON disables merge arming. |
 | `REVIEW_DAEMON_AUTO_MERGE` | -- | `0` is a kill switch for merge arming. |
 | `REVIEW_DAEMON_FIX_RERUN_FIRST` | off | `1` enables flaky-first: rerun failed required Actions jobs once per head before a `failing-check` fix. |
+| `REVIEW_DAEMON_FIX_NONREQUIRED_CHECKS` | off | `1` lets the fix lane also fix failed **non-required** checks, not only required ones. The unfixable gates (hold / approval / label / claim / sign-off) and the ignore list stay excluded. With a policy file: the `routine-fix` order's `fix_nonrequired_checks: true` (a boolean), or this env var as an operator override. |
 | `REVIEW_DAEMON_FIX_RERUN_TIMEOUT_SECONDS` | `2700` | How long later cycles wait for that rerun before dispatching the fix anyway (operational knob, not policy). |
 
 ## Policy-file shape
@@ -132,6 +133,9 @@ The loader populates the same object: `merge_rules` -- one
 `exclude_paths` (`{"owner/repo" | "*": [globs]}`), `order` (the standing-order
 id recorded in `runs.jsonl` `decision.order`) -- and `routine_fix` -- a
 `RoutineFixPolicy`: `allowed` (e.g. `review-findings`), `repo_conventions`,
-`default_update_strategy`, `force_push`, `order`. The env source builds
+`default_update_strategy`, `force_push`, `order` -- plus the policy's
+`fix_nonrequired_checks` flag (env `REVIEW_DAEMON_FIX_NONREQUIRED_CHECKS=1`, or
+`fix_nonrequired_checks: true` on the file's `routine-fix` order; default off).
+The env source builds
 `arm-auto-merge` rules from `REVIEW_DAEMON_AUTO_MERGE_ORGS` and `never-merge`
 rules from `REVIEW_DAEMON_AUTO_MERGE_DENY_ORGS`, with no order ids.
