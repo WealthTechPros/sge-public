@@ -36,7 +36,7 @@ echo "[Pre-flight] alm-backend: $ALM"
 | **Phase 1** — dependency gate | P7 `item-dependencies` | `"$IR" dependencies "$n"` |
 | **Phase 2R** — execution-repo field parse | P2 `view-item` | `"$IR" view "$ISSUE" \| jq -r '.body // ""' \| "$WRC" issue-repo …` |
 | **Phase 6** — find-or-create tracking issue | P10 `search` | `"$IR" search "pipeline runs" --state open --limit 1 \| jq …` |
-| **Pre-flight** — dispatch-label resolution | P9 `dispatch-label` | `"$IR" dispatch-label` |
+| **Pre-flight** — dispatch-label resolution | P9 `dispatch-label` | `"$IR" dispatch-label --autonomous` (declared label, else `sge-ready`; every ALM) |
 
 The preferred discovery path (`/sge:available-issues`) already reads through
 `$IR`, so it inherits Jira routing with no per-call change here.

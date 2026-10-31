@@ -251,3 +251,11 @@ this — do not fix opportunistically outside those).
 - **Repo-targeting is separate.** Being in the right worktree is the *cwd*
   half of correctness; addressing the right GitHub repo from a hub session is
   the [`gh-repo`](../gh-repo/SKILL.md) convention.
+- **Local checkpoints (issue #3234, SPEC-139).** `skills/worktrees/checkpoint.sh`
+  preserves a session-owned worktree's unfinished work (recovery ref, separate
+  staged/unstaged patches, untracked files) in a per-user, owner-only store
+  outside the checkout and outside synchronised folders, with `list`, `restore`
+  into a fresh directory and manual `prune --yes`. Ignored, secret-pattern,
+  unreadable or uncertain-ownership coverage is reported as unsupported (never
+  with contents), the result is `partial`, and it never says a worktree is safe
+  to remove; removal stays a user-confirmed `/sge:tidy-worktrees` step.

@@ -151,10 +151,11 @@ printf '%s' "$report" \
 # writes directly. See references/alm-routing.md ("Mutating tracker writes").
 IR="${CLAUDE_PLUGIN_ROOT:-.}/scripts/issue-read.sh"
 IW="${CLAUDE_PLUGIN_ROOT:-.}/scripts/issue-write.sh"
-# Dispatch label (#2793): the same port /available-issues uses. Empty = the repo
-# declares none; a malformed value fails loud — never fall back to unfiltered.
-DISPATCH_LABEL="$("$IR" dispatch-label)" || { echo "dispatch-label misconfigured — aborting"; exit 1; }
-QUEUE=$("$IR" list --state open --limit 50 ${DISPATCH_LABEL:+--label "$DISPATCH_LABEL"} \
+# Dispatch label (#2793, #3243): the same port /available-issues uses. --autonomous
+# = the declared label, else `sge-ready`, never empty (a lane never scans an
+# unfiltered backlog); a malformed value fails loud — never fall back.
+DISPATCH_LABEL="$("$IR" dispatch-label --autonomous)" || { echo "dispatch-label misconfigured — aborting"; exit 1; }
+QUEUE=$("$IR" list --state open --limit 50 --label "$DISPATCH_LABEL" \
   | jq -r '[.[] | select(
     (.assignees | length == 0) and
     ([.labels[].name] | contains(["agent-lock"]) | not)

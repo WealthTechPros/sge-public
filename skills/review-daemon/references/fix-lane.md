@@ -32,6 +32,14 @@ quarantine, hold labels `hold`/`do-not-merge`/`needs-human`/`blocked`), a PR is 
 
 These never trigger a fix: pending checks, non-required checks, `CANCELLED`/`ACTION_REQUIRED`
 runs, and the ignore list (`hold-gate`, `Require pr-reviewed label` by default).
+**Opt-in exception (sge#3239):** with the delegation policy `fix_nonrequired_checks`
+(`REVIEW_DAEMON_FIX_NONREQUIRED_CHECKS=1`; **off by default**) a failed
+*non-required* check (SBOM freshness, generator tests, SkillSpector, ...) is a
+`failing-check` trigger too. The unfixable gates (approval / label / claim / hold /
+sign-off, `fix_lane.UNFIXABLE_CHECK_PATTERNS`), the ignore list and pending checks
+stay excluded, and the worker's scope line then says "failing check(s)" rather than
+"failing required check(s)". Rules:
+[references/delegation-policy.md](delegation-policy.md).
 A live `pr-fixing` claim keeps the PR out of the fix lane. Classification runs
 *before* the reviewed-marker and standing-fail-verdict exclusions, so a
 `pr-reviewed` PR that has since gone dirty or red is picked up. Any read error
@@ -71,10 +79,27 @@ re-reads the head:
   quarantine (`pr-review-stalled` after `REVIEW_DAEMON_MAX_DISPATCH_ATTEMPTS`).
   A failure during a GitHub outage is retried later and doesn't count.
 
+**A run that never reached the PR is transient (sge#3239).** When the worker's
+final report shows `"itemsProcessed": 0`, no pushed commit and an
+environment-level cause (`Dispatch-level failure`, no checkout, no token, SDK
+start), the daemon calls `forget_attempt` (so the head is not parked and the cap
+is not burned), applies the usual transient backoff, never counts it toward
+quarantine, and lists the reason under `fix_dispatch_failures` in the cycle-status
+snapshot (cleared when a later fix moves the head, or after six hours). A genuine
+`structurally blocked` report still parks the head. The phrase counts only as an
+assertion: a negated ("neither ... nor", "isn't", "no longer") or quoted /
+backticked mention is not read as one; the `sge-fix-outcome: structurally-blocked`
+line always is.
+
 **Loop safety** (`fix_lane.py::FixLedger`):
 
 - one fix per `(repo, pr, head_sha)`, never re-dispatched against the same head.
-  An unknown head is not eligible.
+  An unknown head is not eligible. **Conflicts only (sge#3239):** the dedupe is
+  also keyed on the base branch tip SHA (`ReviewableChange.base_sha`, from the
+  poll's `baseRef.target.oid`), because a conflict is a property of head *and*
+  base: when main advances, a parked or failed conflict at the same head is
+  eligible again (the attempt cap still applies). Failing-check and findings fixes
+  stay head-only, and a ledger entry with no recorded base behaves as before.
 - at most `REVIEW_DAEMON_FIX_MAX_ATTEMPTS` (default 2) fix attempts per PR in any
   `REVIEW_DAEMON_FIX_WINDOW_SECONDS` (default 86400) window.
 - the attempt is recorded *before* dispatch, so a crash mid-run can't loop.
@@ -97,6 +122,7 @@ Dispatch logs record the lane in their header (`# dispatch PR #N @ <ts> kind: fi
 | `REVIEW_DAEMON_FIX_WINDOW_SECONDS` | `86400` | Rolling window for the attempt cap. |
 | `REVIEW_DAEMON_FIX_LEDGER_PATH` | `$REVIEW_DAEMON_LOG_DIR/fix-ledger.json` | Ledger file (in-memory only when neither is set). |
 | `REVIEW_DAEMON_FIX_IGNORE_CHECKS` | `hold-gate,Require pr-reviewed label` | Comma-separated check names that never trigger a fix. |
+| `REVIEW_DAEMON_FIX_NONREQUIRED_CHECKS` | off | Delegation policy: `1` lets the fix lane also act on failed **non-required** checks (unfixable gates stay excluded). Fleet-wide enablement is a rollout decision. |
 | `REVIEW_DAEMON_FIX_FINDINGS`, `REVIEW_DAEMON_AUTO_MERGE*` | off | Delegation policy -- see [references/delegation-policy.md](delegation-policy.md). |
 | `REVIEW_DAEMON_FIX_MODEL` | unset | Model for fix dispatches (e.g. `sonnet`). Unset: fixes go through model routing at a fixed **sonnet** tier (the routing config's `sonnet` model; a fix is not sized by the PR's diff, so the per-path/size rules do not apply), with `ANTHROPIC_MODEL` still a hard override. Precedence: `REVIEW_DAEMON_FIX_MODEL` > `ANTHROPIC_MODEL` > routed sonnet tier. |
 | `REVIEW_DAEMON_RED_MAIN_*` | on | Red default-branch lane: [references/red-main.md](red-main.md). |

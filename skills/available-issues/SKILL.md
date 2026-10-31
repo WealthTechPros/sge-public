@@ -1,6 +1,6 @@
 ---
 description: Use when you need a conflict-safe set of open issues that agents can work in parallel — a /sge:team-pipeline work pool, "what can we work on at once", "pick the next non-conflicting issue", or blocked vs ready. --fleet spans many repos. Read-only; does not implement.
-argument-hint: "[--parallel] [--count N] [--setup] [--mode autonomous-next] [--blocking] [--analyze N] [--module <name>] [--milestone <name>] [--repo <owner/name>] [--fleet <org|r1,r2,...>]"
+argument-hint: "[--parallel] [--count N] [--setup] [--autonomous] [--mode autonomous-next] [--blocking] [--analyze N] [--module <name>] [--milestone <name>] [--repo <owner/name>] [--fleet <org|r1,r2,...>]"
 ---
 
 # Available Issues — conflict-safe parallel issue discovery
@@ -100,7 +100,7 @@ This skill is **read-only** unless `--setup` is given. It never edits issue bodi
 
 ### Dispatch-label gate
 
-Resolve the dispatch-label name via the port — `"$IR" dispatch-label` returns the repo-configurable quality-label name, backend-agnostic (GitHub: reads `dispatch-label:` from CLAUDE.md; Jira: reads `SGE_DISPATCH_LABEL`, default `sge-ready`, DP2). When declared the value is the **quality-label name** — only issues carrying that label enter the ready pool; unlabelled issues are never dispatchable and are surfaced separately as "awaiting quality label" so the caller knows they exist but won't be picked. When not declared, no label filter is applied and the current behaviour is preserved (backwards-compatible).
+Resolve the dispatch-label name via the port — `"$IR" dispatch-label` returns the repo-configurable quality-label name, backend-agnostic (GitHub: reads `dispatch-label:` from CLAUDE.md; Jira: reads `SGE_DISPATCH_LABEL`, default `sge-ready`, DP2). When declared the value is the **quality-label name** — only issues carrying that label enter the ready pool; unlabelled issues are never dispatchable and are surfaced separately as "awaiting quality label" so the caller knows they exist but won't be picked. When not declared, an interactive run applies no label filter (backwards-compatible). An **autonomous** run (`--autonomous`, implied by `--mode autonomous-next` and `--fleet`) defaults to `sge-ready`, never unfiltered (#3243).
 
 #### The `orchestrator-only` exclusion (quality-confirmed ≠ worker-dispatchable)
 
@@ -118,7 +118,8 @@ Routing verdict labels — `needs-human`, `needs-decision`, `superseded`, plus `
 # port exits non-zero (#1726), and swallowing that would silently drop the
 # label filter and widen the dispatch pool — the opposite of what a gate
 # should do on bad input. Stop instead, and say why.
-if ! DISPATCH_LABEL=$("$IR" dispatch-label 2>&1); then
+# AUTONOMOUS=1 for --autonomous, --mode autonomous-next or --fleet (else unset).
+if ! DISPATCH_LABEL=$("$IR" dispatch-label ${AUTONOMOUS:+--autonomous} 2>&1); then
   echo "STOP: dispatch-label is misconfigured in CLAUDE.md — $DISPATCH_LABEL"
   echo "Refusing to run discovery unfiltered; fix the dispatch-label value first."
   exit 1

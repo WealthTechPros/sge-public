@@ -132,7 +132,7 @@ The queue is **re-derived live on every pick** — `available-issues` reads open
 
 ```bash
 gh issue view <N> --json labels --jq '[.labels[].name] | index("loop-skip") != null'   # picked issue excluded?
-/sge:available-issues [--module X] [--milestone M]   # fallback: full ranked ready list; pick the top non-excluded issue
+/sge:available-issues --autonomous [--module X] [--milestone M]   # fallback: full ranked ready list; pick the top non-excluded issue
 ```
 
 If every remaining ready issue is excluded, the queue is drained **for this run**: stop with `stopReason: queue-exhausted` and report the skipped / not-ready remainder explicitly in the ledger — a drain that ends with leftovers must never read as "done".
@@ -145,7 +145,7 @@ node "${SGE_ROOT:?resolve SGE_ROOT first}/scripts/reconcile-worklist.mjs" --issu
 ```
 
 - Reconcile **drops** the pick (already closed, or a merged PR closes it) → record and return to step 1.
-- **Readiness and governance:** preserve repository dispatch labels, build-ready-audit and existing selection criteria. Incomplete ACs, open/unknown dependencies and unresolved decisions pause dispatch; record the actual blocker and exclude within this run. Eligible labelled issues without a marker are dispatchable. Optional `/sge:issue-intake` is unattended-capable analysis, not authorisation. Partial merged slices cause re-evaluation of remaining ACs, not human re-intake. The dispatched `sge-implement` Phase 0.5 freshly classifies current scope (or uses existing trivial-tier inline classification), with `fork-util.mjs register`/`join` issue/repo validation before writes. Never adopt `SGE_GOVTRACE_VERDICT` or comment-cached verdicts. External writes, destructive/live actions and deployment retain explicit authority.
+- **Readiness and governance:** preserve repository dispatch labels, build-ready-audit and existing selection criteria. Incomplete ACs, open/unknown dependencies and unresolved decisions pause dispatch; record the actual blocker and exclude within this run. Eligible issues carrying the dispatch label (declared in `CLAUDE.md`, else `sge-ready`) without a marker are dispatchable. Optional `/sge:issue-intake` is unattended-capable analysis, not authorisation. Partial merged slices cause re-evaluation of remaining ACs, not human re-intake. The dispatched `sge-implement` Phase 0.5 freshly classifies current scope (or uses existing trivial-tier inline classification), with `fork-util.mjs register`/`join` issue/repo validation before writes. Never adopt `SGE_GOVTRACE_VERDICT` or comment-cached verdicts. External writes, destructive/live actions and deployment retain explicit authority.
 - `READY` → step 3.
 - `NOT_READY` → record the blocker in the ledger **and add the issue to the within-run exclusion set** (the deterministic pick would otherwise return it every cycle), return to step 1. The issue is not labelled — it may become ready later, and a fresh run re-audits it; `build-ready-audit` owns telling the author why.
 - `TOO_LARGE` → `/sge:decompose-issue <N>`, record the parent as decomposed (and add it to the exclusion set if it stays open as a tracking epic), return to step 1 — the children enter the pool and are picked in dependency order on subsequent cycles. Never dispatch an un-split epic.

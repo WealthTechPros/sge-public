@@ -33,6 +33,14 @@
 #   issue-read.sh view  <number>
 #       Same JSON object shape for a single issue.
 #       `state` is OPEN|CLOSED for both backends.
+#   issue-read.sh comments  <number>
+#       JSON array of the item's comments, oldest first: [{body, createdAt}].
+#       NOTHING else: the comment author (login, type, association, app,
+#       createdBy, author) is dropped here, so no caller of this verb can
+#       decide anything from who wrote a comment (sge#3254, SPEC-128).
+#       GitHub: `gh api --paginate`. Azure DevOps: azdo-adapter item-comments
+#       (deleted comments skipped). Jira: jira-adapter item-comments.
+#       Forgejo/Gitea has no comments route: it fails loud, never an empty list.
 #   issue-read.sh dependencies  <number>
 #       Print one line per dependency: `<id>\t<open|closed>`.
 #       GitHub: parses Depends on #N / Blocked by #N / Requires #N / DependsOn: #N
@@ -46,11 +54,16 @@
 #       injection-safe escaping so the text cannot break out of the JQL string.
 #       Forgejo: Gitea search API with `q=<text>&type=issues`.
 #       `--state` defaults to "open"; `--limit` defaults to 0 (no cap).
-#   issue-read.sh dispatch-label
+#   issue-read.sh dispatch-label [--autonomous]
 #       Print the repo-configurable dispatch-label name on stdout.
 #       GitHub: reads the `dispatch-label:` key from CLAUDE.md (empty = no filter).
 #       Jira: routes through jira-adapter.sh P9 dispatch-label-config (default
 #       sge-ready, configurable via SGE_DISPATCH_LABEL). (SPEC-105 S4, DP2.)
+#       Azure DevOps: azdo-adapter.sh P9 (a work-item tag, default sge-ready).
+#       --autonomous (sge#3243): for autonomous discovery — the declared label,
+#       else `sge-ready`, on EVERY backend, so the list is never unfiltered. A
+#       malformed declaration still fails loud (no default, no unfiltered).
+#       Interactive callers omit it and keep the unchanged "empty = no filter".
 #
 # SPEC-057: always run from the target repo's checkout cwd — shell state does
 # NOT persist across agent tool calls, so re-enter the resolved cwd at the top
@@ -340,6 +353,28 @@ _ir_azdo_view() { # <id>
   printf '%s' "$raw" | jq "${_IR_JQ_AZDO_ITEM}"
 }
 
+# Comments, normalised to [{body, createdAt}] with the author dropped (sge#3254).
+_ir_azdo_comments() { # <id>
+  local raw
+  command -v jq >/dev/null 2>&1 || { _ir_err "jq not found — required for the Azure Boards comments path"; exit 1; }
+  raw="$(bash "$_AA" item-comments "$1")" || exit 1
+  printf '%s' "$raw" | jq -c '[ .[] | select((.isDeleted // false) | not) | {body: (.text // ""), createdAt: (.createdDate // "")} ]'
+}
+
+_ir_jira_comments() { # <issueKey>
+  local raw
+  command -v jq >/dev/null 2>&1 || { _ir_err "jq not found — required for the Jira comments path"; exit 1; }
+  raw="$(bash "$_JA" item-comments "$1")" || exit 1
+  printf '%s' "$raw" | jq -c '[ .[] | {body: (.body // ""), createdAt: (.created // "")} ]'
+}
+
+_ir_github_comments() { # <number>
+  local raw
+  command -v jq >/dev/null 2>&1 || { _ir_err "jq not found — required for the comments path"; exit 1; }
+  raw="$(gh api --paginate --slurp "repos/{owner}/{repo}/issues/$1/comments")" || exit 1
+  printf '%s' "$raw" | jq -c 'add // [] | [ .[] | {body: (.body // ""), createdAt: (.created_at // "")} ]'
+}
+
 _ir_azdo_search() { # <text> <state> <limit>
   local project raw
   command -v jq >/dev/null 2>&1 || { _ir_err "jq not found — required for the Azure Boards search path"; exit 1; }
@@ -578,6 +613,27 @@ _ir_github_dispatch_label() {
   printf '%s\n' "$lbl"
 }
 
+# The fleet default dispatch label (sge#3243). Jira and Azure DevOps already
+# default to it inside their adapters (SGE_DISPATCH_LABEL, DP2); GitHub/Forgejo
+# defaults to it only on the --autonomous path.
+_IR_DEFAULT_DISPATCH_LABEL="sge-ready"
+
+# Per-ALM dispatch-label resolution (P9). Prints the declared label, or empty
+# when a GitHub/Forgejo repo declares none; a malformed value is a hard error.
+_ir_dispatch_label() {
+  local alm
+  alm="$(_ir_alm)" || exit 1
+  if [ "$alm" = "jira" ]; then
+    _ir_jira_dispatch_label
+  elif [ "$alm" = "azdo" ]; then
+    bash "$_AA" dispatch-label-config
+  elif [ "$alm" != "github" ]; then
+    _ir_unknown_alm "$alm"
+  else
+    _ir_github_dispatch_label
+  fi
+}
+
 # When GH_REPO names a target repo, resolve it to a local checkout and cd
 # there before any host/ALM classification runs (issue #2207, PR #2266
 # review). `_ir_host`/`_ir_origin`/`_ir_alm` all classify from the CURRENT
@@ -692,6 +748,31 @@ _ir_main() {
       fi
       ;;
 
+    comments)
+      local n="${2:-}"
+      [ -n "$n" ] || _ir_usage 'comments needs <number>'
+      local alm
+      alm="$(_ir_alm)" || exit 1
+      if [ "$alm" = "jira" ]; then
+        _ir_jira_comments "$n"
+      elif [ "$alm" = "azdo" ]; then
+        _ir_azdo_comments "$n"
+      elif [ "$alm" != "github" ]; then
+        _ir_unknown_alm "$alm"
+      else
+        case "$n" in
+          *[!0-9]*) _ir_err "comments: issue number must be a positive integer, got '${n}'"; exit 2 ;;
+        esac
+        local host
+        host="$(_ir_host)"
+        case "$host" in
+          github) _ir_github_comments "$n" ;;
+          forgejo) _ir_err "comments: the Forgejo/Gitea host has no comments route in this seam — refusing rather than returning an empty list"; exit 1 ;;
+          *) _ir_err "host kind '${host}' has no issue-read adapter"; exit 1 ;;
+        esac
+      fi
+      ;;
+
     dependencies)
       local n="${2:-}"
       [ -n "$n" ] || _ir_usage 'dependencies needs <number>'
@@ -769,17 +850,23 @@ _ir_main() {
       ;;
 
     dispatch-label)
-      local alm
-      alm="$(_ir_alm)" || exit 1
-      if [ "$alm" = "jira" ]; then
-        _ir_jira_dispatch_label
-      elif [ "$alm" = "azdo" ]; then
-        bash "$_AA" dispatch-label-config
-      elif [ "$alm" != "github" ]; then
-        _ir_unknown_alm "$alm"
-      else
-        _ir_github_dispatch_label
-      fi
+      # --autonomous (sge#3243): the resolution for AUTONOMOUS discovery
+      # (team-pipeline, issue-loop, --fleet, the idle lane): the declared label,
+      # else the fleet default sge-ready — never empty, so a worker can never
+      # scan an unfiltered backlog. A malformed declaration still exits
+      # non-zero with nothing on stdout (never the default, never unfiltered).
+      # Without it the command is unchanged: an interactive caller still gets
+      # empty = "no filter" on GitHub when nothing is declared.
+      local lbl
+      case "${2:-}" in
+        '') _ir_dispatch_label ;;
+        --autonomous)
+          lbl="$(_ir_dispatch_label)" || exit $?
+          printf '%s
+' "${lbl:-$_IR_DEFAULT_DISPATCH_LABEL}"
+          ;;
+        *) _ir_err "dispatch-label: unknown flag '${2}' (only --autonomous)"; exit 2 ;;
+      esac
       ;;
 
     -h|--help|help|'')

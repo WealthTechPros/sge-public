@@ -96,6 +96,8 @@ Branch on `verdict` (carry the `layers` breakdown into what you show the human).
 
 **Proceed:** `MATCHES_EXISTING` (→ Phase 1), `NO_SPEC_WARRANTED`, `NOT_ONBOARDED` (→ 0B). **Block:** `MATCHES_EXISTING_MODIFIED`, `NEEDS_NEW_SPEC` (stub + capability-model edit in one commit), `NOT_SGE_SCOPE` (override only loud: `SGE-Override: ALL; SCOPE-OVERRIDE: <reason>`; never headless). [Table](references/verdict-handling.md#verdict-branch-table-moved-from-skillmd).
 
+**Record (SPEC-128).** Once the build goes ahead, post the governance record: `scripts/governance-record.sh post <N> <verdict.json>` ([detail](references/governance-record.md)). Evidence for the PR gate, never a start condition or an approval.
+
 #### Headless completion contract
 
 Governance pause completion file (`outcome: "blocked"`), `note` examples, `SkillRunRecord` fields, and jq: [`orchestration.md`](references/orchestration.md#headless-completion-contract-phase-05-governance-pause).

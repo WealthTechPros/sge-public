@@ -111,10 +111,9 @@
 #   azdo-adapter.sh pr-work-items <origin-url> <pr>                    (read)
 #   azdo-adapter.sh item-linked-prs <work-item-id>                     (read)
 #
-#   Boards reads for the intake gate (SPEC-126):
+#   Boards comment read (backs issue-read.sh comments, SPEC-128):
 #   azdo-adapter.sh item-comments <work-item-id>   all comments, JSON array
-#   azdo-adapter.sh item-updates  <work-item-id>   revision history, JSON array
-#       Both paginate and fail closed on a malformed page or the page cap.
+#       Paginates and fails closed on a malformed page or the page cap.
 # END_USAGE
 
 # SGD_ fallback: remove in SGD rename Phase 6
@@ -536,7 +535,7 @@ _aa_link_close_on_merge() { # <id> <pr-url>
   _aa_call "link-close-on-merge" PATCH "/_apis/wit/workitems/$1?api-version=7.1" "$patch" "application/json-patch+json" >/dev/null
 }
 
-# --- intake reads (SPEC-126 on Boards) ---------------------------------------
+# --- comment read (issue-read.sh comments, SPEC-128) ---------------------------------------
 # item-comments: every comment (createdBy identity, createdDate, modifiedDate,
 # version, text) as ONE JSON array, following continuationToken. A full page
 # at the page cap fails closed (the newest marker could be on a page not read).
@@ -556,25 +555,6 @@ _aa_item_comments() { # <id>
     if [ -z "$token" ]; then printf '%s\n' "$all"; return 0; fi
   done
   _aa_err "item-comments: page cap reached — comment set may be truncated; refusing"
-  return 1
-}
-
-# item-updates: the work item's revision history (fields old/new per update),
-# paginated by $top/$skip; a full last page at the cap fails closed.
-_aa_item_updates() { # <id>
-  local raw page all='[]' n p size=200
-  _aa_require_work_item_id "$1" || return 1
-  command -v jq >/dev/null 2>&1 || { _aa_err "jq not found — required for item-updates"; return 1; }
-  for (( p=0; p<20; p++ )); do
-    raw="$(_aa_call "item-updates" GET "/_apis/wit/workItems/$1/updates?\$top=$size&\$skip=$((p * size))&api-version=7.1")" || return 1
-    page="$(printf '%s' "$raw" | jq -c 'if type == "object" and (.value | type) == "array" then .value else error("malformed") end' 2>/dev/null)" \
-      || { _aa_err "item-updates: malformed updates payload"; return 1; }
-    all="$(printf '%s\n%s\n' "$all" "$page" | jq -cs '
-      if length == 2 then .[0] + .[1] else error("malformed pagination arrays") end')" || return 1
-    n="$(printf '%s' "$page" | jq 'length' | tr -d '\r')"
-    if [ "$n" -lt "$size" ]; then printf '%s\n' "$all"; return 0; fi
-  done
-  _aa_err "item-updates: page cap reached — history may be truncated; refusing"
   return 1
 }
 
@@ -1951,10 +1931,6 @@ _aa_main() {
     item-comments)
       [ -n "${2:-}" ] || _aa_usage 'item-comments needs <work-item-id>'
       _aa_item_comments "$2" || exit 1
-      ;;
-    item-updates)
-      [ -n "${2:-}" ] || _aa_usage 'item-updates needs <work-item-id>'
-      _aa_item_updates "$2" || exit 1
       ;;
     -h|--help|help|'')
       _aa_usage

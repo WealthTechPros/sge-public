@@ -31,6 +31,8 @@ Read the effective profile with `scripts/read-enforcement-profile.sh <repo-root>
 | `require-commit-trailer.yml` (SPEC-063) | runs; findings are advisory to the merge | a failing run blocks the merge |
 | `require-test-evidence.yml` via `.sge/test-map.yml` `mode:` | `mode: advisory` | `mode: blocking` |
 | Required branch-protection checks (Step 7e) | recommended | `Require commit trailer` and `Require test evidence` are required status checks on the default branch |
+| `governance-record` gate (a PR that closes or implements an issue) | notice | the issue needs a governance record, judged on existence and shape only (never on who wrote it); `NEEDS_NEW_SPEC` / `MATCHES_EXISTING_MODIFIED` also need a spec change in the PR |
+| `merge-review` gate (maker-checker) | notice | the base branch requires at least 1 approving review: verified where the CI token can read it, else a `required_approvals` declaration reported as unverified |
 
 Under `enforced`, a control that is missing or still advisory is a failure,
 not a warning: the CI check reports each one by name.
@@ -62,7 +64,8 @@ Demotion is the same PR in reverse, with the reason in the PR description.
 
   The fields are gate, reason, approver (GitHub login) and expiry
   (`YYYY-MM-DD`). The gate is one of `commit-msg`, `tdd-guard`,
-  `require-commit-trailer`, `require-test-evidence`, `branch-protection`. A
+  `require-commit-trailer`, `require-test-evidence`, `branch-protection`,
+  `governance-record`, `merge-review`. A
   malformed entry is an error (`malformed-exception`), including a field that
   holds a control character such as a TAB, or an expiry that is not a real
   calendar date. Write the keys plainly (`enforcement: enforced`). The parser

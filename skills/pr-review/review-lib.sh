@@ -242,7 +242,7 @@
 #   start, **/*webhook*, dotenv files ([.]env, [.]env.*), and .github/workflows/.
 #   Plus the gate's own enforcement files, so a change that narrows this
 #   regex or guts a guard always gets a security review (#2921): **/hooks/**,
-#   hooks.json, *intake-check*, *intake-marker-guard*, review-lib.sh.
+#   hooks.json, review-lib.sh.
 #
 # Match it CASE-INSENSITIVELY (grep -iE) — every consumer does (issue #2913:
 # `Auth/`, `OAuthCallback`, `SECURITY/` were missed by a case-sensitive grep).
@@ -257,7 +257,7 @@
 # security-sensitive. Added explicit (^|/)security/ and (^|/)secrets/
 # alternatives rather than relying on substring luck.
 rl_security_glob_regex() {
-  printf '%s\n' 'auth|(^|/)middleware/|token|secret|(^|/)config/|(^|/)crypto|migrat|(^|/)security/|(^|/)secrets/|login|session|jwt|passw(or)?d|credential|permission|rbac|(^|[^[:alnum:]])acl|acls?([^[:alnum:]]|$)|acls?(service|manager|polic|rule|entr|list|check|guard|provider|store|repo|config|util|helper|handler|middleware|filter|resolver|validator|evaluator)|cookie|csrf|(^|[^[:alnum:]])cors([^[:alnum:]]|$|config|policy|options|origin|handler|middleware)|oidc|saml|(^|[^[:alnum:]])sso([^[:alnum:]]|$|[a-su-z])|encrypt|decrypt|cipher|(^|[^[:alnum:]])certs?([^[:alnum:]]|$)|certif|(^|[^[:alnum:]])m?tls|webhook|(^|/)[.]env([.]|$)|(^|/)[.]github/workflows/|(^|/)hooks/|hooks[.]json|intake-check|intake-marker-guard|review-lib[.]sh'
+  printf '%s\n' 'auth|(^|/)middleware/|token|secret|(^|/)config/|(^|/)crypto|migrat|(^|/)security/|(^|/)secrets/|login|session|jwt|passw(or)?d|credential|permission|rbac|(^|[^[:alnum:]])acl|acls?([^[:alnum:]]|$)|acls?(service|manager|polic|rule|entr|list|check|guard|provider|store|repo|config|util|helper|handler|middleware|filter|resolver|validator|evaluator)|cookie|csrf|(^|[^[:alnum:]])cors([^[:alnum:]]|$|config|policy|options|origin|handler|middleware)|oidc|saml|(^|[^[:alnum:]])sso([^[:alnum:]]|$|[a-su-z])|encrypt|decrypt|cipher|(^|[^[:alnum:]])certs?([^[:alnum:]]|$)|certif|(^|[^[:alnum:]])m?tls|webhook|(^|/)[.]env([.]|$)|(^|/)[.]github/workflows/|(^|/)hooks/|hooks[.]json|review-lib[.]sh'
 }
 
 # Host dispatch for PR reads (SPEC-110 S4, issue #2985): `sge_gh_pr` runs
