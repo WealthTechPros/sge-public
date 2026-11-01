@@ -1,6 +1,6 @@
 ---
-description: Use when an unattended SGE session's throughput collapses or could — orphaned dev/test servers burning CPU, broken pnpm symlinks after a move, more sessions than cores, a hung install. Run hourly or as a preflight before fan-out to catch and self-heal it.
-argument-hint: "[--preflight] [--reap] [--throughput] [--dry-run]"
+description: Use when an unattended SGE session's throughput collapses or could (orphaned servers, broken pnpm symlinks, too many sessions, hung install), or when hooks fail with "Hook command failed" (--doctor: which bash, PATH order, versions, fix). Hourly or preflight.
+argument-hint: "[--preflight] [--reap] [--throughput] [--doctor] [--dry-run]"
 ---
 
 # /sge:env-health — Environment-Health & Throughput Self-Healing Monitor
@@ -33,6 +33,7 @@ common failures — all without a human hand-diagnosing the day.
 /sge:env-health --preflight      # Env-integrity + capacity gate only (run before fan-out)
 /sge:env-health --reap           # Detect and reap orphaned processes only
 /sge:env-health --throughput     # Throughput-vs-baseline report only
+/sge:env-health --doctor         # Why hooks cannot run: bash, PATH order, versions, exact fix (read-only)
 /sge:env-health --dry-run        # Report everything; take no remediating action
 ```
 
@@ -43,6 +44,30 @@ destructive step below has a dry-run preview.
 The four components map to the four flags: **reaper** (`--reap`), **preflight
 gate** (`--preflight`), **throughput tracking** (`--throughput`), and
 **auto-remediate** (folded into each — it is the *act* half of detect-then-act).
+
+---
+
+## Doctor mode (`--doctor`, sge#3269)
+
+When hooks fail with `Hook command failed with code 1`, run:
+
+```bash
+SGE_ROOT="${CLAUDE_PLUGIN_ROOT:-$(bash ./scripts/resolve-sge-root.sh)}" || exit 1
+cd "$SGE_ROOT" || exit 1   # the doctor is not part of the public distribution
+[ -f "$SGE_ROOT/hooks/lib/doctor.sh" ] || { echo "doctor is not shipped in this install; update the plugin"; exit 1; }
+CLAUDE_PLUGIN_ROOT="$SGE_ROOT" bash "$SGE_ROOT/hooks/lib/doctor.sh" --full
+```
+
+It reports which `bash` the hooks use and why (it runs the real `hooks/run-hook.cmd`
+launcher as a probe, so discovery logic is not duplicated), the PATH order with a WSL
+launcher stub (`System32\bash.exe`, WindowsApps) flagged, the client (Claude Code or
+Copilot CLI) and version, the plugin version, and whether each hook command in `hooks/hooks.json` runs (each is executed the way the client runs it, in a throwaway directory with a benign payload).
+On a problem it prints the exact fix (put Git for Windows ahead of `System32` for the
+process that launches the client) and names the logged break-glass override
+`SGE_POLICY_OVERRIDE`. It is read-only: it never edits PATH, never disables hooks and
+never changes policy, so hooks stay enabled and fail closed. Output contains no home
+paths or environment values. A lighter version runs at session start and prints one
+line only when something is wrong. `--doctor` runs alone; it skips the components below.
 
 ---
 
