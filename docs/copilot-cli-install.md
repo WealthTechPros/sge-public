@@ -150,8 +150,8 @@ worktree-preservation family (epic #3216, SPEC-139 — an internal spec, not
 published here).
 It is **best-effort and never destructive**: it registers the session's linked
 worktree in the shared ownership registry, records a heartbeat and the end of
-the session, calls the checkpoint hook point (`skills/lib/checkpoint.sh`, when
-the #3234 slice provides it), and at the next *new* session start tells the
+the session, calls the checkpoint hook point (`skills/worktrees/checkpoint.sh`, the #3234
+store), and at the next *new* session start tells the
 agent which owned worktrees earlier sessions left open, each with its shared
 audit verdict. It never deletes, stashes, resets, commits, pushes, unregisters
 or opens a PR, never releases another session's claim, and never writes prompt
@@ -188,9 +188,13 @@ is safe: duplicate events are deduplicated per session.
 
 ### Known gaps (reported, not hidden)
 
-- Without `skills/lib/checkpoint.sh` nothing is copied: the state records
-  `checkpoint=unavailable` and the handoff says so. Even with it, the adapter
-  records only the exit status, never coverage.
+- Without `skills/worktrees/checkpoint.sh` nothing is copied: the state records
+  `checkpoint=unavailable` and the handoff says so. With it, the adapter
+  records only the exit status (0 `complete`, 10 `partial-rc10`, other
+  `failed-rcN`), never coverage detail or output; recovery handles come from
+  `checkpoint.sh list` or `/sge:tidy-worktrees`. The wiring is exercised against
+  the real store in the hook test, not on the live Copilot CLI (the earlier
+  headless runs predate the store).
 - A later session that merely reuses a worktree registered to an earlier
   session does not take ownership (a foreign claim is never overwritten), so
   its interruption is not reported under its own id; the worktree is still

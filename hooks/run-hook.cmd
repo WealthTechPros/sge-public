@@ -40,6 +40,16 @@ CMDBLOCK
 # Windows runs hooks through it, where a quoted-path-first command is a parse error) and sh accept. ---
 # Prefer the bash already running us ($BASH), else a bash that actually works
 # (a PATH shim that exits non-zero is skipped), else the standard locations.
+# dash's `.` drops operands (sge#3317, #3310), so a runner whose shell is dash (Claude Desktop's synced
+# plugin) arrives here with no $1. Recover the script from this shell's own command line, which still
+# holds the literal hooks.json text (`sh -c '. "<root>/hooks/run-hook.cmd" "<root>/hooks/x.sh"'`).
+# Linux /proc only; anywhere else, or if nothing matches, the diagnostic below still fails closed.
+if [ -z "${1:-}" ] && [ -r "/proc/$$/cmdline" ]; then
+  sge_cand="$(tr '\0' '\n' < "/proc/$$/cmdline" | sed -n 's/.*"\([^"]*\/hooks\/[^"\/]*\.sh\)".*/\1/p' | tail -n 1)"
+  sge_tok='${CLAUDE_PLUGIN_ROOT}'
+  case "$sge_cand" in "$sge_tok"/*) sge_cand="${CLAUDE_PLUGIN_ROOT:-}${sge_cand#"$sge_tok"}" ;; esac
+  if [ -n "$sge_cand" ]; then set -- "$sge_cand"; fi
+fi
 case "${1:-}" in
   *.sh) ;;
   '') echo "SGE hook launcher: no hook script was passed (a shell whose '.' ignores arguments, such as dash, cannot run hooks; use bash, zsh or Git Bash). Failing closed." >&2; exit 2 ;;
