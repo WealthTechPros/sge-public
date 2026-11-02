@@ -26386,6 +26386,36 @@ var nodeRequire = createRequire(import.meta.url);
 var { DatabaseSync } = nodeRequire("node:sqlite");
 var DEFAULT_SEARCH_LIMIT = 10;
 var MAX_SEARCH_LIMIT = 50;
+function boundedSearchIndex(entries, maxTokens, abstained = false) {
+  const result = {
+    responseMode: "index",
+    entities: [],
+    relations: [],
+    estimatedTokens: 0,
+    truncated: entries.length > 0,
+    ...abstained ? { abstained: true } : {}
+  };
+  const measure = () => {
+    let estimate = Math.ceil(JSON.stringify(result, null, 2).length / 4);
+    while (estimate !== result.estimatedTokens) {
+      result.estimatedTokens = estimate;
+      estimate = Math.ceil(JSON.stringify(result, null, 2).length / 4);
+    }
+  };
+  measure();
+  for (const entry of entries) {
+    result.entities.push(entry);
+    result.truncated = result.entities.length < entries.length;
+    measure();
+    if (result.estimatedTokens > maxTokens) {
+      result.entities.pop();
+      result.truncated = true;
+      measure();
+      break;
+    }
+  }
+  return result;
+}
 function normaliseAsOf(asOf) {
   const normalised = asOf.replace("T", " ").replace(/(\.\d+)?Z?$/, "");
   if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(normalised)) {
@@ -27232,11 +27262,30 @@ var CortexStore = class {
     const hydrated = this.hydrate(rows, asOf);
     const keptRows = rows.filter((_, i) => (hydrated[i]?.observations.length ?? 0) > 0);
     const entities = hydrated.filter((e) => e.observations.length > 0);
-    const relations = this.relationsFor(keptRows);
+    const relations = this.relationsFor(keptRows, asOf);
     this.audit("read_graph", this.scope, this.classification, {
       entities: entities.length,
       relations: relations.length
     });
+    return { entities, relations };
+  }
+  getNodes(ids, options = {}) {
+    if (!Array.isArray(ids) || ids.length < 1 || ids.length > 10 || ids.some((id) => typeof id !== "string" || id.length === 0)) {
+      throw new Error("get_nodes requires 1\u201310 non-empty string ids from an index response");
+    }
+    const asOf = options.asOf === void 0 ? void 0 : normaliseAsOf(options.asOf);
+    const uniqueIds = [...new Set(ids)];
+    const rows = this.activeScopes.length === 0 ? [] : this.db.prepare(
+      `SELECT id, name, type FROM nodes
+               WHERE id IN (${uniqueIds.map(() => "?").join(",")})
+                 AND scope IN (${this.scopePlaceholders()})`
+    ).all(...uniqueIds, ...this.activeScopes);
+    rows.sort((a, b) => uniqueIds.indexOf(a.id) - uniqueIds.indexOf(b.id));
+    const hydrated = this.hydrate(rows, asOf, options.includeCitations === true);
+    const keptRows = rows.filter((_, i) => (hydrated[i]?.observations.length ?? 0) > 0);
+    const entities = hydrated.map((entity, i) => ({ id: rows[i].id, ...entity })).filter((entity) => entity.observations.length > 0);
+    const relations = this.relationsFor(keptRows, asOf);
+    this.audit("get_nodes", this.scope, this.classification, { results: entities.length });
     return { entities, relations };
   }
   /**
@@ -27267,20 +27316,20 @@ var CortexStore = class {
       supersededBy: r.superseded_by
     }));
   }
-  /**
-   * Hybrid semantic retrieval (SPEC-052 S3): fuse three signals — FTS5 keyword
-   * relevance, on-device vector cosine similarity, and graph traversal — ranked
-   * by a combined score. CRITICAL: every signal is computed AFTER the default-
-   * deny scope filter (issue #348 / S2). The vector path is a NEW read path, so
-   * it applies the identical `WHERE scope IN (active set)` guard the FTS path
-   * does; a semantically-similar OUT-OF-SCOPE node can never surface.
-   *
-   * Fail-closed (no external fallback): if a query produces no usable tokens we
-   * return empty (never a network call); if an individual stored node has no
-   * usable vector we degrade to its FTS signal rather than dropping it.
-   */
   searchNodes(query, limitOrOpts) {
     const opts = typeof limitOrOpts === "number" ? { limit: limitOrOpts } : limitOrOpts ?? {};
+    if (opts.responseMode !== void 0 && !["full", "index"].includes(opts.responseMode)) {
+      throw new Error("responseMode must be full or index");
+    }
+    const indexMode = opts.responseMode === "index";
+    const maxTokens = opts.maxTokens ?? 1e3;
+    if (opts.maxTokens !== void 0 && (!indexMode || typeof opts.maxTokens !== "number" || !Number.isInteger(maxTokens) || maxTokens < 128 || maxTokens > 8e3)) {
+      throw new Error("maxTokens requires index mode and an integer from 128 to 8000");
+    }
+    if (indexMode && opts.includeCitations) {
+      throw new Error("Index entries are not evidence; use get_nodes with includeCitations");
+    }
+    const emptyResult = (abstained = false) => indexMode ? boundedSearchIndex([], maxTokens, abstained) : { entities: [], relations: [], ...abstained ? { abstained: true } : {} };
     const asOf = opts.asOf === void 0 ? void 0 : normaliseAsOf(opts.asOf);
     const auditSearch = (g) => {
       this.audit("search_nodes", this.scope, this.classification, {
@@ -27289,11 +27338,11 @@ var CortexStore = class {
       return g;
     };
     if (this.activeScopes.length === 0) {
-      return auditSearch({ entities: [], relations: [] });
+      return auditSearch(emptyResult());
     }
     const andQuery = ftsAndQuery(query);
     if (andQuery === "") {
-      return auditSearch({ entities: [], relations: [] });
+      return auditSearch(emptyResult());
     }
     const cap = typeof opts.limit === "number" && opts.limit > 0 ? Math.min(opts.limit, MAX_SEARCH_LIMIT) : DEFAULT_SEARCH_LIMIT;
     const ph = this.scopePlaceholders();
@@ -27303,7 +27352,7 @@ var CortexStore = class {
       ftsRows = this.ftsCandidates(orQuery, ph, opts);
     }
     if (ftsRows.length === 0) {
-      return auditSearch({ entities: [], relations: [] });
+      return auditSearch(emptyResult());
     }
     const ranks = ftsRows.map((r) => r.rank);
     const minRank = Math.min(...ranks);
@@ -27333,18 +27382,38 @@ var CortexStore = class {
     scored.sort((a, b) => b.score - a.score || a.row.rank - b.row.rank);
     const floor = resolveSupportFloor(opts.supportFloor ?? this.supportFloor);
     if ((scored[0]?.score ?? 0) < floor) {
-      return auditSearch({ entities: [], relations: [], abstained: true });
+      return auditSearch(emptyResult(true));
     }
     if (queryVec !== null && scored[0]?.hasStoredVec) {
       if (scored[0].vecScore < VECTOR_ABSTENTION_FLOOR) {
-        return auditSearch({ entities: [], relations: [], abstained: true });
+        return auditSearch(emptyResult(true));
       }
     }
     const top = scored.slice(0, cap).map((s) => s.row);
+    if (indexMode) {
+      const temporal = asOf ? `(o.valid_from IS NULL OR o.valid_from <= ?) AND (o.valid_to IS NULL OR o.valid_to > ?)` : "o.valid_to IS NULL";
+      const metadata = this.db.prepare(
+        `SELECT n.id, n.name, n.type AS entityType, n.updated_at AS updatedAt,
+                  COUNT(o.id) AS observationCount
+           FROM nodes n JOIN observations o ON o.node_id = n.id AND ${temporal}
+           WHERE n.id IN (${top.map(() => "?").join(",")})
+             AND n.scope IN (${ph}) GROUP BY n.id`
+      ).all(
+        ...asOf ? [asOf, asOf] : [],
+        ...top.map((row) => row.id),
+        ...this.activeScopes
+      );
+      const byId = new Map(metadata.map((entry) => [entry.id, entry]));
+      const entries = top.flatMap((row) => {
+        const entry = byId.get(row.id);
+        return entry ? [entry] : [];
+      });
+      return auditSearch(boundedSearchIndex(entries, maxTokens));
+    }
     const hydrated = this.hydrate(top, asOf, opts.includeCitations === true);
     const keptRows = top.filter((_, i) => (hydrated[i]?.observations.length ?? 0) > 0);
     const entities = hydrated.filter((e) => e.observations.length > 0);
-    return auditSearch({ entities, relations: this.relationsFor(keptRows) });
+    return auditSearch({ entities, relations: this.relationsFor(keptRows, asOf) });
   }
   /**
    * Record whether a retrieval was useful (#731 hit-rate instrumentation). Two
@@ -27499,8 +27568,12 @@ var CortexStore = class {
    *   2. the relation's own `scope` must be in the active set — so an edge
    *      written in an out-of-scope context cannot leak even if both endpoint
    *      ids happened to exist in-scope.
+   *
+   * `asOf`, when given, additionally bounds relations to `created_at <= asOf`
+   * — a point-in-time read must not surface a relation created later on the
+   * same day. Omit it for current reads, which are left unfiltered.
    */
-  relationsFor(nodes) {
+  relationsFor(nodes, asOf) {
     if (nodes.length === 0 || this.activeScopes.length === 0) {
       return [];
     }
@@ -27511,8 +27584,9 @@ var CortexStore = class {
     const rows = this.db.prepare(
       `SELECT from_id, to_id, type FROM relations
          WHERE from_id IN (${placeholders}) AND to_id IN (${placeholders})
-           AND scope IN (${scopePh})`
-    ).all(...ids, ...ids, ...this.activeScopes);
+           AND scope IN (${scopePh})
+           ${asOf === void 0 ? "" : "AND created_at <= ?"}`
+    ).all(...ids, ...ids, ...this.activeScopes, ...asOf === void 0 ? [] : [asOf]);
     return rows.map((r) => ({
       from: idToName.get(r.from_id) ?? r.from_id,
       to: idToName.get(r.to_id) ?? r.to_id,
@@ -30880,7 +30954,7 @@ var TOOLS = [
   },
   {
     name: "search_nodes",
-    description: 'Search for entities and their relations using AND-biased text search with relevance ranking. Tries an all-terms (AND) match first for precision and falls back to any-term (OR) only when that is empty. Optional filters narrow BEFORE ranking: entityType (restrict to one node type, e.g. "gotcha") and sinceDays (only entities updated within the last N days). Default limit is small (10); pass limit to widen (max 50). GROUNDING (SPEC-052/A4): pass includeCitations to get, per entity, the supporting observation rows with their provenance. ABSTENTION: when candidates matched but none cleared the support floor, the result is empty AND carries "abstained": true \u2014 treat that as "the store does not know", distinct from an empty result with no abstained flag, which means nothing matched at all. Neither is a confident answer: prefer primary sources over guessing.',
+    description: 'Search for entities and their relations using AND-biased text search with relevance ranking. Tries an all-terms (AND) match first for precision and falls back to any-term (OR) only when that is empty. Optional filters narrow BEFORE ranking: entityType (restrict to one node type, e.g. "gotcha") and sinceDays (only entities updated within the last N days). Default limit is small (10); pass limit to widen (max 50). For token-efficient discovery use responseMode="index", then get_nodes for selected ids (local store only). GROUNDING (SPEC-052/A4): pass includeCitations to get, per entity, the supporting observation rows with their provenance. ABSTENTION: when candidates matched but none cleared the support floor, the result is empty AND carries "abstained": true \u2014 treat that as "the store does not know", distinct from an empty result with no abstained flag, which means nothing matched at all. Neither is a confident answer: prefer primary sources over guessing.',
     inputSchema: {
       type: "object",
       properties: {
@@ -30893,6 +30967,17 @@ var TOOLS = [
         sinceDays: {
           type: "number",
           description: "Optional: only entities updated within the last N days (recency filter)."
+        },
+        responseMode: {
+          type: "string",
+          enum: ["full", "index"],
+          description: "Default full preserves existing output. Index returns ranked ids, names, types, node update times and observation counts only; no facts, citations or relations. Discover first, then get_nodes for selected ids. Local store only."
+        },
+        maxTokens: {
+          type: "integer",
+          minimum: 128,
+          maximum: 8e3,
+          description: "Index-only response budget (default 1000), estimated as JSON characters/4, NOT an exact tokenizer limit. Omits whole trailing entries and reports truncated. No effect on ranking."
         },
         supportFloor: {
           type: "number",
@@ -30911,14 +30996,38 @@ var TOOLS = [
     }
   },
   {
+    name: "get_nodes",
+    description: "Fetch 1\u201310 exact scoped ids from a search_nodes index, without repeating a broad search or loading the whole graph. Missing, erased or out-of-scope ids return no content. Current facts by default; optional as_of and includeCitations use the existing temporal/provenance rules. Index metadata is not evidence: fetch facts before answering, and recheck changing status live. Local store only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ids: {
+          type: "array",
+          minItems: 1,
+          maxItems: 10,
+          items: { type: "string", minLength: 1 }
+        },
+        includeCitations: {
+          type: "boolean",
+          description: "Return observation-level provenance alongside the selected facts."
+        },
+        as_of: {
+          type: "string",
+          description: "Optional UTC datetime; same historical validity rules as search_nodes."
+        }
+      },
+      required: ["ids"]
+    }
+  },
+  {
     name: "read_graph",
-    description: "Get recent entities and their relations. Optional as_of (SPEC-052/A1): a UTC datetime for a point-in-time read \u2014 the graph as it was at that instant (superseded observations surface, then-future ones do not). NOTE (#1709): superseded observations are retained permanently by design, so rewriting an entity is NOT erasure \u2014 the prior text stays readable here. To erase content use delete_entity or delete_scope, which hard-delete superseded history. Omitted \u2192 current recall. Not supported in broker mode.",
+    description: "Get recent entities and their relations. Optional as_of (SPEC-052/A1): return observations valid at that UTC instant and currently stored relations created by then. Deleted relations are not retained; this is not a complete historical graph snapshot. NOTE (#1709): superseded observations are retained permanently by design, so rewriting an entity is NOT erasure \u2014 the prior text stays readable here. To erase content use delete_entity or delete_scope, which hard-delete superseded history. Omitted \u2192 current recall. Not supported in broker mode.",
     inputSchema: {
       type: "object",
       properties: {
         as_of: {
           type: "string",
-          description: "Optional (SPEC-052/A1): a UTC datetime ('YYYY-MM-DD HH:MM:SS', or ISO-8601 'T' form) for a point-in-time read of the graph. Superseded observations are retained permanently by design (#1709), so this surfaces text that a later rewrite retired \u2014 rewriting is NOT erasure; use delete_entity/delete_scope for that. Omitted \u2192 current recall. Not supported in broker mode."
+          description: "Optional (SPEC-052/A1): a UTC datetime ('YYYY-MM-DD HH:MM:SS', or ISO-8601 'T' form) for observation validity and currently stored relations created by then, not a complete historical graph snapshot. Deleted relations cannot be recovered. Superseded observations are retained permanently by design (#1709), so this surfaces text that a later rewrite retired \u2014 rewriting is NOT erasure; use delete_entity/delete_scope for that. Omitted \u2192 current recall. Not supported in broker mode."
         }
       }
     }
@@ -31058,6 +31167,9 @@ function errorResult(err) {
 }
 async function asyncDispatchTool(store, name, args) {
   try {
+    if (name === "get_nodes" || name === "search_nodes" && (args.responseMode !== void 0 && args.responseMode !== "full" || args.maxTokens !== void 0)) {
+      return errorResult(new Error("Progressive index/detail retrieval requires the local store"));
+    }
     if ((name === "read_graph" || name === "search_nodes") && args.as_of !== void 0) {
       return errorResult(
         new Error(
@@ -31187,10 +31299,23 @@ function dispatchTool(store, name, args) {
           includeCitations: args.includeCitations === true,
           // Per-call floor override; an out-of-range value is clamped back to
           // the configured default by resolveSupportFloor, not honoured.
-          supportFloor: typeof args.supportFloor === "number" ? args.supportFloor : void 0
+          supportFloor: typeof args.supportFloor === "number" ? args.supportFloor : void 0,
+          responseMode: args.responseMode,
+          maxTokens: args.maxTokens
         });
         return textResult(JSON.stringify(result, null, 2));
       }
+      case "get_nodes":
+        return textResult(
+          JSON.stringify(
+            store.getNodes(args.ids, {
+              asOf: asOfArg(args),
+              includeCitations: args.includeCitations === true
+            }),
+            null,
+            2
+          )
+        );
       case "read_graph": {
         const asOf = asOfArg(args);
         const graph = asOf !== void 0 ? store.readGraphAsOf(asOf) : store.readGraph();
