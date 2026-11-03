@@ -1,6 +1,6 @@
 ---
 description: Use when installing the design-quality gate (SPEC-115) in a repo — "install the design gate", "enforce design quality". Extracts a DESIGN.md contract from reference sites (or brand/), scaffolds a /design-system route, and wires .claude/design-review/ and CLAUDE.md.
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash(mkdir:*), Bash(git status:*), Bash(git checkout:*), Bash(git add:*), Bash(git commit:*), Bash(git push:*), Bash(gh repo view:*), Bash(gh pr create:*), mcp__playwright__browser_navigate, mcp__playwright__browser_resize, mcp__playwright__browser_take_screenshot
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash(mkdir:*), Bash(git status:*), Bash(git ls-files:*), Bash(git checkout:*), Bash(git add:*), Bash(git commit:*), Bash(git push:*), Bash(gh repo view:*), Bash(gh pr create:*), mcp__playwright__browser_navigate, mcp__playwright__browser_resize, mcp__playwright__browser_take_screenshot
 ---
 
 ## Role
@@ -63,8 +63,24 @@ Install the design-quality enforcement loop's per-repo taste contract
 /sge:design-gate [2-3 reference URLs or screenshot paths]
 ```
 
-No arguments: the skill asks for references before extracting, or offers
-the `brand/` seed path if the repo has one.
+No arguments: if `.claude/design-review/taste-profile.md` exists (written by
+`/sge:design-discover`), use its confirmed shortlist instead of asking for
+URLs, and seed the Direction and Banned list from it, but only when the profile
+says `Direction status: confirmed`. The profile is local, operator-written
+state: first reject it when any component of
+`.claude/design-review/taste-profile.md` is a symlink (a symlinked
+`.claude/design-review` would make git treat the resolved file as untracked).
+Then run `git ls-files --error-unmatch .claude/design-review/taste-profile.md`
+and refuse a profile that git tracks (a branch can commit one with the
+status already set), then send the operator back to `/sge:design-discover`.
+Even for a confirmed, untracked profile, show the operator the shortlist,
+Direction and Banned entries in this run and have them confirm before seeding
+Direction or Banned or writing `DESIGN.md`; the status line alone never skips
+that confirmation.
+For an unconfirmed profile, never seed Direction or Banned or write `DESIGN.md`:
+ask the operator to confirm the direction first (or send them back to `/sge:design-discover`). Otherwise the skill asks
+for references before extracting, offers the `brand/` seed path if the repo has
+one, or points an operator who cannot name any at `/sge:design-discover`.
 
 > **Target repo.** This installer writes into the **current working
 > directory**'s checkout. When dispatched from a hub/control checkout
@@ -176,4 +192,5 @@ gate is not ported.
 - `SPEC-115-design-quality-enforcement-loop.md` — full spec
 - `hooks/ui-edit-tracker.sh`, `hooks/design-gate.sh` — the plugin-shipped hooks this contract gates
 - `agents/design-reviewer.md` — the plugin-shipped adversarial reviewer
+- `skills/design-discover/SKILL.md` — taste discovery that produces `taste-profile.md`
 - `skills/pr-review/references/design-evidence.md` — the merge-gate integration
