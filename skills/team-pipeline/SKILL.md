@@ -225,7 +225,7 @@ commands: [mechanisms](references/mechanisms.md).
 Once reconciled, validate numeric entries and deduplicate, preserving dispatch
 labels, `/sge:build-ready-audit` and existing selection criteria. Incomplete ACs,
 open/unknown dependencies and unresolved decisions remain paused; never assume
-READY. Eligible issues carrying the dispatch label (declared, else `sge-ready`) without a marker are dispatchable. Each lane
+READY. Eligible issues carry the dispatch label (declared, else `sge-ready`) and are admitted (`scripts/issue-read.sh admitted <N>` exits 0); they are dispatchable without a marker from `/sge:issue-intake`. Each lane
 runs fresh Phase 0.5 governance classification for its current scope.
 Never adopt `SGE_GOVTRACE_VERDICT` or comment-cached verdicts. Optional
 `/sge:issue-intake` is readiness analysis, including unattended, not authorisation.
