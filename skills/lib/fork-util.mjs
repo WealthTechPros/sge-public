@@ -17,7 +17,7 @@
  * Commands
  * --------
  *   node fork-util.mjs register --handle-id <id> --output-file <path>
- *                               [--issue <N>] [--repo <owner/repo>] [--fresh]
+ *                               [--issue <N>] [--repo <owner/repo|org/project/repo>] [--fresh]
  *     Record that a fork was dispatched and will write its verdict JSON
  *     (governance-trace Step-7 shape) to <output-file>.
  *     Writes /tmp/sge-fork-<id>.json with { outputFile, resultFile, registeredAt }.
@@ -180,10 +180,11 @@ function cmdRegister(flags) {
   // wrong repo (e.g. the hub/control session's own cwd) produces a verdict for
   // the right issue NUMBER in the wrong repo — join() rejects it.
   // A --repo that is present but empty/valueless (`--repo "$REPO"`, $REPO unset)
-  // or not owner/repo must fail closed: silently binding null would skip the
-  // repo-echo check in join. Omitting --repo entirely stays back-compat.
-  if ("repo" in flags && !(typeof flags["repo"] === "string" && /^[^/\s]+\/[^/\s]+$/.test(flags["repo"]))) {
-    die(1, `--repo must be owner/repo (got ${flags["repo"] === true ? "no value" : JSON.stringify(flags["repo"])})`);
+  // or neither owner/repo nor org/project/repo must fail closed: silently
+  // binding null would skip the repo-echo check in join. Omitting --repo
+  // entirely stays back-compat.
+  if ("repo" in flags && !(typeof flags["repo"] === "string" && /^[^/\s]+\/[^/\s]+(?:\/[^/\s]+)?$/.test(flags["repo"]))) {
+    die(1, `--repo must be owner/repo or org/project/repo (got ${flags["repo"] === true ? "no value" : JSON.stringify(flags["repo"])})`);
   }
   const repo = typeof flags["repo"] === "string" ? flags["repo"] : null;
 
