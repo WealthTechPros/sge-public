@@ -1,0 +1,66 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/WealthTechPros/sge/docs/schemas/review-record.schema.json",
+  "title": "SGE review record",
+  "description": "One machine-readable record per merged PR, written by /sge:pr-review at verdict time to .sge/review-records/<pr>.json on the PR branch: what was checked, by what, and who decided. The human decision is a reference to evidence the agent cannot write, never free text. Cross-field rules (a T2 PR, or a declared T2 floor, needs a github-review decision; the file name must match pr) are enforced by validateArtefacts in scripts/artefact-schemas.mjs. sge#3322, ADLC epic sge#3320.",
+  "type": "object",
+  "required": ["schema_version", "pr", "issue", "spec_id", "tier", "review", "evals", "policy_checks", "model_id", "plugin_version", "human_decision", "timestamps"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "pr": { "type": "integer", "description": "Pull request number. Must equal the number in the file name." },
+    "issue": { "type": "integer", "description": "Issue the PR closes or implements." },
+    "spec_id": { "type": "string", "minLength": 1, "description": "SPEC-NNN the change is governed by, or \"none\" when governance-trace classed it spec-less." },
+    "tier": {
+      "type": "object",
+      "required": ["resolved", "declared_floor"],
+      "properties": {
+        "resolved": { "type": "string", "enum": ["T0", "T1", "T2"], "description": "Tier the resolver derived from the diff." },
+        "declared_floor": { "type": "string", "enum": ["none", "T0", "T1", "T2"], "description": "Floor a trusted human declared at intent; the resolver may raise the tier above it, never lower it." }
+      },
+      "additionalProperties": false
+    },
+    "review": {
+      "type": "object",
+      "required": ["verdict", "depth"],
+      "properties": {
+        "verdict": { "type": "string", "enum": ["pass", "fail", "incomplete"], "description": "The pr-review sge-verdict value." },
+        "depth": { "type": "string", "minLength": 1, "description": "Review depth, for example light or full." }
+      },
+      "additionalProperties": false
+    },
+    "evals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "result"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "result": { "type": "string", "enum": ["pass", "fail", "skipped"] }
+        },
+        "additionalProperties": false
+      }
+    },
+    "policy_checks": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Names of the policy checks that ran." },
+    "model_id": { "type": "string", "minLength": 1, "description": "Exact model id that produced the verdict, pinned." },
+    "plugin_version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.-]+)?$", "description": "SGE plugin version, pinned (semver, never \"latest\")." },
+    "human_decision": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["github-review", "sampled", "auto"], "description": "github-review for T2 (review_id required); sampled or auto for T0/T1." },
+        "review_id": { "type": "integer", "description": "GitHub pull request review id (API), evidence the agent cannot write. Required when kind is github-review, forbidden otherwise." }
+      },
+      "additionalProperties": false
+    },
+    "timestamps": {
+      "type": "object",
+      "required": ["started_at", "verdict_at"],
+      "properties": {
+        "started_at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$" },
+        "verdict_at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

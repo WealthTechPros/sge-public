@@ -154,6 +154,23 @@ The reviewer then scores from the screenshots plus `measurements.json`
 motion) and marks the verdict `Evidence: static`. Multi-state routes: pass
 `--plan plan.json` (format in the script header).
 
+## Copilot parity (#3294)
+
+Copilot-authored UI gets the same contract by projecting `DESIGN.md` into
+Copilot's instruction files. Re-run after every `DESIGN.md` change, and add
+`--check` to CI so a stale projection fails:
+
+```bash
+node <sge-plugin-dir>/scripts/project-design-md.mjs           # write
+node <sge-plugin-dir>/scripts/project-design-md.mjs --check   # CI freshness
+```
+
+It writes a marker-delimited block in `.github/copilot-instructions.md`
+(your own text outside the markers is kept), `.github/instructions/ui.instructions.md`
+(applyTo = the UI glob) and `.github/prompts/{design-review,design-variants,a11y-audit}.prompt.md`.
+On Copilot, enforcement is the `/sge:pr-review` merge gate only; the Stop-hook
+gate is not ported.
+
 ## Related
 
 - `SPEC-115-design-quality-enforcement-loop.md` — full spec

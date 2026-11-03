@@ -814,3 +814,15 @@ The currency rule lives in one place, `skills/pr-review/gate-labels.sh` (`classi
 - **Daemon review selection** re-selects a PR whose `pr-reviewed` is provably stale, and does so again at dispatch time (`is_still_reviewable`).
 - **Holds** (`hold`, `do-not-merge`, `needs-human`, `blocked`) are not verdict labels. A push never releases one.
 - **`hold-gate.yml`** reads the PR's labels from the API at run time, not from the event payload. A job re-run replays the original payload, so it could not see a hold that changed after the event.
+
+## Review record (sge#3322)
+
+At verdict time, `/sge:pr-review` also commits `.sge/review-records/<pr>.json` to the PR branch:
+issue, spec id, resolved tier and declared floor, this verdict and depth, eval results, policy
+checks run, the model id and plugin version in use (both pinned), a human decision reference and
+timestamps. The human decision is never free text: a GitHub review approval id (`github-review`,
+required for T2 or a declared T2 floor) or `sampled` / `auto` for T0/T1. Shape:
+[`docs/schemas/review-record.schema.json`](../../../docs/schemas/review-record.schema.json);
+fields, writers and retention: `docs/compliance/review-records.md`. Validate with
+`check-artefact-schemas.mjs` (C42). `/sge:governance-trace` and `/sge:regulatory-trace` read the
+record in preference to the PR-body markers.
