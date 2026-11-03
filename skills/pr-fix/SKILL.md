@@ -225,7 +225,7 @@ If a conflict's correct resolution is genuinely ambiguous (e.g. two divergent sc
 
 ## Resolve blocking review comments
 
-Full detail: [`references/review-comments.md`](references/review-comments.md).
+Address each finding (fix, or decline with a reason) before resolving its thread; never resolve just to clear the gate. Detail: [`references/review-comments.md`](references/review-comments.md).
 
 ## Spec-drift gate failures — control-preserving resolution
 
@@ -276,7 +276,7 @@ Release it whether or not the PR went green — the claim signals *"a fix agent 
 
 ## Reporting back
 
-- **Fixed:** short summary, one bullet per check that needed work, plus "verified locally: <commands run>". Note any conflicts resolved, review comments addressed, and follow-up issues filed.
+- **Fixed:** short summary, one bullet per check that needed work, plus "verified locally: <commands run>". Note any conflicts resolved, follow-up issues filed, and each review thread with its classification and evidence (fixed, declined-with-reason or still-open); never report a thread as done just because it is resolved.
 - **Stuck:** name the check, paste the actual error excerpt, propose two alternative fixes.
 
 **Always end with the machine-readable exit report** — the shared
