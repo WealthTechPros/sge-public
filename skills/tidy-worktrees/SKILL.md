@@ -42,9 +42,10 @@ Two modes — **both always run Phases 0–2 (sync, inventory, safety audit)**:
 /sge:tidy-worktrees                      # interactive, per-item rescue
 /sge:tidy-worktrees --force              # audited fast sweep, one confirmed plan
 /sge:tidy-worktrees --force repoA repoB  # multi-repo
+/sge:tidy-worktrees --inbox [repo dirs…]   # read-only: what is open, one suggested action each
 ```
 
-`$ARGUMENTS`: `--force` selects the fast path; any remaining tokens are repo directories (default: the current repo).
+`$ARGUMENTS`: `--force` selects the fast path; `--inbox` runs `bash inbox.sh <repo dirs>` and stops (suggestions only, nothing is deleted, pushed or opened); other tokens are repo directories (default: the current repo). Recovery, restore and limits: [`docs/worktree-lifecycle.md`](../../docs/worktree-lifecycle.md).
 
 > **Target repo.** This skill audits and mutates the repo in the **current
 > working directory** (or the repo directories passed in `$ARGUMENTS`, for
@@ -135,6 +136,8 @@ claim=$(roc_claim_state "$wt")
 An expired claim (older than the TTL with the owning agent presumably dead) self-heals: the worktree falls through to normal audit rules rather than being kept forever.
 
 Recency guard, stash attribution, squash-merge cross-check and the per-worktree check commands: [`references/safety-audit-checks.md`](references/safety-audit-checks.md).
+
+A worktree registered by the lifecycle hooks (`worktree-lifecycle.sh list`) is also audited with the shared `worktree-lifecycle.sh audit <wt> <owner-session>`; a verdict of KEEP/VALUABLE or an uncertain audit always wins over `candidate`. For uncommitted work, offer a checkpoint (`../worktrees/checkpoint.sh checkpoint <wt> <session>`); exit 10 means partial, so the worktree stays and is never "safe to remove". A checkpoint never authorises deletion.
 
 Build a table — one row per worktree/branch — with verdict, reason, and **tip SHA**.
 
