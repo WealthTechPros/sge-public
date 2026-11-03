@@ -1,5 +1,6 @@
 ---
-description: Use when an unattended SGE session's throughput collapses or could (orphaned servers, broken pnpm symlinks, too many sessions, hung install), or when hooks fail with "Hook command failed" (--doctor: which bash, PATH order, versions, fix). Hourly or preflight.
+description: >-
+  Use when an unattended SGE session's throughput collapses or could (orphaned servers, broken pnpm symlinks, too many sessions, hung install), or when hooks fail with "Hook command failed" (--doctor: which bash, PATH order, versions, fix). Hourly or preflight.
 argument-hint: "[--preflight] [--reap] [--throughput] [--doctor] [--dry-run]"
 ---
 
