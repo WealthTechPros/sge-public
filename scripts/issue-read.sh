@@ -64,6 +64,12 @@
 #       else `sge-ready`, on EVERY backend, so the list is never unfiltered. A
 #       malformed declaration still fails loud (no default, no unfiltered).
 #       Interactive callers omit it and keep the unchanged "empty = no filter".
+#       A declared-but-empty `dispatch-label:` line fails closed with
+#       --autonomous (sge#3321).
+#   issue-read.sh admitted <number>
+#       Exit 0 only if a trusted human admitted this exact issue body (the
+#       dispatch-gate workflow's marker matches the live body hash); else exit 1.
+#       Autonomous dispatch calls it before claiming any issue (sge#3321).
 #
 # SPEC-057: always run from the target repo's checkout cwd — shell state does
 # NOT persist across agent tool calls, so re-enter the resolved cwd at the top
@@ -849,6 +855,17 @@ _ir_main() {
       fi
       ;;
 
+    admitted)
+      # sge#3321: has a trusted human admitted THIS EXACT issue body? Exit 0 only
+      # when the newest dispatch-gate marker (github-actions[bot]) matches the
+      # live body hash. GitHub only; other ALMs have no admission marker yet, so
+      # they refuse (fail closed) rather than pass unchecked.
+      local n="${2:-}"
+      [ -n "$n" ] || _ir_usage 'admitted needs <number>'
+      [ "$(_ir_alm)" = "github" ] || { _ir_err "admitted: no admission marker for this ALM — refusing (fail closed)"; exit 1; }
+      node "$(dirname "${BASH_SOURCE[0]}")/dispatch-gate.mjs" verify --repo "${GH_REPO:-$(gh repo view --json nameWithOwner --jq .nameWithOwner)}" --issue "$n" || exit 1
+      ;;
+
     dispatch-label)
       # --autonomous (sge#3243): the resolution for AUTONOMOUS discovery
       # (team-pipeline, issue-loop, --fleet, the idle lane): the declared label,
@@ -861,6 +878,13 @@ _ir_main() {
       case "${2:-}" in
         '') _ir_dispatch_label ;;
         --autonomous)
+          # A declared-but-EMPTY `dispatch-label:` (sge#3321) is a broken gate,
+          # not "undeclared": refuse rather than fall back to the default, so an
+          # edit that blanks the value cannot widen or silently re-route discovery.
+          if grep -qE '^dispatch-label:[[:space:]]*$' CLAUDE.md 2>/dev/null; then
+            _ir_err "dispatch-label: CLAUDE.md declares an empty dispatch-label — autonomous discovery refuses (fail closed, sge#3321); set a label or remove the line"
+            exit 2
+          fi
           lbl="$(_ir_dispatch_label)" || exit $?
           printf '%s
 ' "${lbl:-$_IR_DEFAULT_DISPATCH_LABEL}"

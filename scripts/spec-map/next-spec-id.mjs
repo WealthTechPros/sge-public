@@ -31,6 +31,7 @@ import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { TRUSTED_ASSOCIATIONS, botLabellersFromEnv } from "../dispatch-gate.mjs";
 
 const SPEC_HOMES = ["docs/specs", "docs/sgd-build/specs"];
 const MARKER_OPENS = ["<!-- sge-spec-reservation:", "<!-- sge-intake:"];
@@ -42,6 +43,33 @@ const ID_RE = /^(?:SPEC|SGD|SGE)-(\d+)$/;
 // concurrent new-spec issues seen in practice and far below a number that
 // could burn the line.
 export const HEADROOM = 100;
+
+/**
+ * A reservation comment counts only from a trusted HUMAN (sge#3321): author
+ * association OWNER/MEMBER/COLLABORATOR and not a bot or GitHub App. The one
+ * exception is a bot named in the SAME allow-list the dispatch gate uses
+ * (SGE_DISPATCH_BOT_LABELLERS, default: the one configured agent App): exact login and type Bot
+ * (REST `login`+`type`, or gh's `app/<name>` / `<name>` with is_bot true). Any
+ * other bot, or a lookalike login, is ignored. A comment with no author data is
+ * untrusted (fail closed): anyone can comment on a public issue, and a forged
+ * marker must not squat the number line.
+ */
+export function isTrustedComment(comment, botLabellers = botLabellersFromEnv()) {
+  const author = comment?.author ?? comment?.user ?? {};
+  const login = String(author.login ?? "");
+  if (!login) return false;
+  const isBot = /\[bot\]$/.test(login) || login.startsWith("app/") || author.is_bot === true || author.type === "Bot";
+  if (isBot) {
+    return botLabellers.some((allowed) => {
+      const name = allowed.slice(0, -"[bot]".length);
+      const restShape = author.type === "Bot" && login === allowed;
+      const ghShape = author.is_bot === true && (login === `app/${name}` || login === name);
+      return restShape || ghShape;
+    });
+  }
+  const assoc = comment.authorAssociation ?? comment.author_association;
+  return TRUSTED_ASSOCIATIONS.includes(assoc);
+}
 
 /** Numbers a spec file name claims (handles NNN-to-MMM batch stubs). */
 function claimedNumbers(fileName) {
@@ -91,7 +119,8 @@ function parseMarker(body) {
  * or whose id is malformed, holds nothing. So does one whose number is not a
  * safe integer or is above `onDiskMax + HEADROOM` (a forged comment cannot
  * squat the number line), and when several issues claim one id the
- * lowest-numbered issue keeps it. No commenter identity is consulted.
+ * lowest-numbered issue keeps it. Only comments from a trusted human
+ * (isTrustedComment) are read at all (sge#3321).
  * @param {{number:number, comments:{body:string, createdAt:string}[]}[]} issues
  * @param {{onDiskMax?: number}} [opts] highest spec number on disk; omitted = no cap
  * @returns {{issue:number, id:number}[]}
@@ -100,6 +129,7 @@ export function reservationsFromIssues(issues, { onDiskMax = Infinity } = {}) {
   const out = [];
   for (const issue of issues ?? []) {
     const markers = (issue.comments ?? [])
+      .filter((c) => isTrustedComment(c))
       .map((c) => ({ at: c.createdAt ?? "", m: parseMarker(c.body) }))
       .filter((x) => x.m)
       .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
