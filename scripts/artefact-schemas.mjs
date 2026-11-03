@@ -36,6 +36,7 @@ export const SCHEMA_FILES = {
   spec: "spec.schema.json",
   adr: "adr.schema.json",
   architecture: "architecture.schema.json",
+  "review-record": "review-record.schema.json",
 };
 
 /** Where each artefact lives, in the order a repo is searched. */
@@ -47,6 +48,8 @@ export const MODEL_FILES = [
 ];
 export const SPEC_DIRS = ["docs/sgd-build/specs", "docs/specs", "docs/features"];
 const ADR_DIRS = ["docs/decisions", "docs/adr"];
+const REVIEW_RECORD_DIR = ".sge/review-records";
+const REVIEW_RECORD_FILE_RE = /^\d+\.json$/;
 const ARCHITECTURE_FILE = "docs/sgd-build/architecture.yaml";
 const SPEC_FILE_RE = /^(SPEC|SGD|SGE)-\d+.*\.md$/;
 const SPEC_ID_RE = /^(?:SGE|SGD|SPEC)-\d+(?:-to-\d+)?/;
@@ -490,6 +493,7 @@ export function discoverArtefacts(root) {
   for (const d of SPEC_DIRS) for (const file of listDir(root, d, SPEC_FILE_RE)) out.push({ kind: "spec", file });
   for (const d of ADR_DIRS) for (const file of listDir(root, d, ADR_FILE_RE)) out.push({ kind: "adr", file });
   if (existsSync(path.join(root, ARCHITECTURE_FILE))) out.push({ kind: "architecture", file: ARCHITECTURE_FILE });
+  for (const file of listDir(root, REVIEW_RECORD_DIR, REVIEW_RECORD_FILE_RE)) out.push({ kind: "review-record", file });
   return out;
 }
 
@@ -526,6 +530,46 @@ function sectionViolations(schema, text, data, block) {
   return out;
 }
 
+/**
+ * Review records (sge#3322): the schema plus the cross-field rules the
+ * draft-07 subset cannot express. A T2 PR, or one with a declared T2 floor,
+ * needs a github-review decision; review_id belongs to github-review only;
+ * the file name carries the PR number.
+ */
+function reviewRecordViolations(file, text, schema) {
+  let rec;
+  try {
+    rec = JSON.parse(text);
+  } catch (e) {
+    return [{ field: "json", message: `is not valid JSON: ${e.message}` }];
+  }
+  const out = validateSchema(schema, rec);
+  if (!rec || typeof rec !== "object" || Array.isArray(rec)) return out;
+  const filePr = Number(path.basename(file, ".json"));
+  if (Number.isInteger(rec.pr) && rec.pr !== filePr) out.push({ field: "pr", message: `is ${rec.pr}, but the file name says ${filePr}` });
+  const hd = rec.human_decision;
+  if (hd && typeof hd === "object") {
+    const t2 = rec.tier?.resolved === "T2" || rec.tier?.declared_floor === "T2";
+    if (t2 && hd.kind !== "github-review") out.push({ field: "human_decision.kind", message: `is ${show(hd.kind)}; a T2 PR (resolved or declared floor) needs a github-review decision` });
+    if (hd.kind === "github-review" && hd.review_id === undefined) out.push({ field: "human_decision.review_id", message: "is required when kind is github-review" });
+    if (hd.kind !== "github-review" && hd.review_id !== undefined) out.push({ field: "human_decision.review_id", message: "is only allowed when kind is github-review" });
+  }
+  return out;
+}
+
+/**
+ * Years a review record is retained after the repo's life ends. Configurable
+ * in .sge/config.yml as review_record_retention_years; 6 is a PROPOSAL (life
+ * of repo + 6 years) pending the ADLC epic's retention decision (sge#3320).
+ */
+export const DEFAULT_REVIEW_RECORD_RETENTION_YEARS = 6;
+export function reviewRecordRetentionYears(root) {
+  const cfg = path.join(root, ".sge", "config.yml");
+  if (!existsSync(cfg)) return DEFAULT_REVIEW_RECORD_RETENTION_YEARS;
+  const m = readFileSync(cfg, "utf8").match(/^review_record_retention_years:[ \t]*(\d+)[ \t]*(?:#.*)?$/m);
+  return m ? Number(m[1]) : DEFAULT_REVIEW_RECORD_RETENTION_YEARS;
+}
+
 /** The violations of one artefact: [{ field, message }]. */
 function artefactViolations(root, kind, file, schema) {
   const abs = path.join(root, file);
@@ -537,6 +581,7 @@ function artefactViolations(root, kind, file, schema) {
     return validateSchema(schema, doc);
   }
   const text = readFileSync(abs, "utf8");
+  if (kind === "review-record") return reviewRecordViolations(file, text, schema);
   if (kind === "capability-model") {
     const { version, domains, unparsed } = readCapabilityModel(text);
     const doc = { domains };

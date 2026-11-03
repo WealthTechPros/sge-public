@@ -289,6 +289,8 @@ End with exactly this JSON shape:
 }
 ```
 
+**Review record first.** For a merged PR, read the governance tier and the `pr-review` verdict from `.sge/review-records/<pr>.json` in preference to the `sge-governance-tier` and `sge-phase5-verdict` comment markers (the markers are the fallback for PRs that predate the record): [`references/review-record.md`](references/review-record.md).
+
 The Step 0.5 cache-hit variant (`"cacheReused": true`, `commentPosted: false`, `matchConfidence: "medium"`) and the meaning of every field (`issue`/`repo` echo, `verdict`, `layers`, `requirementChanges[]`, `suggestedSpecStub`, `suggestedCapabilityModelEdit`, `nonGoalConflict`, `commentPosted`): [`references/verdict-schema.md`](references/verdict-schema.md).
 
 > **TASK COMPLETE — STOP HERE** as a fork (see Fork mandate above).
