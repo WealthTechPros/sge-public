@@ -94,7 +94,28 @@ copying anything back by hand.
 Cleanup keeps the order **worktrees, then local branches, then separately
 authorised remote branches**. On Windows the junction guard
 (`skills/tidy-worktrees/references/windows-junction-guard.md`) runs before every
-`git worktree remove`, so a junction target is never deleted. One consolidated
-plan with tip SHAs is shown and nothing is removed until you confirm it, in
-default mode and under `--force`. Recovery refs and checkpoint data are never
-part of a deletion plan.
+`git worktree remove`, so a junction target is never deleted. Default mode
+first shows one consolidated plan of clean, exact merged-PR worktrees and
+local branches, with PR links and tip SHAs: remove all listed, choose a subset,
+or keep everything. It then assesses remaining unprotected work item by item,
+recommending checkpoint locally, resume/rescue for review, keep or explicit
+discard from actual changes and completion evidence. Unknown value means
+keep; protected work, including ownership locks, is never offered for discard.
+
+Nothing is removed without confirming the exact plan. Revalidate each item
+immediately before removal; remote branches require separate, explicit
+approval. `--force` retains its single audited-plan confirmation and never
+authorises rescue. Recovery refs and checkpoint data are never part of a
+deletion plan. See the skill's
+[two-stage decision flow](../skills/tidy-worktrees/references/consolidation-intent.md#default-decisions-merged-cleanup-then-unfinished-work)
+for eligibility, scope conflicts and per-item choices.
+
+## Cleanup is not integration
+
+Tidy does not automatically commit, push or merge everything marked VALUABLE.
+That verdict means work needs a preservation decision, not that it is ready
+for main. Rescue is per item; a commit, remote copy or draft PR is not a merge.
+For "consolidate useful changes into main, then clean up", first review the net
+changes and take approved candidates through the repository's normal tests,
+review and merge gates. Re-audit afterwards, then confirm the deletion plan.
+Keep uncertain work and report anything still awaiting review or merge.
