@@ -10098,7 +10098,7 @@ var require_websocket = __commonJS({
     var http = __require("http");
     var net = __require("net");
     var tls = __require("tls");
-    var { randomBytes, createHash: createHash4 } = __require("crypto");
+    var { randomBytes, createHash: createHash5 } = __require("crypto");
     var { Duplex, Readable: Readable2 } = __require("stream");
     var { URL: URL2 } = __require("url");
     var PerMessageDeflate2 = require_permessage_deflate();
@@ -10766,7 +10766,7 @@ var require_websocket = __commonJS({
           abortHandshake(websocket, socket, "Invalid Upgrade header");
           return;
         }
-        const digest = createHash4("sha1").update(key + GUID).digest("base64");
+        const digest = createHash5("sha1").update(key + GUID).digest("base64");
         if (res.headers["sec-websocket-accept"] !== digest) {
           abortHandshake(websocket, socket, "Invalid Sec-WebSocket-Accept header");
           return;
@@ -11135,7 +11135,7 @@ var require_websocket_server = __commonJS({
     var EventEmitter = __require("events");
     var http = __require("http");
     var { Duplex } = __require("stream");
-    var { createHash: createHash4 } = __require("crypto");
+    var { createHash: createHash5 } = __require("crypto");
     var extension2 = require_extension();
     var PerMessageDeflate2 = require_permessage_deflate();
     var subprotocol2 = require_subprotocol();
@@ -11442,7 +11442,7 @@ var require_websocket_server = __commonJS({
           );
         }
         if (this._state > RUNNING) return abortHandshake(socket, 503);
-        const digest = createHash4("sha1").update(key + GUID).digest("base64");
+        const digest = createHash5("sha1").update(key + GUID).digest("base64");
         const headers = [
           "HTTP/1.1 101 Switching Protocols",
           "Upgrade: websocket",
@@ -28311,7 +28311,7 @@ async function pollBrokerToken(deviceCode, opts) {
 }
 
 // src/http.ts
-import { timingSafeEqual } from "node:crypto";
+import { createHash as createHash3, timingSafeEqual } from "node:crypto";
 import { isIP } from "node:net";
 import {
   createServer as createNodeHttpServer
@@ -30484,22 +30484,107 @@ function isLoopbackHost(host) {
   }
   return false;
 }
-function resolveHttpBearer(raw) {
+function resolveHttpBearer(raw, name = "SGE_CORTEX_HTTP_BEARER") {
   if (raw === void 0) {
     return void 0;
   }
   if (raw.trim() === "") {
     throw new Error(
-      "[sge-cortex] SGE_CORTEX_HTTP_BEARER is set but empty; set a real token, or unset it entirely (an unauthenticated /mcp is then only allowed on a loopback bind)"
+      `[sge-cortex] ${name} is set but empty; set a real token, or unset it entirely (an unauthenticated /mcp is then only allowed on a loopback bind)`
     );
   }
   return raw;
+}
+var DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
+var DEFAULT_RATE_LIMIT_PER_MINUTE = 120;
+var READ_ONLY_TOOLS = /* @__PURE__ */ new Set([
+  "search_nodes",
+  "get_nodes",
+  "read_graph",
+  "audit_read"
+]);
+function parseNonNegativeInt(raw, name, fallback, min) {
+  if (raw === void 0 || raw.trim() === "") {
+    return fallback;
+  }
+  const n = Number(raw.trim());
+  if (!Number.isInteger(n) || n < min) {
+    throw new Error(`[sge-cortex] ${name} must be an integer >= ${min}, got "${raw}"`);
+  }
+  return n;
+}
+function parseMaxBodyBytes(raw) {
+  return parseNonNegativeInt(raw, "SGE_CORTEX_HTTP_MAX_BODY_BYTES", DEFAULT_MAX_BODY_BYTES, 1);
+}
+function parseRateLimit(raw) {
+  return parseNonNegativeInt(
+    raw,
+    "SGE_CORTEX_HTTP_RATE_LIMIT_PER_MINUTE",
+    DEFAULT_RATE_LIMIT_PER_MINUTE,
+    0
+  );
+}
+var RateLimiter = class {
+  constructor(perMinute, now = Date.now) {
+    this.perMinute = perMinute;
+    this.now = now;
+  }
+  perMinute;
+  now;
+  windows = /* @__PURE__ */ new Map();
+  check(key) {
+    if (this.perMinute <= 0) {
+      return 0;
+    }
+    const t = this.now();
+    if (this.windows.size > 1e3) {
+      for (const [k, w2] of this.windows) {
+        if (t - w2.start >= 6e4) {
+          this.windows.delete(k);
+        }
+      }
+    }
+    const w = this.windows.get(key);
+    if (w === void 0 || t - w.start >= 6e4) {
+      this.windows.set(key, { start: t, count: 1 });
+      return 0;
+    }
+    w.count += 1;
+    return w.count > this.perMinute ? Math.max(1, Math.ceil((6e4 - (t - w.start)) / 1e3)) : 0;
+  }
+};
+function readOnlyViolation(body) {
+  const messages = Array.isArray(body) ? body : [body];
+  for (const m of messages) {
+    if (typeof m !== "object" || m === null) {
+      continue;
+    }
+    const msg = m;
+    if (msg.method !== "tools/call") {
+      continue;
+    }
+    const tool = msg.params?.name;
+    if (typeof tool !== "string" || !READ_ONLY_TOOLS.has(tool)) {
+      return { tool: typeof tool === "string" ? tool : "<unnamed>", id: msg.id ?? null };
+    }
+  }
+  return void 0;
 }
 function sendJson(res, status, body) {
   res.writeHead(status, { "content-type": "application/json" });
   res.end(JSON.stringify(body));
 }
-async function handleRequest(req, res, opts) {
+function sendTooLarge(res) {
+  res.writeHead(413, { "content-type": "application/json", connection: "close" });
+  res.end(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      error: { code: -32600, message: "Request body too large" },
+      id: null
+    })
+  );
+}
+async function handleRequest(req, res, opts, limiter, maxBodyBytes) {
   let pathname;
   try {
     pathname = new URL(req.url ?? "/", "http://localhost").pathname;
@@ -30515,7 +30600,13 @@ async function handleRequest(req, res, opts) {
     sendJson(res, 404, { error: "not_found", message: "endpoints: /mcp (MCP), GET /healthz" });
     return;
   }
-  if (opts.bearer !== void 0 && !bearerMatches(req.headers.authorization, opts.bearer)) {
+  let readOnly = false;
+  let authorised = opts.bearer === void 0 || bearerMatches(req.headers.authorization, opts.bearer);
+  if (!authorised && opts.readOnlyBearer !== void 0) {
+    authorised = bearerMatches(req.headers.authorization, opts.readOnlyBearer);
+    readOnly = authorised;
+  }
+  if (!authorised) {
     res.writeHead(401, { "content-type": "application/json", "www-authenticate": "Bearer" });
     res.end(
       JSON.stringify({
@@ -30525,6 +30616,61 @@ async function handleRequest(req, res, opts) {
       })
     );
     return;
+  }
+  const retryAfter = limiter.check(
+    createHash3("sha256").update(req.headers.authorization ?? "anonymous").digest("hex")
+  );
+  if (retryAfter > 0) {
+    res.writeHead(429, { "content-type": "application/json", "retry-after": String(retryAfter) });
+    res.end(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        error: { code: -32029, message: "Too many requests" },
+        id: null
+      })
+    );
+    return;
+  }
+  let parsedBody;
+  if (req.method === "POST") {
+    const declared = Number(req.headers["content-length"]);
+    if (Number.isFinite(declared) && declared > maxBodyBytes) {
+      sendTooLarge(res);
+      return;
+    }
+    const chunks = [];
+    let total = 0;
+    for await (const chunk of req) {
+      const buf = chunk;
+      total += buf.length;
+      if (total > maxBodyBytes) {
+        sendTooLarge(res);
+        return;
+      }
+      chunks.push(buf);
+    }
+    try {
+      parsedBody = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    } catch {
+      sendJson(res, 400, {
+        jsonrpc: "2.0",
+        error: { code: -32700, message: "Parse error" },
+        id: null
+      });
+      return;
+    }
+    const violation = readOnly ? readOnlyViolation(parsedBody) : void 0;
+    if (violation !== void 0) {
+      sendJson(res, 403, {
+        jsonrpc: "2.0",
+        error: {
+          code: -32003,
+          message: `Forbidden: tool "${violation.tool}" is not available to a read-only token`
+        },
+        id: violation.id
+      });
+      return;
+    }
   }
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: void 0,
@@ -30537,7 +30683,7 @@ async function handleRequest(req, res, opts) {
   });
   try {
     await mcpServer.connect(transport);
-    await transport.handleRequest(req, res);
+    await transport.handleRequest(req, res, parsedBody);
   } catch (err) {
     console.error("[sge-cortex] HTTP /mcp request failed:", err);
     if (!res.headersSent) {
@@ -30560,8 +30706,22 @@ function startHttpServer(opts) {
       )
     );
   }
+  if (opts.readOnlyBearer !== void 0 && opts.bearer === void 0) {
+    return Promise.reject(
+      new Error("[sge-cortex] SGE_CORTEX_HTTP_BEARER_READONLY requires SGE_CORTEX_HTTP_BEARER")
+    );
+  }
+  if (opts.readOnlyBearer !== void 0 && opts.readOnlyBearer === opts.bearer) {
+    return Promise.reject(
+      new Error(
+        "[sge-cortex] SGE_CORTEX_HTTP_BEARER_READONLY must differ from SGE_CORTEX_HTTP_BEARER"
+      )
+    );
+  }
+  const limiter = new RateLimiter(opts.rateLimitPerMinute ?? DEFAULT_RATE_LIMIT_PER_MINUTE);
+  const maxBodyBytes = opts.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
   const httpServer = createNodeHttpServer((req, res) => {
-    handleRequest(req, res, opts).catch((err) => {
+    handleRequest(req, res, opts, limiter, maxBodyBytes).catch((err) => {
       console.error("[sge-cortex] HTTP request handler failed:", err);
       if (!res.headersSent) {
         sendJson(res, 500, { error: "internal_error" });
@@ -30584,7 +30744,7 @@ function startHttpServer(opts) {
 }
 
 // src/config.ts
-import { createHash as createHash3 } from "node:crypto";
+import { createHash as createHash4 } from "node:crypto";
 function parseActiveScopes(raw) {
   const scopes = (raw ?? "").split(",").map((s) => s.trim()).filter((s) => s.length > 0);
   if (scopes.length === 0) {
@@ -30611,7 +30771,7 @@ function parseSourceType(raw) {
 }
 function hashSessionRef(raw) {
   if (!raw) return void 0;
-  return `session-${createHash3("sha256").update(raw).digest("hex").slice(0, 16)}`;
+  return `session-${createHash4("sha256").update(raw).digest("hex").slice(0, 16)}`;
 }
 function loadConfig(env = process.env) {
   const owner = env.SGE_CORTEX_OWNER;
@@ -31490,6 +31650,12 @@ async function main() {
       port: httpPort,
       host: process.env.SGE_CORTEX_HTTP_HOST || void 0,
       bearer,
+      readOnlyBearer: resolveHttpBearer(
+        process.env.SGE_CORTEX_HTTP_BEARER_READONLY,
+        "SGE_CORTEX_HTTP_BEARER_READONLY"
+      ),
+      maxBodyBytes: parseMaxBodyBytes(process.env.SGE_CORTEX_HTTP_MAX_BODY_BYTES),
+      rateLimitPerMinute: parseRateLimit(process.env.SGE_CORTEX_HTTP_RATE_LIMIT_PER_MINUTE),
       createMcpServer: () => createServer2(store)
     });
     return;

@@ -367,10 +367,9 @@ _ja_api_get() { # <path-with-leading-slash-and-query>
   local _authcfg
   _authcfg="$(_ja_credential)" || return 1
   command -v curl >/dev/null 2>&1 || { _ja_err "curl not found — required for REST calls"; return 1; }
-  printf '%s' "$_authcfg" | \
-    curl -K - -fsS --proto '=https' --proto-redir '=https' --max-redirs 0 \
+  curl -K - -fsS --proto '=https' --proto-redir '=https' --max-redirs 0 \
     -H "Accept: application/json" \
-    "${_JA_API_BASE}$1"
+    "${_JA_API_BASE}$1" <<<"$_authcfg"
 }
 
 # Authenticated POST. MUTATING path (callers gate via _ja_require_write first).
@@ -386,11 +385,10 @@ _ja_api_post_status() { # <path> <json-body> [<body-out-file>]
   local _authcfg
   _authcfg="$(_ja_credential)" || return 1
   command -v curl >/dev/null 2>&1 || { _ja_err "curl not found — required for REST calls"; return 1; }
-  printf '%s' "$_authcfg" | \
-    curl -K - -sS --proto '=https' --proto-redir '=https' --max-redirs 0 -X POST \
+  curl -K - -sS --proto '=https' --proto-redir '=https' --max-redirs 0 -X POST \
     -H "Content-Type: application/json" -H "Accept: application/json" \
     -d "$2" -o "${3:-/dev/null}" -w '%{http_code}' \
-    "${_JA_API_BASE}$1"
+    "${_JA_API_BASE}$1" <<<"$_authcfg"
 }
 
 # Escape free text for safe inclusion inside a JQL "..." string literal.
