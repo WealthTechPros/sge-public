@@ -272,7 +272,7 @@ fpr_merge_ready() {
   # byte-for-byte identical to monitor-lib.sh's pr_ready_for_merge Gate 1 —
   # see that function's comment for why `part of #N` counts as a link without
   # requiring a closing keyword.
-  if ! printf '%s' "$body" | grep -iqE '(clos(e|es|ed)|fix(es|ed)?|resolv(e|es|ed)|(^|[^[:alnum:]])part[[:space:]]+of)[[:space:]]+#[0-9]+'; then
+  if ! grep -iqE '(clos(e|es|ed)|fix(es|ed)?|resolv(e|es|ed)|(^|[^[:alnum:]])part[[:space:]]+of)[[:space:]]+#[0-9]+' <<<"$body"; then
     echo "GATE_FAIL:not_linked"; return 1
   fi
 
@@ -286,7 +286,7 @@ fpr_merge_ready() {
   if [ -n "${SGE_FORGEJO_REVIEWED_LABEL:-}" ]; then
     # Whole-line fixed-string match: a look-alike ("pr-reviewed-stale") or a
     # regex metacharacter in the configured name must not satisfy the gate.
-    if ! printf '%s\n' "$labels" | grep -qxF -- "${SGE_FORGEJO_REVIEWED_LABEL}"; then
+    if ! grep -qxF -- "${SGE_FORGEJO_REVIEWED_LABEL}" <<<"$labels"; then
       echo "GATE_FAIL:not_reviewed"; return 1
     fi
   fi
