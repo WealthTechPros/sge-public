@@ -50,3 +50,8 @@ concretely enough to build and to review against.
 - Visible keyboard focus on every interactive element
 - Body contrast >= 4.5:1; reduced motion respected
 - Console clean
+
+<!-- Optional: add a "## Benchmarks" section (one line per screenshot path or
+URL plus its purpose, e.g. "dashboard: path/or/url") to enable the
+design-reviewer's advisory pairwise comparison (#3293). Omit it and the
+review behaves as before. -->

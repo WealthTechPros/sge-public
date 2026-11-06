@@ -180,4 +180,34 @@ category below 2 when a base was captured. Lead Top fixes with
 follow-up debt. `scripts/design-verdict-gate.mjs` parses exactly this
 shape for the `/sge:pr-review` gate, so do not reword the field labels.
 
+## Benchmark comparison and second opinion (#3293, advisory)
+
+Runs only when `.claude/design-review/DESIGN.md` has a `## Benchmarks`
+section (screenshot paths or URLs, each with a one-line purpose, recorded by
+`/sge:design-gate` or `/sge:design-discover`). No such section: skip this
+whole section, write no extra file, and behave exactly as above.
+
+Pairwise step. For each affected route, pick the benchmark whose stated
+purpose matches the route. Read the head screenshot and the benchmark
+screenshot, then state which is stronger on hierarchy (R2), spacing (R3) and
+distinctiveness (R4). Every finding names BOTH screenshots by path. A
+benchmark you cannot open or a route with no matching purpose gets
+`not compared - <reason>`; never describe a benchmark from memory.
+
+Write the result to a SEPARATE file beside the verdict:
+`.claude/design-review/benchmark-compare-<session_id>.md` (same suffix as the
+session-scoped verdict; unscoped `benchmark-compare.md` when none was named).
+Never put it in the verdict file: the verdict shape and
+`scripts/design-verdict-gate.mjs` parsing are unchanged, and the pairwise
+result never changes a score or blocks a merge.
+
+Second opinion (optional critic). Only the dispatching agent can run a
+critic on a different provider or model than the builder, using whatever
+model routing the harness offers (see `skills/pr-review/references/model-roles.md`);
+this agent never names a model. If the dispatcher supplied a second critic's
+findings, append them to the compare file under `## Second opinion` and offer
+them as extra Top-fix suggestions. Otherwise end the compare file with one
+line, never omitted: `second opinion: not run - <reason>` (for example
+"no second provider configured").
+
 Be specific enough that the main agent can act without re-investigating.
