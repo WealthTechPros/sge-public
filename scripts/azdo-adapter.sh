@@ -290,10 +290,9 @@ _aa_api_get() { # <path>
   local authcfg
   authcfg="$(_aa_credential)" || return 1
   command -v curl >/dev/null 2>&1 || { _aa_err "curl not found — required for REST calls"; return 1; }
-  printf '%s' "$authcfg" | \
-    curl -K - -fsS --proto '=https' --proto-redir '=https' --max-redirs 0 \
+  curl -K - -fsS --proto '=https' --proto-redir '=https' --max-redirs 0 \
     -H "Accept: application/json" \
-    "${_AA_API_BASE}$1"
+    "${_AA_API_BASE}$1" <<<"$authcfg"
 }
 
 _aa_api_post_status() { # <path> <json-body> [<body-out-file>]
@@ -304,11 +303,10 @@ _aa_api_post_status() { # <path> <json-body> [<body-out-file>]
   local authcfg
   authcfg="$(_aa_credential)" || return 1
   command -v curl >/dev/null 2>&1 || { _aa_err "curl not found — required for REST calls"; return 1; }
-  printf '%s' "$authcfg" | \
-    curl -K - -sS --proto '=https' --proto-redir '=https' --max-redirs 0 -X POST \
+  curl -K - -sS --proto '=https' --proto-redir '=https' --max-redirs 0 -X POST \
     -H "Content-Type: application/json" -H "Accept: application/json" \
     -d "$2" -o "${3:-/dev/null}" -w '%{http_code}' \
-    "${_AA_API_BASE}$1"
+    "${_AA_API_BASE}$1" <<<"$authcfg"
 }
 
 _aa_api_patch_status() { # <path> <json-patch-body> [<body-out-file>]
@@ -319,11 +317,10 @@ _aa_api_patch_status() { # <path> <json-patch-body> [<body-out-file>]
   local authcfg
   authcfg="$(_aa_credential)" || return 1
   command -v curl >/dev/null 2>&1 || { _aa_err "curl not found — required for REST calls"; return 1; }
-  printf '%s' "$authcfg" | \
-    curl -K - -sS --proto '=https' --proto-redir '=https' --max-redirs 0 -X PATCH \
+  curl -K - -sS --proto '=https' --proto-redir '=https' --max-redirs 0 -X PATCH \
     -H "Content-Type: application/json-patch+json" -H "Accept: application/json" \
     -d "$2" -o "${3:-/dev/null}" -w '%{http_code}' \
-    "${_AA_API_BASE}$1"
+    "${_AA_API_BASE}$1" <<<"$authcfg"
 }
 
 # Generic authenticated request (SPEC-110 S2-S4). Same boundary as the helpers
@@ -341,11 +338,9 @@ _aa_api_req() { # <method> <path> <body-file-or-empty> <out-file> <content-type>
   command -v curl >/dev/null 2>&1 || { _aa_err "curl not found — required for REST calls"; return 1; }
   local dump=(-D "${6:-/dev/null}")   # response headers (Retry-After, DR9)
   if [ -n "$3" ]; then
-    printf '%s' "$authcfg" | \
-      curl -K - -sS --proto '=https' --proto-redir '=https' --max-redirs 0 -X "$1" -H "Content-Type: $5" -H "Accept: application/json" --data-binary "@$3" "${dump[@]}" -o "$4" -w '%{http_code}' "${_AA_API_BASE}$2"
+    curl -K - -sS --proto '=https' --proto-redir '=https' --max-redirs 0 -X "$1" -H "Content-Type: $5" -H "Accept: application/json" --data-binary "@$3" "${dump[@]}" -o "$4" -w '%{http_code}' "${_AA_API_BASE}$2" <<<"$authcfg"
   else
-    printf '%s' "$authcfg" | \
-      curl -K - -sS --proto '=https' --proto-redir '=https' --max-redirs 0 -X "$1" -H "Accept: application/json" "${dump[@]}" -o "$4" -w '%{http_code}' "${_AA_API_BASE}$2"
+    curl -K - -sS --proto '=https' --proto-redir '=https' --max-redirs 0 -X "$1" -H "Accept: application/json" "${dump[@]}" -o "$4" -w '%{http_code}' "${_AA_API_BASE}$2" <<<"$authcfg"
   fi
 }
 
