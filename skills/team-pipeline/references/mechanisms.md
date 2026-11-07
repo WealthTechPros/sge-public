@@ -262,8 +262,8 @@ result as an ordered array in `/tmp/team-pipeline-queue.json`.
 reconciliation and source-owned `/sge:build-ready-audit` selection criteria.
 Incomplete or blocked issues remain paused, not always READY. Eligible issues
 are those carrying the dispatch label **and** admitted by a trusted human: the
-dispatch-gate workflow's marker matches the live body hash
-(`scripts/issue-read.sh admitted <N>` exits 0; see
+dispatch-gate workflow's marker matches the live body hash and the newest label
+event (`scripts/issue-read.sh admitted <N>` exits 0; see
 `docs/compliance/dispatch-gate.md`). A refused issue is dropped, never claimed.
 A repo whose `CLAUDE.md` declares an empty `dispatch-label:` has no autonomous
 discovery at all (`issue-read.sh dispatch-label --autonomous` fails closed).

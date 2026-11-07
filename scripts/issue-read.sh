@@ -68,7 +68,9 @@
 #       --autonomous (sge#3321).
 #   issue-read.sh admitted <number>
 #       Exit 0 only if a trusted human admitted this exact issue body (the
-#       dispatch-gate workflow's marker matches the live body hash); else exit 1.
+#       dispatch-gate workflow's marker matches the live body hash) AND that
+#       marker was written for the newest label event (sge#3352: a later
+#       relabel, an unlabel, or an unreadable timeline refuses); else exit 1.
 #       Autonomous dispatch calls it before claiming any issue (sge#3321).
 #
 # SPEC-057: always run from the target repo's checkout cwd — shell state does
@@ -857,13 +859,24 @@ _ir_main() {
 
     admitted)
       # sge#3321: has a trusted human admitted THIS EXACT issue body? Exit 0 only
-      # when the newest dispatch-gate marker (github-actions[bot]) matches the
-      # live body hash. GitHub only; other ALMs have no admission marker yet, so
+      # when a dispatch-gate marker (github-actions[bot]) matches the live body
+      # hash and was written for the NEWEST label event (sge#3352, via the issue
+      # events API; an API error refuses). GitHub only; other ALMs have no admission marker yet, so
       # they refuse (fail closed) rather than pass unchecked.
       local n="${2:-}"
       [ -n "$n" ] || _ir_usage 'admitted needs <number>'
       [ "$(_ir_alm)" = "github" ] || { _ir_err "admitted: no admission marker for this ALM — refusing (fail closed)"; exit 1; }
-      node "$(dirname "${BASH_SOURCE[0]}")/dispatch-gate.mjs" verify --repo "${GH_REPO:-$(gh repo view --json nameWithOwner --jq .nameWithOwner)}" --issue "$n" || exit 1
+      # The marker and label events must be for the dispatch label THIS repo
+      # selects on now (declared, else the fleet default), so a marker for an old
+      # label cannot admit after the label changes (sge#3352). An empty or
+      # malformed declaration refuses, as in `dispatch-label --autonomous`.
+      local lbl
+      if grep -qE '^dispatch-label:[[:space:]]*$' CLAUDE.md 2>/dev/null; then
+        _ir_err "admitted: CLAUDE.md declares an empty dispatch-label — refusing (fail closed)"
+        exit 1
+      fi
+      lbl="$(_ir_dispatch_label)" || exit 1
+      node "$(dirname "${BASH_SOURCE[0]}")/dispatch-gate.mjs" verify --repo "${GH_REPO:-$(gh repo view --json nameWithOwner --jq .nameWithOwner)}" --issue "$n" --label "${lbl:-$_IR_DEFAULT_DISPATCH_LABEL}" || exit 1
       ;;
 
     dispatch-label)
