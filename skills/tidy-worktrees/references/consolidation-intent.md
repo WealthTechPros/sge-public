@@ -8,13 +8,13 @@ still apply; these phrases do not waive them.
 |---|---|
 | "Tidy worktrees" | Audit everything in scope; confirm clean merged cleanup together, then recommend and decide remaining work per item under the [two-stage flow](#default-decisions-merged-cleanup-then-unfinished-work). Preserve protected work; do not silently commit, push or merge. |
 | "Preserve the owning-repository workflow" / "retain worktrees" | Distinguish the workflow from blanket retention. If explicit retention conflicts with cleanup, show read-only candidates and clarify the protected scope; keep affected items meanwhile. Scope clarification is not deletion approval. |
-| "Commit and push all valuable work" | First show each candidate's net changes versus current main, validation state and recommendation. Obtain individual rescue choices under Phase 3; do not turn this into bulk PR creation. |
+| "Commit and push all valuable work" | First show each candidate's net changes versus current main, validation state and recommendation. Offer the single capped draft-PR multi-select (below) for items individually verified `live` with an open linked issue; everything else is a per-item choice. Never an unverified bulk push. |
 | "Consolidate valuable changes into main, delete the rest" | Treat integration and deletion as separate gated tasks. Identify useful, non-superseded changes and their owning PRs first; follow the repository's normal implementation, testing, review and merge requirements for approved candidates. Then refresh the audit and confirm the exact cleanup plan. |
 | `--force` | Confirm one audited deletion plan. No commits, pushes, PR creation or merges are implied. |
 | `--inbox` | Read-only suggestions, not completed rescue, integration or cleanup. |
 
-VALUABLE means potentially unrecoverable work that needs a decision, not
-reviewed, correct or ready to merge. A stale branch is not necessarily
+NEEDS-DECISION (the retired VALUABLE verdict) means potentially unrecoverable
+work that needs a decision, not reviewed, correct or ready to merge. A stale branch is not necessarily
 worthless; a pushed branch is not necessarily integrated. Unknown value or
 uncertain supersession means **keep**, not delete.
 
@@ -108,22 +108,46 @@ missing acceptance evidence means completion is unknown. A merged branch
 with later commits or uncommitted files still needs this assessment. Unknown
 value means keep, not a recommendation to discard.
 
-Ask **one question per item** with the applicable choices:
+Ask one question per item (batched 4 per `AskUserQuestion` call, or as a
+numbered list on hosts without it) with the applicable choices:
 
 1. **Checkpoint locally** - run the existing checkpoint tool without changing
    the branch, index or files. Report coverage; exit 10/partial keeps the
    original. A checkpoint never authorises deletion or a commit.
 2. **Resume / rescue for review** - obtain the bounded continuation scope.
-   Offer **Push + draft PR** only after live supersession and an open linked
-   issue are verified, then apply the existing rescued-worktree guards before
-   pushing. No bulk rescue PRs, automatic merge or automatic integration.
+   **Push + draft PR** is offered only through the capped multi-select
+   ([below](#draft-pr-multi-select-2026-11-07-relaxes-2866)), after live
+   supersession and an open linked issue are verified item by item, then apply
+   the existing rescued-worktree guards before pushing. No unverified bulk
+   rescue PRs, automatic merge or automatic integration.
 3. **Keep** - leave the item untouched. Default here when evidence or a
    decision is missing; a declined merged-cleanup batch is not a discard.
 4. **Discard** - an explicit per-item decision followed by an exact Phase 4
    plan/confirmation. Record branch and attributed-stash recovery SHAs first.
    Name any uncommitted files being lost: a commit SHA cannot recover them.
 
-Do not silently group different worktrees into one rescue decision. Report
+Do not silently group different worktrees into one rescue decision outside the
+capped multi-select below. Report
 kept items, partial checkpoints, proposed continuations, confirmed removals
 and outstanding decisions separately; neither a PR nor a checkpoint is proof
 that unfinished work was integrated or is safe to remove.
+
+### Draft-PR multi-select (2026-11-07, relaxes #2866)
+
+#2866 required one question per branch after a cleanup session opened 8 PRs
+that all duplicated work already on main. The lesson is
+**verify each branch against main before it can become a PR**, not "ask many
+times". The maintainer approved replacing the per-branch question with a single
+multi-select, "open draft PRs for these N", under these conditions:
+
+- Each listed item individually passes `rescue-guard.sh supersession` = `live`
+  (a fresh check this run) **and** its linked issue is still open. Superseded,
+  unknown, closed-issue or issue-less items never appear in the list.
+- **Draft PRs only**, at most `SGE_TIDY_MAX_DRAFT_PRS` (default 10) per run.
+  The rest wait for the next run.
+- Never auto-merge, never arm auto-merge, never `--force` or force-push, never
+  label changes. The rescued-worktree guard (`assess` then `verify`) still
+  runs before each push.
+- `--force` still never pushes or opens a PR.
+- Selection authorises opening the draft only; integration still needs the
+  repository's normal review and merge gates.
