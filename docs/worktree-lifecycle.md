@@ -14,6 +14,16 @@ disk failure.
 | Hooks (`hooks/copilot/worktree-lifecycle.sh`) | Register, checkpoint at turn end, save a handoff at session end. | Delete, stash, reset, commit, push or open a PR. |
 | Tidy and inbox (`/sge:tidy-worktrees`, `skills/tidy-worktrees/inbox.sh`) | Fetch fresh remote state, audit, show the inbox, build one deletion plan. | Delete without you confirming the exact plan. |
 
+## Full audit: `audit.sh`
+
+`bash skills/tidy-worktrees/audit.sh [--summary] [--json-out f] [repo dirs]` is the
+read-only engine behind `/sge:tidy-worktrees`. It covers local worktrees, branches,
+stashes **and** `origin/*` branches, sorts each into A merged / B unmerged and
+valuable / C part-complete or kept / D superseded or empty, and prints the delete
+plan as literal per-branch commands (see
+[the engine reference](../skills/tidy-worktrees/references/audit-engine.md)).
+Any lookup failure keeps the item. It deletes nothing.
+
 ## What is open? The inbox
 
 ```bash
@@ -31,7 +41,7 @@ and registry owner. It is read-only. `/sge:tidy-worktrees --inbox` runs it.
 | Action | Meaning | What you do next |
 |---|---|---|
 | `continue` | Live claim, recently created, current session or an open PR. | Nothing. |
-| `open-a-pr` | The branch has net work not in main (`rescue-guard.sh supersession` says `live`). | Confirm the linked issue is still open, then use tidy's per-item rescue. Never a bulk action. |
+| `open-a-pr` | The branch has net work not in main (`rescue-guard.sh supersession` says `live`). | Confirm the linked issue is still open, then tidy offers it in one capped multi-select of draft PRs (never auto-merged). |
 | `delete` | Clean and superseded by main. | Appears in the tidy deletion plan with its tip SHA; you confirm the plan. |
 | `checkpoint-then-decide` | Uncommitted work. | Run `checkpoint.sh checkpoint`, then decide per item. |
 | `keep` | Audit uncertain (open-PR lookup failed, base unresolvable, attributed stash, default branch...). | Read the reason. Fix the cause and re-run. |
@@ -112,9 +122,12 @@ for eligibility, scope conflicts and per-item choices.
 
 ## Cleanup is not integration
 
-Tidy does not automatically commit, push or merge everything marked VALUABLE.
-That verdict means work needs a preservation decision, not that it is ready
-for main. Rescue is per item; a commit, remote copy or draft PR is not a merge.
+Tidy does not automatically commit, push or merge everything marked NEEDS-DECISION
+(the registry lib still says VALUABLE). That verdict means work needs a
+preservation decision, not that it is ready for main. Rescue is a single capped
+multi-select of draft PRs, each item individually verified as not already in
+main with its issue still open (maintainer decision, 2026-11-07, relaxing #2866's one question
+per branch); a commit, remote copy or draft PR is not a merge.
 For "consolidate useful changes into main, then clean up", first review the net
 changes and take approved candidates through the repository's normal tests,
 review and merge gates. Re-audit afterwards, then confirm the deletion plan.

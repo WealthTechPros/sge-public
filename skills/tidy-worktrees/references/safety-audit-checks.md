@@ -1,6 +1,6 @@
 # Phase 2 safety-audit checks
 
-Moved verbatim from `SKILL.md` (issue #2917, 24 KB size budget).
+Moved verbatim from `SKILL.md` (issue #2917, 24 KB size budget); the retired VALUABLE verdict is now NEEDS-DECISION (#3399).
 
 **Recency guard (issue #1759).** When no `.sge-wt-claim` is present (the worker died before writing one, or the worktree was created outside the claim-aware path), fall back to directory age: if the worktree directory's **mtime** is within `SGE_WT_RECENCY_GUARD_MIN` (default 10 minutes), presume it is live and classify 🟩 **KEEP (recently created)**. Check mtime portably:
 
@@ -18,9 +18,9 @@ fi
 
 The recency guard is a secondary net; the claim file is the real fix. A worktree that is both old (past recency) and claim-free is audited under normal rules.
 
-**Stash attribution — `git stash list` is repo-global.** All worktrees share one stash list, so "stash list non-empty" would let a single stash block every removal in the repo. Instead, attribute each stash to a branch via its subject line (`WIP on <branch>: …` / `On <branch>: …`) and only mark *that* branch/worktree VALUABLE. Stashes that match no candidate branch (or were made on `main`) are **a note in the final summary, never a removal blocker**.
+**Stash attribution — `git stash list` is repo-global.** All worktrees share one stash list, so "stash list non-empty" would let a single stash block every removal in the repo. Instead, attribute each stash to a branch via its subject line (`WIP on <branch>: …` / `On <branch>: …`) and only mark *that* branch/worktree NEEDS-DECISION. Stashes that match no candidate branch (or were made on `main`) are **a note in the final summary, never a removal blocker**.
 
-**Squash-merge cross-check — `git log origin/main..<branch>` lies after a squash merge.** The squashed commit on `main` has a different SHA, so the branch shows phantom "ahead" commits forever. Before classifying a branch VALUABLE on ahead-count alone, cross-check GitHub:
+**Squash-merge cross-check — `git log origin/main..<branch>` lies after a squash merge.** The squashed commit on `main` has a different SHA, so the branch shows phantom "ahead" commits forever. Before classifying a branch NEEDS-DECISION on ahead-count alone, cross-check GitHub:
 
 ```bash
 gh pr list --state merged --head "$b" --json number,mergedAt,headRefOid
@@ -39,11 +39,11 @@ if COMPLETED="$(fpr_completed_pr_heads "$b")"; then
 fi
 ```
 
-A branch is ⬜ SAFE only when a **completed** PR exists, its recorded source head (`lastMergeSourceCommit`) equals the local branch tip, **and** the tree is clean. Everything else stays 🟥 VALUABLE: a tip that moved past the completed head, an abandoned or active PR (only `status=completed` counts; completion is never inferred from mergeability or a merge commit), no completed PR, a missing token or disallowed host, an API/auth error, malformed JSON, or a page-cap hit (possible truncation). `fpr_completed_pr_heads` exits non-zero on every uncertainty; an empty list with exit 0 is a confirmed zero and also leaves the branch VALUABLE. Never print or log the token.
+A branch is ⬜ SAFE only when a **completed** PR exists, its recorded source head (`lastMergeSourceCommit`) equals the local branch tip, **and** the tree is clean. Everything else stays 🟥 NEEDS-DECISION: a tip that moved past the completed head, an abandoned or active PR (only `status=completed` counts; completion is never inferred from mergeability or a merge commit), no completed PR, a missing token or disallowed host, an API/auth error, malformed JSON, or a page-cap hit (possible truncation). `fpr_completed_pr_heads` exits non-zero on every uncertainty; an empty list with exit 0 is a confirmed zero and also leaves the branch NEEDS-DECISION. Never print or log the token.
 
-On any other non-GitHub host (Forgejo/Gitea) there is no merged-PR lookup yet, so skip this cross-check: the branch stays 🟥 VALUABLE on ahead-count (fail safe — never SAFE on an unverified merge).
+On any other non-GitHub host (Forgejo/Gitea) there is no merged-PR lookup yet, so skip this cross-check: the branch stays 🟥 NEEDS-DECISION on ahead-count (fail safe — never SAFE on an unverified merge).
 
-If a merged PR exists for the branch **and** the branch tip equals the PR's `headRefOid` (on Azure DevOps, the completed PR's `lastMergeSourceCommit`) (no commits added after the merge) **and** the working tree is clean → ⬜ SAFE (squash-merged). If the tip has moved past the merged PR's head, the extra commits are 🟥 VALUABLE.
+If a merged PR exists for the branch **and** the branch tip equals the PR's `headRefOid` (on Azure DevOps, the completed PR's `lastMergeSourceCommit`) (no commits added after the merge) **and** the working tree is clean → ⬜ SAFE (squash-merged). If the tip has moved past the merged PR's head, the extra commits are 🟥 NEEDS-DECISION.
 
 Other useful checks (per worktree `$wt` / branch `$b`):
 
