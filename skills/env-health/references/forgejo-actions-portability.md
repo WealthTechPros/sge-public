@@ -11,7 +11,7 @@ traced:
 | `run: gh ...` (GitHub CLI) | `gh: command not found` (exit 127) on every PR/push | Stock Forgejo runner images (and `node:*`/`debian:*` job containers) do not ship `gh`. Installing it does not help: `gh` talks to the GitHub API, not Forgejo's. |
 
 A failing non-required job still leaves a red check on every PR. On a repo
-where SGE reads CI state (`fpr_checks` / `fpr_check_is_failing`), that red
+where SGE reads CI state (`hpr_checks` / `hpr_check_is_failing`), that red
 check reads as failing, and a PR can be held back by noise from a step that
 could never have worked.
 

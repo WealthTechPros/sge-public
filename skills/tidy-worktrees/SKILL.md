@@ -28,7 +28,7 @@ Every item ends as **already in main / PR opened / kept with a named blocker / d
 ## Guard rails (never relaxed, not even by `--force`)
 
 - **Audit before delete; local before remote.** Order: worktrees, local branches, then remote branches. Remote-first destroys the only copy of pushed work.
-- **No open-PR set, no deletions** (sge-public#47): the set comes from the repo's real host via `fpr_open_pr_heads`; on failure print the audit and refuse a plan.
+- **No open-PR set, no deletions** (sge-public#47): the set comes from the repo's real host via `hpr_open_pr_heads`; on failure print the audit and refuse a plan.
 - **Protected, always KEEP:** the current worktree, the default branch, open-PR branches, Git-locked worktrees, live claims, recently created worktrees (table below).
 - **Every deletion quotes a recovery SHA.** Uncommitted files have no SHA: name them if the user discards them.
 - **Sweeps never mutate merge-gate labels** (`pr-reviewing`, `pr-reviewed`) — see Phase 4.
@@ -63,14 +63,14 @@ Recovery, restore and limits: [`docs/worktree-lifecycle.md`](../../docs/worktree
 ## Phase 1 — Inventory and open-PR set (read-only)
 
 ```bash
-source "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/lib/forgejo-pr-read.sh"
-if ! OPEN_PRS="$(fpr_open_pr_heads)"; then   # "<number><TAB><head-branch>" per open PR
-  echo "REFUSE: cannot determine the open-PR set for $(git remote get-url origin) (host: $(fpr_host_kind)) — nothing will be deleted" >&2
+source "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/lib/host-pr-read.sh"
+if ! OPEN_PRS="$(hpr_open_pr_heads)"; then   # "<number><TAB><head-branch>" per open PR
+  echo "REFUSE: cannot determine the open-PR set for $(git remote get-url origin) (host: $(hpr_host_kind)) — nothing will be deleted" >&2
   exit 1
 fi
 ```
 
-`fpr_open_pr_heads` routes by host: `gh` on GitHub, the Forgejo adapter, or `azdo-adapter.sh list-prs` on Azure DevOps (needs `SGE_AZDO_TOKEN`, a read-only Code PAT). It fails closed on an unknown host, a failed call, a malformed payload or possible truncation; an empty result with exit 0 is a confirmed zero. On Azure DevOps squash-merges use `fpr_completed_pr_heads <branch>` (fail-closed too).
+`hpr_open_pr_heads` routes by host: `gh` on GitHub, the Forgejo adapter, or `azdo-adapter.sh list-prs` on Azure DevOps (needs `SGE_AZDO_TOKEN`, a read-only Code PAT). It fails closed on an unknown host, a failed call, a malformed payload or possible truncation; an empty result with exit 0 is a confirmed zero. On Azure DevOps squash-merges use `hpr_completed_pr_heads <branch>` (fail-closed too).
 
 Then run the **engine**: `bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/tidy-worktrees/audit.sh" --summary [repo dirs…]` (drop `--summary` for the JSON, or add `--json-out <file>`). It classifies local worktrees, branches, stashes **and** `origin/*` branches into A-D with PR state, ahead/behind, age, last author and supersession, and prints the delete plan as literal per-branch commands. Fields and rules: [`references/audit-engine.md`](references/audit-engine.md). Host without bash or jq: follow [`references/safety-audit-checks.md`](references/safety-audit-checks.md) by hand.
 
@@ -131,7 +131,7 @@ Fan out the read-only audit (one agent per repo), merge the tables, then run Pha
 ## Key principles
 
 1. **Local audit before remote deletion;** a branch with no upstream is a single copy: record its SHA.
-2. **Squash merges hide behind phantom "ahead" commits:** trust the host's merged-PR record (`gh`, or `fpr_completed_pr_heads` on Azure DevOps) plus tip == recorded head; Forgejo has no such lookup, so there it stays on git evidence. Any lookup failure keeps.
+2. **Squash merges hide behind phantom "ahead" commits:** trust the host's merged-PR record (`gh`, or `hpr_completed_pr_heads` on Azure DevOps) plus tip == recorded head; Forgejo has no such lookup, so there it stays on git evidence. Any lookup failure keeps.
 3. **Stashes are repo-global:** attribute them by subject; unattributed ones are a note, not a blocker.
 4. **Cleanup never opens PRs one-by-one or in unverified bulk** (#2866). On 2026-10-03 a cleanup session opened 8 PRs and all 8 duplicated work already on main. The maintainer relaxed the one-question-per-branch rule on 2026-11-07 to a single multi-select where each item is individually verified `live` with its issue open, draft-only, capped, never auto-merged, never force-pushed. `--force` never pushes or opens a PR.
 5. **Live claims, locks and the recency guard are sacrosanct** (#1759), including under `--force`.

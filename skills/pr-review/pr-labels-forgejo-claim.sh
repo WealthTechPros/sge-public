@@ -67,16 +67,16 @@ _prl_fj_cl_call() {
 _prl_fj_cl_label() {
   local op="$1" pr="$2" label="$3" adapter
   # A distinct name: fpr_* declares its own `local origin`, which would shadow
-  # ours inside the _fpr_origin_url override below.
+  # ours inside the _hpr_origin_url override below.
   _PRL_FJ_CL_PIN_ORIGIN="$(_prl_fj_cl_origin)" && [ -n "$_PRL_FJ_CL_PIN_ORIGIN" ] \
     || { _prl_fj_cl_err "no origin — refusing"; return 1; }
   adapter="$(_prl_fj_cl_adapter)"
   (
     # shellcheck disable=SC1091
     . "$_PRL_FJ_CL_DIR/../lib/forgejo-pr-mutate.sh" >/dev/null 2>&1 || exit 1
-    _FPR_HOST_KIND=forgejo
-    _FPR_ADAPTER="$adapter"
-    _fpr_origin_url() { printf '%s\n' "$_PRL_FJ_CL_PIN_ORIGIN"; }
+    _HPR_HOST_KIND=forgejo
+    _HPR_ADAPTER="$adapter"
+    _hpr_origin_url() { printf '%s\n' "$_PRL_FJ_CL_PIN_ORIGIN"; }
     case "$op" in
       add)    fpr_add_label "$pr" "$label" ;;
       remove) fpr_remove_label "$pr" "$label" ;;

@@ -609,8 +609,8 @@ _fa_main() {
     pr-commit-status)
       # Print the combined Gitea commit status for <sha>:
       #   success | pending | failure | none                              (read)
-      # Aggregation (traffic-light), aligned with the fpr_checks normaliser in
-      # skills/lib/forgejo-pr-read.sh (#1439) so both adapters agree on 'warning':
+      # Aggregation (traffic-light), aligned with the hpr_checks normaliser in
+      # skills/lib/host-pr-read.sh (#1439) so both adapters agree on 'warning':
       #   any failure/error         → failure
       #   any pending               → pending
       #   otherwise (success and/or warning, all non-blocking) → success

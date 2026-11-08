@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # audit.test.sh — tests for audit.sh (issue #3399, SPEC-139 tidy audit engine).
 # Throwaway repos, no network: origin/* refs are made with update-ref, and the
-# PR host is stubbed (fpr_host_kind / fpr_open_pr_heads / fpr_completed_pr_heads
+# PR host is stubbed (hpr_host_kind / hpr_open_pr_heads / hpr_completed_pr_heads
 # overrides plus a fake `gh` on PATH for the GitHub bulk lookup). Run:
 #   bash skills/tidy-worktrees/audit.test.sh
 set -uo pipefail
@@ -79,8 +79,8 @@ jq -n --arg sq "$(tipof feat/squash)" --arg pm "$(git -C "$R" rev-parse "$(tipof
     {number:7, headRefName:"feat/merged-ff", headRefOid:$mf, state:"MERGED", mergedAt:"2026-11-01T00:00:00Z"},
     {number:8, headRefName:"feat/closed-live", headRefOid:$cl, state:"CLOSED", mergedAt:null},
     {number:9, headRefName:"feat/open", headRefOid:"x", state:"OPEN", mergedAt:null} ]' >"$GH_STUB_JSON"
-fpr_host_kind() { echo "${STUB_HOST:-github}"; }
-fpr_open_pr_heads() { printf '9\tfeat/open\n'; }
+hpr_host_kind() { echo "${STUB_HOST:-github}"; }
+hpr_open_pr_heads() { printf '9\tfeat/open\n'; }
 STUB_HOST=github
 
 REPORT="$(ta_audit_repo "$R")"
@@ -128,11 +128,11 @@ check "counts add up" "$(printf '%s' "$REPORT" | jq '(.counts.A + .counts.B + .c
 check "bucket counts present per kind" "$(printf '%s' "$REPORT" | jq '.counts_by_kind["remote-branch"] | has("A") and has("D")')" "true"
 
 # ---- fail safe: lookup failures ----
-fpr_open_pr_heads() { return 1; }
+hpr_open_pr_heads() { return 1; }
 RF="$(ta_audit_repo "$R")"
 check "open-PR set unknown -> refused, empty plan" "$(printf '%s' "$RF" | jq '.refused and (.delete_plan == null)')" "true"
 check "open-PR set unknown -> no A/B/D items" "$(printf '%s' "$RF" | jq '[.items[] | select(.bucket!="C")] | length')" "0"
-fpr_open_pr_heads() { printf '9\tfeat/open\n'; }
+hpr_open_pr_heads() { printf '9\tfeat/open\n'; }
 GH_STUB_FAIL=1 RF="$(GH_STUB_FAIL=1 ta_audit_repo "$R")"
 check "gh bulk lookup failure -> remote branches kept, none deletable" \
   "$(printf '%s' "$RF" | jq '[.items[] | select(.kind=="remote-branch" and .bucket!="C")] | length')" "0"
@@ -148,7 +148,7 @@ git -C "$R" update-ref refs/remotes/origin/main main
 
 # ---- other hosts via the shim ----
 STUB_HOST=azdo
-fpr_completed_pr_heads() {
+hpr_completed_pr_heads() {
   case "$1" in
     feat/squash) printf '5\t%s\t2026-11-01T00:00:00Z\n' "$(tipof feat/squash)" ;;
     feat/lookup-fails) return 1 ;;

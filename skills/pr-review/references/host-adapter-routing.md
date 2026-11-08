@@ -10,14 +10,14 @@ Phases 1–3 routes correctly without branching on the host inside each phase:
 ```bash
 SGE_ROOT="$(bash ./scripts/resolve-sge-root.sh 2>/dev/null || bash "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-sge-root.sh")" || exit 1
 HOST_KIND="$("$SGE_ROOT/scripts/with-repo-cwd.sh" host)"
-source "$SGE_ROOT/skills/lib/forgejo-pr-read.sh"
+source "$SGE_ROOT/skills/lib/host-pr-read.sh"
 ```
 
-| Read operation            | GitHub (`gh`)                           | Any host (`fpr_*`)    |
+| Read operation            | GitHub (`gh`)                           | Any host (`hpr_*`)    |
 |---------------------------|-----------------------------------------|-----------------------|
-| View PR metadata          | `gh pr view "$PR" --json ...`           | `fpr_view "$PR"`      |
-| Fetch diff                | `gh pr diff "$PR"`                      | `fpr_diff "$PR"`      |
-| Read CI check statuses    | `gh pr checks "$PR" --json ...`         | `fpr_checks "$PR"`    |
+| View PR metadata          | `gh pr view "$PR" --json ...`           | `hpr_view "$PR"`      |
+| Fetch diff                | `gh pr diff "$PR"`                      | `hpr_diff "$PR"`      |
+| Read CI check statuses    | `gh pr checks "$PR" --json ...`         | `hpr_checks "$PR"`    |
 
 **Scope:** only the non-mutating read and diff phases (Phase 1 Discovery, Phase 2
 agent dispatch input, Phase 3 quality gates CI read, Phase 4 issue validation) are
@@ -144,7 +144,7 @@ forgejo") and never call `gh`.
 | `labels[].name`           | `.labels[].name`                        |
 | `additions` / `deletions` | not in Gitea schema — derive from diff  |
 
-`fpr_view "$PR"` returns the full Gitea PR JSON object; use `jq` to project
+`hpr_view "$PR"` returns the full Gitea PR JSON object; use `jq` to project
 the fields this skill needs before passing to downstream phases.
 
 ## Azure Repos (`azdo`) — the supported review lane (SPEC-110 S4, #2985 / #2989 / #3028)
