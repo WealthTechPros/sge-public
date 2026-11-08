@@ -289,15 +289,15 @@ chronic false-positive). Flag a drop early, mid-morning, not after a lost aftern
 > **Host-routed (sge-public#47).** Detect the host first — `gh` only talks to
 > GitHub. On a Forgejo/Gitea remote there is no merged-PR search yet, so report
 > `THROUGHPUT_SKIP` with the reason (plus the open-PR backlog from the adapter's
-> `list-prs`, via `fpr_open_pr_heads`) — **never** a silent `0 merged`, which
+> `list-prs`, via `hpr_open_pr_heads`) — **never** a silent `0 merged`, which
 > would fire a false `THROUGHPUT_WARN` (or hide a real collapse). The same
 > applies on GitHub when `gh` fails: skip, don't count zero.
 
 ```bash
-source "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/lib/forgejo-pr-read.sh"
-HOST="$(fpr_host_kind)"
+source "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/lib/host-pr-read.sh"
+HOST="$(hpr_host_kind)"
 if [ "$HOST" != "github" ]; then
-  if OPEN=$(fpr_open_pr_heads 2>/dev/null); then OPEN_N=$(printf '%s' "$OPEN" | grep -c .); else OPEN_N="unknown"; fi
+  if OPEN=$(hpr_open_pr_heads 2>/dev/null); then OPEN_N=$(printf '%s' "$OPEN" | grep -c .); else OPEN_N="unknown"; fi
   echo "THROUGHPUT_SKIP: host=$HOST — merged-PR count needs GitHub search (open PRs: $OPEN_N)"
   exit 0   # skip the rest of Component C only
 fi
@@ -333,7 +333,7 @@ fi
 ## Component C2: CI portability scan (Forgejo sge-public#48, Azure Pipelines sge#3030)
 
 On a Forgejo/Gitea host (`.forgejo/workflows/`) or an Azure DevOps host
-(`azure-pipelines.yml`, `.azure-pipelines/**`; `fpr_host_kind` = `azdo`), warn on
+(`azure-pipelines.yml`, `.azure-pipelines/**`; `hpr_host_kind` = `azdo`), warn on
 steps that are GitHub-only and fail silently or noisily on that CI, so the
 per-PR noise is not misread as a regression:
 
@@ -346,7 +346,7 @@ per-PR noise is not misread as a regression:
 # the `gh` executable in command position, any subcommand (auth, secret, ...)
 GH='(^|[[:space:];|&(])gh[[:space:]]+[a-z]'
 FILES=""
-case "$(fpr_host_kind)" in
+case "$(hpr_host_kind)" in
   forgejo) WHERE="a Forgejo runner"; PAT="uses:[[:space:]]*actions/github-script|$GH"
            FILES="$(find .forgejo/workflows -name '*.y*ml' -type f 2>/dev/null)" ;;
   azdo)    WHERE="an Azure Pipelines agent"; PAT="uses:[[:space:]]*actions/|task:[[:space:]]*GitHub[A-Za-z]*@|$GH"

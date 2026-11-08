@@ -37,7 +37,7 @@ git -C "$R1" commit -q --allow-empty -m bo-live; echo b >"$R1/b.txt"; git -C "$R
 git -C "$R2" worktree add -q -b feat/other "$TMP/repo2-worktrees/other"
 cd "$TMP"
 
-fpr_open_pr_heads() { printf '9\tfeat/openpr\n'; }
+hpr_open_pr_heads() { printf '9\tfeat/openpr\n'; }
 OUT="$TMP/out.tsv"; { wi_scan "$R1"; wi_scan "$R2"; } >"$OUT"
 row() { awk -F'\t' -v b="$1" '$6==b' "$OUT"; }
 act() { row "$1" | cut -f1; }
@@ -65,11 +65,11 @@ check "open-a-pr only for supersession-live rows" \
 check "tip sha is recorded on every delete row" "$(awk -F'\t' '$1=="delete" && $7 !~ /^[0-9a-f]{40}$/' "$OUT" | wc -l | tr -d ' ')" "0"
 
 # --- fail safe: PR lookup failure never suggests delete / open-a-pr ---
-fpr_open_pr_heads() { return 1; }
+hpr_open_pr_heads() { return 1; }
 wi_scan "$R1" >"$OUT"
 check "lookup failure: no delete or open-a-pr" "$(cut -f1 "$OUT" | grep -cE '^(delete|open-a-pr)$')" "0"
 check "lookup failure reason recorded" "$(row feat/superseded | cut -f2)" "open-pr-lookup-failed"
-fpr_open_pr_heads() { printf '9\tfeat/openpr\n'; }
+hpr_open_pr_heads() { printf '9\tfeat/openpr\n'; }
 git -C "$R1" update-ref -d refs/remotes/origin/main
 wi_scan "$R1" >"$OUT"
 check "unresolvable base: never delete" "$(cut -f1 "$OUT" | grep -c '^delete$')" "0"

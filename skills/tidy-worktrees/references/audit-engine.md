@@ -12,7 +12,7 @@ bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/tidy-worktr
 
 | Field | Meaning |
 |---|---|
-| `refused` / `open_pr_set_known` | `true` / `false` when `fpr_open_pr_heads` failed: every item is C and `delete_plan` is `null` |
+| `refused` / `open_pr_set_known` | `true` / `false` when `hpr_open_pr_heads` failed: every item is C and `delete_plan` is `null` |
 | `counts`, `counts_by_kind` | A/B/C/D totals, overall and per kind (`worktree`, `branch`, `stash`, `remote-branch`) |
 | `items[]` | `kind`, `name`, `path`, `tip`, `bucket`, `sub_verdict`, `reason`, `pr_state` (`merged`/`closed`/`open`/`none`), `pr_number`, `ahead`, `behind` (vs `origin/<default>`), `age_days`, `last_author`, `supersession`, `dirty`, `unpushed`, `owner`, `commands`, `needs_junction_guard` |
 | `delete_plan` | `merged_A` and `discard_D`, each with `local` (worktrees, then branches) and `remote` lists of `{item, tip, pr_state, commands}` |
@@ -31,7 +31,7 @@ Stashes are always C `NEEDS-DECISION:STASH` and never carry commands. The branch
 
 ## Host routing
 
-GitHub: one bulk `gh pr list --state all` (cap `SGE_AUDIT_PR_LIMIT`, default 2000). Records found in a truncated list are used; absence from a truncated list is a lookup failure (keep). Azure DevOps: `fpr_completed_pr_heads <branch>` per branch (needs `SGE_AZDO_TOKEN`). Forgejo/Gitea: only the open set exists, so a branch reaches A or D only on git evidence. Unknown host: everything is C.
+GitHub: one bulk `gh pr list --state all` (cap `SGE_AUDIT_PR_LIMIT`, default 2000). Records found in a truncated list are used; absence from a truncated list is a lookup failure (keep). Azure DevOps: `hpr_completed_pr_heads <branch>` per branch (needs `SGE_AZDO_TOKEN`). Forgejo/Gitea: only the open set exists, so a branch reaches A or D only on git evidence. Unknown host: everything is C.
 
 ## Commands are literal
 

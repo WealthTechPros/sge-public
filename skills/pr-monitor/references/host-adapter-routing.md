@@ -13,26 +13,26 @@ SGE_ROOT="$(bash ./scripts/resolve-sge-root.sh 2>/dev/null || bash "${CLAUDE_PLU
 # Detect the host kind once per Startup.
 HOST_KIND="$("$SGE_ROOT/scripts/with-repo-cwd.sh" host)"
 
-# Source the routing shim — it exposes fpr_list / fpr_view / fpr_diff / fpr_checks
+# Source the routing shim — it exposes hpr_list / hpr_view / hpr_diff / hpr_checks
 # that transparently route to gh (GitHub) or forgejo-adapter.sh (Forgejo/Gitea).
-source "$SGE_ROOT/skills/lib/forgejo-pr-read.sh"
+source "$SGE_ROOT/skills/lib/host-pr-read.sh"
 ```
 
 Then replace every `gh pr list`/`gh pr view`/`gh pr checks` call in the monitor loop
-with the corresponding `fpr_*` wrapper:
+with the corresponding `hpr_*` wrapper:
 
-| GitHub (`gh`)                         | Any host (`fpr_*`)            |
+| GitHub (`gh`)                         | Any host (`hpr_*`)            |
 |---------------------------------------|-------------------------------|
-| `gh pr list --state open --json ...`  | `fpr_list`                    |
-| `gh pr view "$pr" --json ...`         | `fpr_view "$pr"`              |
-| `gh pr checks "$pr"`                  | `fpr_checks "$pr"`            |
+| `gh pr list --state open --json ...`  | `hpr_list`                    |
+| `gh pr view "$pr" --json ...`         | `hpr_view "$pr"`              |
+| `gh pr checks "$pr"`                  | `hpr_checks "$pr"`            |
 
 **Forgejo-specific behaviour:**
 
-- `fpr_list` returns the Gitea PR JSON schema (superset of what `gh pr list --json` returns;
+- `hpr_list` returns the Gitea PR JSON schema (superset of what `gh pr list --json` returns;
   map `number → number`, `title → title`, `state → state`, `head.sha → headRefOid`,
   `base.ref → baseRefName`, `labels[].name → labels[].name`).
-- `fpr_checks` resolves the PR head SHA then calls `pr-statuses`; the Gitea
+- `hpr_checks` resolves the PR head SHA then calls `pr-statuses`; the Gitea
   CommitStatus `state` values (`pending/success/error/failure/warning`) map to
   the same traffic-light logic as `gh pr checks` conclusions: `success` = green;
   `pending` = in-flight; all others = failing.
@@ -45,7 +45,7 @@ so the adapter's allow-list validation passes (ADR-0010).
 
 The mutating slice deferred above has shipped: `skills/lib/forgejo-pr-mutate.sh`
 gives the same `fpr_*` seam for rerun, merge, and label add/remove. Source it
-(it sources `forgejo-pr-read.sh` itself, so one `source` is enough):
+(it sources `host-pr-read.sh` itself, so one `source` is enough):
 
 ```bash
 source "$SGE_ROOT/skills/lib/forgejo-pr-mutate.sh"
@@ -60,7 +60,7 @@ source "$SGE_ROOT/skills/lib/forgejo-pr-mutate.sh"
 
 **Use the `fpr_*` merge/readiness rows on Forgejo only, for now.** On GitHub keep
 using `monitor-lib.sh`'s `pr_ready_for_merge` and `gh`: the GitHub branch of
-`fpr_checks` requests `gh pr checks --json` fields real `gh` rejects, and
+`hpr_checks` requests `gh pr checks --json` fields real `gh` rejects, and
 `fpr_merge_ready` never consults `$MERGE_GATE_LABEL` there (tracked in #2650).
 Also note **`fpr_merge` on Forgejo merges immediately** — unlike GitHub's
 `--auto`, nothing waits for CI server-side — which is why `fpr_merge_ready`
@@ -100,7 +100,7 @@ the bare add/remove-label primitive exists there.
 Gitea's CommitStatus schema has no dedicated "cancelled" state; whether a
 cancelled Forgejo Actions run reports as `error`, `failure`, or something else
 is **unverified** — checking this needs a real cancelled run on a live
-instance. Until checked, `fpr_check_is_failing`/`fpr_merge_ready` will treat a
+instance. Until checked, `hpr_check_is_failing`/`fpr_merge_ready` will treat a
 cancelled Forgejo run as a hard CI failure (fail-closed is the safe default,
 but it means a cancelled run gets CODE-FAIL treatment instead of the
 retry-via-fresh-run treatment GitHub gets).

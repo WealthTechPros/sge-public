@@ -25,7 +25,7 @@ git -C "$R" worktree add -q -b feat/done "$TMP/wt done"
 git -C "$R" worktree add -q -b feat/wip "$TMP/wt wip"
 D="$TMP/wt done"; P="$TMP/wt wip"
 cd "$TMP"
-fpr_open_pr_heads() { printf '7\tsome/other\n'; }
+hpr_open_pr_heads() { printf '7\tsome/other\n'; }
 wl_register "$D" s1 >/dev/null; wl_register "$P" s1 >/dev/null
 
 snapshot() { # everything a deletion or mutation would change
@@ -64,9 +64,9 @@ check "post-merge commit is never suggested for delete" "$(awk -F'\t' '$6=="feat
 git -C "$P" stash -q -u 2>/dev/null
 wi_scan "$R" >"$TMP/rows.tsv"
 check "attributed stash is kept, not deleted" "$(awk -F'\t' '$6=="feat/wip"{print $1":"$2}' "$TMP/rows.tsv")" "keep:attributed-stash"
-fpr_open_pr_heads() { return 1; }
+hpr_open_pr_heads() { return 1; }
 check "failed PR lookup never yields candidate" "$(wl_audit "$D" s1 | sed -n 1p)" "verdict:KEEP"
-fpr_open_pr_heads() { printf '7\tsome/other\n'; }
+hpr_open_pr_heads() { printf '7\tsome/other\n'; }
 
 # --- no lifecycle script or hook contains a deletion or history-mutating command ---
 SCRIPTS=("$HERE/inbox.sh" "$HERE/../lib/worktree-lifecycle.sh" "$HERE/../../hooks/copilot/worktree-lifecycle.sh")

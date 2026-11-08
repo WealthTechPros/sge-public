@@ -40,7 +40,7 @@ _TA_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "$_TA_HERE/inbox.sh"
 # shellcheck source=/dev/null
-source "$_TA_HERE/../lib/forgejo-pr-read.sh"
+source "$_TA_HERE/../lib/host-pr-read.sh"
 set +e
 
 _ta_safe_name() { # branch names we are willing to put in a literal command
@@ -62,14 +62,14 @@ _ta_supersession() {
 # Load the host-routed PR evidence once per repo (cwd must be the repo).
 ta_pr_load() {
   local cap raw n
-  _TA_HOST="$(fpr_host_kind 2>/dev/null)"; [ -n "$_TA_HOST" ] || _TA_HOST=unknown
+  _TA_HOST="$(hpr_host_kind 2>/dev/null)"; [ -n "$_TA_HOST" ] || _TA_HOST=unknown
   _TA_OPEN_OK=1; _TA_OPEN=""
-  _TA_OPEN="$(fpr_open_pr_heads 2>/dev/null)" || { _TA_OPEN_OK=0; _TA_OPEN=""; }
+  _TA_OPEN="$(hpr_open_pr_heads 2>/dev/null)" || { _TA_OPEN_OK=0; _TA_OPEN=""; }
   _TA_ALL_OK=0; _TA_ALL_TRUNC=0; _TA_ALL=""
   if [ "$_TA_HOST" = github ] && [ "$_TA_OPEN_OK" -eq 1 ]; then
     cap="${SGE_AUDIT_PR_LIMIT:-2000}"
     case "$cap" in ''|*[!0-9]*|0) cap=2000 ;; esac
-    if raw="$(_fpr_timed gh pr list --state all --limit "$cap" --json number,headRefName,headRefOid,state,mergedAt 2>/dev/null)" \
+    if raw="$(_hpr_timed gh pr list --state all --limit "$cap" --json number,headRefName,headRefOid,state,mergedAt 2>/dev/null)" \
        && n="$(printf '%s' "$raw" | jq -e 'if type=="array" then length else error("x") end' 2>/dev/null)"; then
       n="${n%$'\r'}"
       _TA_ALL="$raw"; _TA_ALL_OK=1
@@ -97,7 +97,7 @@ ta_pr_record() {
       [ "$_TA_ALL_TRUNC" -eq 1 ] && return 1 # absence is not proof when the list may be truncated
       printf 'none\t-\t-\n'; return 0 ;;
     azdo)
-      out="$(fpr_completed_pr_heads "$b" 2>/dev/null)"; rc=$?
+      out="$(hpr_completed_pr_heads "$b" 2>/dev/null)"; rc=$?
       [ "$rc" -eq 0 ] || return 1
       if [ -n "$out" ]; then
         printf '%s\n' "$out" | sort -t$'\t' -k3 | tail -1 | awk -F'\t' '{print "merged\t"$1"\t"$2}'

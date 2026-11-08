@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # forgejo-pr-mutate.sh — routing shim for MUTATING PR operations on non-GitHub
-# hosts (issue #2582, the mutating slice deferred by forgejo-pr-read.sh / #1238).
+# hosts (issue #2582, the mutating slice deferred by host-pr-read.sh / #1238).
 #
-# forgejo-pr-read.sh gave every skill a UNIFIED INTERFACE for read-only PR ops
-# (fpr_list/fpr_view/fpr_diff/fpr_checks) that routes to `gh` on GitHub and to
+# host-pr-read.sh gave every skill a UNIFIED INTERFACE for read-only PR ops
+# (hpr_list/hpr_view/hpr_diff/hpr_checks) that routes to `gh` on GitHub and to
 # scripts/forgejo-adapter.sh on a Forgejo/Gitea host, while explicitly deferring
 # mutating ops ("skip + log deferral"). This file is that deferred slice: rerun,
 # merge (with a degrading merge-readiness check), and label add/remove.
@@ -14,7 +14,7 @@
 # Forgejo remote with no adapter involved (see skills/pr-fix/SKILL.md Loop
 # step 7). This file does not add new REST verbs to the adapter; it wires the
 # existing ones (and plain git, for rerun) behind the same `fpr_*` seam that
-# forgejo-pr-read.sh established, so a caller never branches on host itself.
+# host-pr-read.sh established, so a caller never branches on host itself.
 #
 # GOVERNANCE NOTE (#2582): built WITHOUT live access to the validation target
 # named in the issue's governance decision — git.feaw.co.uk/FEAW/homelab-infra
@@ -28,7 +28,7 @@
 # `mcp__forgejo__*` access against the real target repo is a required follow-up
 # before this is trusted in production pr-monitor/pr-review runs.
 #
-# Usage (source AFTER forgejo-pr-read.sh, or let this file source it for you):
+# Usage (source AFTER host-pr-read.sh, or let this file source it for you):
 #   source "${CLAUDE_PLUGIN_ROOT}/skills/lib/forgejo-pr-mutate.sh"
 #
 #   # Re-run CI for a PR.
@@ -99,7 +99,7 @@
 #     but whether a Forgejo Actions run that was actually cancelled reports as
 #     `error`, `failure`, or something else entirely is UNVERIFIED without a
 #     live cancelled run to inspect. OPEN QUESTION, not guessed at here:
-#     fpr_check_is_failing (forgejo-pr-read.sh) will currently treat any
+#     hpr_check_is_failing (host-pr-read.sh) will currently treat any
 #     failure/error state as a hard CI failure, so a cancelled Forgejo run
 #     may be mis-routed to CODE FAIL/GATE_FAIL:ci_failing instead of being
 #     given the CANCELLED-row treatment GitHub gets. Needs checking against a
@@ -113,10 +113,10 @@
 # (never the self-settable pr-reviewed tag) and the DP5 CI gate.
 # fpr_rerun has no Azure branch (it fails closed as an unknown host).
 #
-# Environment (in addition to forgejo-pr-read.sh's):
+# Environment (in addition to host-pr-read.sh's):
 #   FORGEJO_ADAPTER_ALLOW_WRITE — set to 1 internally by this file's own
 #     forgejo-path calls into forgejo-adapter.sh; sourcing this file at all
-#     (as opposed to forgejo-pr-read.sh) is the explicit, auditable decision
+#     (as opposed to host-pr-read.sh) is the explicit, auditable decision
 #     to permit mutating ops (ADR-0010's read-vs-mutating boundary is honoured
 #     at the forgejo-adapter.sh layer regardless — this file cannot bypass it,
 #     it just supplies the flag on the caller's behalf for each mutating call
@@ -135,13 +135,13 @@ set -euo pipefail
 
 _FPM_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Reuse forgejo-pr-read.sh's host detection, origin resolution, fpr_view,
-# _FPR_ADAPTER path, and fpr_check_is_failing — do NOT fork a second copy of
+# Reuse host-pr-read.sh's host detection, origin resolution, hpr_view,
+# _HPR_ADAPTER path, and hpr_check_is_failing — do NOT fork a second copy of
 # any of that here. Sourcing only defines functions/vars (same contract
 # forgejo-adapter.sh relies on for with-repo-cwd.sh), so this is a pure
 # include with no extra side effects beyond what read.sh already has.
-# shellcheck source=skills/lib/forgejo-pr-read.sh
-. "$_FPM_SCRIPT_DIR/forgejo-pr-read.sh"
+# shellcheck source=skills/lib/host-pr-read.sh
+. "$_FPM_SCRIPT_DIR/host-pr-read.sh"
 
 _fpm_err() { printf 'forgejo-pr-mutate: error: %s\n' "$*" >&2; }
 
@@ -162,7 +162,7 @@ _fpm_adapter_failed() {
 fpr_rerun() {
   local pr="${1:-}" reason="${2:-manual retrigger}"
   [ -n "$pr" ] || { _fpm_err "fpr_rerun: <pr-index> required"; return 1; }
-  local host; host="$(fpr_host_kind)"
+  local host; host="$(hpr_host_kind)"
   case "$host" in
     github)
       local sha run_id
@@ -185,9 +185,9 @@ fpr_rerun() {
       # Forgejo instance in this lane.
       command -v jq >/dev/null 2>&1 || { _fpm_err "jq is required for fpr_rerun on a Forgejo host"; return 1; }
       local origin pr_json expected_ref current_ref head_sha head_repo base_repo
-      origin="$(_fpr_origin_url)" || return 1
-      [ -f "$_FPR_ADAPTER" ] || { _fpm_err "forgejo-adapter.sh not found at $_FPR_ADAPTER"; return 1; }
-      pr_json="$(bash "$_FPR_ADAPTER" get-pr "$origin" "$pr")" \
+      origin="$(_hpr_origin_url)" || return 1
+      [ -f "$_HPR_ADAPTER" ] || { _fpm_err "forgejo-adapter.sh not found at $_HPR_ADAPTER"; return 1; }
+      pr_json="$(bash "$_HPR_ADAPTER" get-pr "$origin" "$pr")" \
         || { _fpm_err "fpr_rerun: could not fetch PR $pr"; return 1; }
       expected_ref="$(printf '%s' "$pr_json" | jq -r '.head.ref // empty')"
       [ -n "$expected_ref" ] || { _fpm_err "fpr_rerun: could not resolve head ref for PR $pr"; return 1; }
@@ -243,7 +243,7 @@ fpr_merge_ready() {
   command -v jq >/dev/null 2>&1 || { _fpm_err "jq is required for fpr_merge_ready"; return 2; }
 
   local pr_json body labels
-  pr_json="$(fpr_view "$pr" --json body,labels 2>/dev/null)" \
+  pr_json="$(hpr_view "$pr" --json body,labels 2>/dev/null)" \
     || { _fpm_err "fpr_merge_ready: could not fetch PR $pr"; return 2; }
   body="$(printf '%s' "$pr_json" | jq -r '.body // ""' 2>/dev/null)"
   labels="$(printf '%s' "$pr_json" | jq -r '.labels[].name' 2>/dev/null)"   # one name per line
@@ -255,14 +255,14 @@ fpr_merge_ready() {
   # requires the newest verdict artefact written by the SGE token identity
   # (azdo-adapter.sh pr-verdict-status) to be `approve` at the CURRENT head.
   # The tag is display only. Gate 3 below is shared.
-  if [ "$(fpr_host_kind)" = azdo ]; then
+  if [ "$(hpr_host_kind)" = azdo ]; then
     local wis vs head
-    wis="$(bash "$_FPR_AZDO_ADAPTER" pr-work-items "$(_fpr_origin_url)" "$pr" 2>/dev/null)" \
+    wis="$(bash "$_HPR_AZDO_ADAPTER" pr-work-items "$(_hpr_origin_url)" "$pr" 2>/dev/null)" \
       || { echo "GATE_FAIL:link_unknown"; return 1; }
     [ -n "$wis" ] || { echo "GATE_FAIL:not_linked"; return 1; }
     head="$(printf '%s' "$pr_json" | jq -r '.headRefOid // ""' 2>/dev/null | tr -d '\r')"
-    [ -n "$head" ] || head="$(fpr_view "$pr" --json headRefOid --jq .headRefOid 2>/dev/null | tr -d '\r')" || head=''
-    vs="$(bash "$_FPR_AZDO_ADAPTER" pr-verdict-status "$(_fpr_origin_url)" "$pr" 2>/dev/null | tr -d '\r')" \
+    [ -n "$head" ] || head="$(hpr_view "$pr" --json headRefOid --jq .headRefOid 2>/dev/null | tr -d '\r')" || head=''
+    vs="$(bash "$_HPR_AZDO_ADAPTER" pr-verdict-status "$(_hpr_origin_url)" "$pr" 2>/dev/null | tr -d '\r')" \
       || { echo "GATE_FAIL:verdict_unknown"; return 1; }
     [[ "$head" =~ ^[0-9a-f]{40}$ && "$vs" == "approve $head" ]] \
       || { echo "GATE_FAIL:not_reviewed"; return 1; }
@@ -293,21 +293,21 @@ fpr_merge_ready() {
   fi
 
   # Gate 3 — CI green. Always required, on every host. Reuses
-  # fpr_check_is_failing (forgejo-pr-read.sh) so both hosts are judged by
+  # hpr_check_is_failing (host-pr-read.sh) so both hosts are judged by
   # exactly the same rule; THREE-VALUED per that function's own contract:
   # exit 2 (unresolvable) must fail closed, never read as "not failing".
   local rc=0
-  fpr_check_is_failing "$pr" || rc=$?
+  hpr_check_is_failing "$pr" || rc=$?
   case "$rc" in
     0) echo "GATE_FAIL:ci_failing"; return 1 ;;
     2) echo "GATE_FAIL:ci_unknown"; return 1 ;;
   esac
-  # "Not failing" is not "green": fpr_check_is_failing is also 1 for an EMPTY
+  # "Not failing" is not "green": hpr_check_is_failing is also 1 for an EMPTY
   # status list and for statuses still PENDING. Require at least one status and
   # none still open, else a Forgejo merge (immediate, no server-side wait)
   # would ship code whose CI never ran or hasn't finished.
   local checks n_total n_open
-  checks="$(fpr_checks "$pr" 2>/dev/null)" || { echo "GATE_FAIL:ci_unknown"; return 1; }
+  checks="$(hpr_checks "$pr" 2>/dev/null)" || { echo "GATE_FAIL:ci_unknown"; return 1; }
   n_total="$(printf '%s' "$checks" | jq 'length' 2>/dev/null)" || n_total=''
   n_open="$(printf '%s' "$checks" | jq '[.[] | select(.state != "SUCCESS" and .state != "SKIPPED" and .state != "NEUTRAL")] | length' 2>/dev/null)" || n_open=''
   case "$n_total" in ''|*[!0-9]*) echo "GATE_FAIL:ci_unknown"; return 1 ;; esac
@@ -327,7 +327,7 @@ fpr_merge() {
   local skip=0
   case "${1:-}" in --skip-ready-check) skip=1 ;; esac
 
-  local host; host="$(fpr_host_kind)"
+  local host; host="$(hpr_host_kind)"
   # Forgejo: resolve the head SHA ONCE, BEFORE the ready check, and pin the merge
   # to it. Re-reading it after the check would pin to whatever head exists by
   # then — including a commit pushed mid-call that the check never evaluated.
@@ -337,15 +337,15 @@ fpr_merge() {
   local origin='' sha=''
   if [ "$host" = azdo ]; then
     command -v jq >/dev/null 2>&1 || { _fpm_err "jq is required for fpr_merge on Azure DevOps"; return 1; }
-    origin="$(_fpr_origin_url)" || return 1
-    sha="$(fpr_view "$pr" --json headRefOid --jq .headRefOid 2>/dev/null | tr -d '\r')" || sha=''
+    origin="$(_hpr_origin_url)" || return 1
+    sha="$(hpr_view "$pr" --json headRefOid --jq .headRefOid 2>/dev/null | tr -d '\r')" || sha=''
     [ -n "$sha" ] || { _fpm_err "fpr_merge: could not resolve head SHA for PR $pr"; return 1; }
   fi
   if [ "$host" = forgejo ]; then
     command -v jq >/dev/null 2>&1 || { _fpm_err "jq is required for fpr_merge on a Forgejo host"; return 1; }
-    origin="$(_fpr_origin_url)" || return 1
-    [ -f "$_FPR_ADAPTER" ] || { _fpm_err "forgejo-adapter.sh not found at $_FPR_ADAPTER"; return 1; }
-    sha="$(bash "$_FPR_ADAPTER" pr-head-sha "$origin" "$pr")" \
+    origin="$(_hpr_origin_url)" || return 1
+    [ -f "$_HPR_ADAPTER" ] || { _fpm_err "forgejo-adapter.sh not found at $_HPR_ADAPTER"; return 1; }
+    sha="$(bash "$_HPR_ADAPTER" pr-head-sha "$origin" "$pr")" \
       || { _fpm_err "fpr_merge: could not resolve head SHA for PR $pr"; return 1; }
     [ -n "$sha" ] || { _fpm_err "fpr_merge: empty head SHA for PR $pr"; return 1; }
   fi
@@ -366,13 +366,13 @@ fpr_merge() {
     forgejo)
       # NOT LIVE-VALIDATED: pinned squash-merge, see the SHA note above.
       local rc=0
-      FORGEJO_ADAPTER_ALLOW_WRITE=1 bash "$_FPR_ADAPTER" pr-merge-squash "$origin" "$pr" "$sha" || rc=$?
+      FORGEJO_ADAPTER_ALLOW_WRITE=1 bash "$_HPR_ADAPTER" pr-merge-squash "$origin" "$pr" "$sha" || rc=$?
       [ "$rc" -eq 0 ] || { _fpm_adapter_failed fpr_merge "$pr" pr-merge-squash "$rc"; return "$rc"; }
       ;;
     azdo)
       # Squash-complete pinned to the head checked above; transitionWorkItems
       # closes the linked work items (SPEC-110 P8). Immediate, like Forgejo.
-      AZDO_ADAPTER_ALLOW_WRITE=1 bash "$_FPR_AZDO_ADAPTER" pr-merge "$origin" "$pr" "$sha"
+      AZDO_ADAPTER_ALLOW_WRITE=1 bash "$_HPR_AZDO_ADAPTER" pr-merge "$origin" "$pr" "$sha"
       ;;
     *)
       _fpm_err "unknown host kind '$host' — cannot merge PR $pr"
@@ -390,21 +390,21 @@ fpr_merge() {
 fpr_add_label() {
   local pr="${1:-}" label="${2:-}"
   [ -n "$pr" ] && [ -n "$label" ] || { _fpm_err "fpr_add_label: <pr-index> <label-name> required"; return 1; }
-  local host; host="$(fpr_host_kind)"
+  local host; host="$(hpr_host_kind)"
   case "$host" in
     github)
       gh pr edit "$pr" --add-label "$label"
       ;;
     forgejo)
-      local origin; origin="$(_fpr_origin_url)" || return 1
-      [ -f "$_FPR_ADAPTER" ] || { _fpm_err "forgejo-adapter.sh not found at $_FPR_ADAPTER"; return 1; }
+      local origin; origin="$(_hpr_origin_url)" || return 1
+      [ -f "$_HPR_ADAPTER" ] || { _fpm_err "forgejo-adapter.sh not found at $_HPR_ADAPTER"; return 1; }
       local rc=0
-      FORGEJO_ADAPTER_ALLOW_WRITE=1 bash "$_FPR_ADAPTER" pr-add-label "$origin" "$pr" "$label" || rc=$?
+      FORGEJO_ADAPTER_ALLOW_WRITE=1 bash "$_HPR_ADAPTER" pr-add-label "$origin" "$pr" "$label" || rc=$?
       [ "$rc" -eq 0 ] || { _fpm_adapter_failed fpr_add_label "$pr" pr-add-label "$rc"; return "$rc"; }
       ;;
     azdo)
       # PR labels are PR tags on Azure Repos (#2985).
-      AZDO_ADAPTER_ALLOW_WRITE=1 bash "$_FPR_AZDO_ADAPTER" pr-add-label "$(_fpr_origin_url)" "$pr" "$label"
+      AZDO_ADAPTER_ALLOW_WRITE=1 bash "$_HPR_AZDO_ADAPTER" pr-add-label "$(_hpr_origin_url)" "$pr" "$label"
       ;;
     *)
       _fpm_err "unknown host kind '$host' — cannot add label to PR $pr"
@@ -421,20 +421,20 @@ fpr_add_label() {
 fpr_remove_label() {
   local pr="${1:-}" label="${2:-}"
   [ -n "$pr" ] && [ -n "$label" ] || { _fpm_err "fpr_remove_label: <pr-index> <label-name> required"; return 1; }
-  local host; host="$(fpr_host_kind)"
+  local host; host="$(hpr_host_kind)"
   case "$host" in
     github)
       gh pr edit "$pr" --remove-label "$label"
       ;;
     forgejo)
-      local origin; origin="$(_fpr_origin_url)" || return 1
-      [ -f "$_FPR_ADAPTER" ] || { _fpm_err "forgejo-adapter.sh not found at $_FPR_ADAPTER"; return 1; }
+      local origin; origin="$(_hpr_origin_url)" || return 1
+      [ -f "$_HPR_ADAPTER" ] || { _fpm_err "forgejo-adapter.sh not found at $_HPR_ADAPTER"; return 1; }
       local rc=0
-      FORGEJO_ADAPTER_ALLOW_WRITE=1 bash "$_FPR_ADAPTER" pr-remove-label "$origin" "$pr" "$label" || rc=$?
+      FORGEJO_ADAPTER_ALLOW_WRITE=1 bash "$_HPR_ADAPTER" pr-remove-label "$origin" "$pr" "$label" || rc=$?
       [ "$rc" -eq 0 ] || { _fpm_adapter_failed fpr_remove_label "$pr" pr-remove-label "$rc"; return "$rc"; }
       ;;
     azdo)
-      AZDO_ADAPTER_ALLOW_WRITE=1 bash "$_FPR_AZDO_ADAPTER" pr-remove-label "$(_fpr_origin_url)" "$pr" "$label"
+      AZDO_ADAPTER_ALLOW_WRITE=1 bash "$_HPR_AZDO_ADAPTER" pr-remove-label "$(_hpr_origin_url)" "$pr" "$label"
       ;;
     *)
       _fpm_err "unknown host kind '$host' — cannot remove label from PR $pr"

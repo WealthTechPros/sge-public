@@ -27,19 +27,19 @@ gh pr list --state merged --head "$b" --json number,mergedAt,headRefOid
 # or: gh pr view "$b" --json state,headRefOid
 ```
 
-On **Azure DevOps** (`fpr_host_kind` = `azdo`) use the completed-PR lookup instead (issue #3027; needs `SGE_AZDO_TOKEN`, the same read-only Code PAT as the open-PR list):
+On **Azure DevOps** (`hpr_host_kind` = `azdo`) use the completed-PR lookup instead (issue #3027; needs `SGE_AZDO_TOKEN`, the same read-only Code PAT as the open-PR list):
 
 ```bash
-source "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/lib/forgejo-pr-read.sh"
+source "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/lib/host-pr-read.sh"
 # "<number><TAB><recorded-source-head-sha><TAB><completion-time>" per status=completed PR
-if COMPLETED="$(fpr_completed_pr_heads "$b")"; then
+if COMPLETED="$(hpr_completed_pr_heads "$b")"; then
   tip="$(git rev-parse "refs/heads/$b")"
   printf '%s
 ' "$COMPLETED" | cut -f2 | grep -qx "$tip" && echo "completed-PR head == tip"
 fi
 ```
 
-A branch is ⬜ SAFE only when a **completed** PR exists, its recorded source head (`lastMergeSourceCommit`) equals the local branch tip, **and** the tree is clean. Everything else stays 🟥 NEEDS-DECISION: a tip that moved past the completed head, an abandoned or active PR (only `status=completed` counts; completion is never inferred from mergeability or a merge commit), no completed PR, a missing token or disallowed host, an API/auth error, malformed JSON, or a page-cap hit (possible truncation). `fpr_completed_pr_heads` exits non-zero on every uncertainty; an empty list with exit 0 is a confirmed zero and also leaves the branch NEEDS-DECISION. Never print or log the token.
+A branch is ⬜ SAFE only when a **completed** PR exists, its recorded source head (`lastMergeSourceCommit`) equals the local branch tip, **and** the tree is clean. Everything else stays 🟥 NEEDS-DECISION: a tip that moved past the completed head, an abandoned or active PR (only `status=completed` counts; completion is never inferred from mergeability or a merge commit), no completed PR, a missing token or disallowed host, an API/auth error, malformed JSON, or a page-cap hit (possible truncation). `hpr_completed_pr_heads` exits non-zero on every uncertainty; an empty list with exit 0 is a confirmed zero and also leaves the branch NEEDS-DECISION. Never print or log the token.
 
 On any other non-GitHub host (Forgejo/Gitea) there is no merged-PR lookup yet, so skip this cross-check: the branch stays 🟥 NEEDS-DECISION on ahead-count (fail safe — never SAFE on an unverified merge).
 

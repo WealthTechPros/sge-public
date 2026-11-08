@@ -73,9 +73,9 @@ _prl_fjh_ctx() {
   [ "$_pf" = on ] || set +o pipefail
   # Pin the shim to THIS tree's adapter and to the origin pr-labels.sh already
   # classified as forgejo (it honours FORGEJO_ORIGIN, which the shim does not).
-  _FPR_ADAPTER="$_FJH_ADAPTER"
-  _FPR_HOST_KIND="forgejo"
-  _fpr_origin_url() { printf '%s' "$_FJH_ORIGIN"; }
+  _HPR_ADAPTER="$_FJH_ADAPTER"
+  _HPR_HOST_KIND="forgejo"
+  _hpr_origin_url() { printf '%s' "$_FJH_ORIGIN"; }
   _FJH_READY=1
 }
 
