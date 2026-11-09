@@ -1,5 +1,5 @@
 ---
-description: Use when cleaning up git worktrees, branches, stashes or leftover files, after merging PRs or before new work (--force: fast merged-only sweep). Audits everything, builds one delete plan, assesses unmerged work for PR or discard. Destructive only after one confirmed plan with tip SHAs.
+description: 'Use when cleaning up git worktrees, branches, stashes or leftover files, after merging PRs or before new work (--force: fast merged-only sweep). Audits everything, builds one delete plan, assesses unmerged work for PR or discard. Destructive only after one confirmed plan with tip SHAs.'
 argument-hint: "[--force] [--inbox] [--audit] [repo dirs…]"
 allowed-tools: Read, Grep, Glob, Agent, AskUserQuestion, Bash, mcp__plugin_sge_sge-memory__search_nodes, mcp__plugin_sge_sge-memory__create_entities
 ---
@@ -29,7 +29,7 @@ Every item ends as **already in main / PR opened / kept with a named blocker / d
 
 - **Audit before delete; local before remote.** Order: worktrees, local branches, then remote branches. Remote-first destroys the only copy of pushed work.
 - **No open-PR set, no deletions** (sge-public#47): the set comes from the repo's real host via `hpr_open_pr_heads`; on failure print the audit and refuse a plan.
-- **Protected, always KEEP:** the current worktree, the default branch, open-PR branches, Git-locked worktrees, live claims, recently created worktrees (table below).
+- **Protected, always KEEP:** the current worktree, the default branch, open-PR branches, live claims, recently created worktrees and Git-locked worktrees (table below). A lock is a retention marker, not proof of an active worker: locked worktrees are only ever unlocked through the Phase 2b user-confirmed choice.
 - **Every deletion quotes a recovery SHA.** Uncommitted files have no SHA: name them if the user discards them.
 - **Sweeps never mutate merge-gate labels** (`pr-reviewing`, `pr-reviewed`) — see Phase 4.
 - **Supersession is checked before any push**; no auto-merge, no force-push, no bulk PRs beyond the capped multi-select below.
@@ -41,6 +41,7 @@ Targets the repo in the current directory (or the dirs in `$ARGUMENTS`). From a 
 
 ## Out of scope
 
+- Unlocking or removing a locked worktree without the Phase 2b user choice (never under `--force`); touching dirty, stashed, live-claimed, active-PR or other-owner worktrees.
 - Deleting anything without one user-confirmed plan (`--force` still confirms), or deleting remote branches before the local audit is done.
 - Merging, auto-merging, force-pushing or bypassing review gates; PRs only via the capped, verified draft multi-select.
 - Non-git clutter (use `/sge:clean-root`) and processes (use `/sge:reap-orphans`).
@@ -79,13 +80,18 @@ Then run the **engine**: `bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-top
 | Signal | Verdict |
 |---|---|
 | Fresh `.sge-wt-claim` (`roc_claim_state` = `held-fresh`/`mine`, TTL `SGE_WT_CLAIM_TTL_MIN`) | **KEEP (live claim)** |
-| `locked` in `git worktree list --porcelain` | **KEEP (locked)** — never unlock |
+| `locked` in `git worktree list --porcelain` | **KEEP (locked)** — audited in Phase 2b; unlocked only on an explicit user choice, never by the sweep |
 | Directory mtime within `SGE_WT_RECENCY_GUARD_MIN` (default 10) and no claim | **KEEP (recently created)** |
 | Uncommitted changes / attributed stash | C `NEEDS-DECISION:UNCOMMITTED` / `:STASH` — no SHA recovers it |
 | Open PR, current worktree, default branch | C KEEP |
 | Any lookup failed or the base is unresolved | C KEEP |
 
 An expired claim self-heals into the normal audit. Claim, recency, stash and squash-merge checks: [`references/safety-audit-checks.md`](references/safety-audit-checks.md). Registered worktrees also get `worktree-lifecycle.sh audit <wt> <owner-session>`; KEEP/VALUABLE/uncertain wins over `candidate`. Offer `../worktrees/checkpoint.sh checkpoint <wt> <session>` for uncommitted work (exit 10 = partial = keep); a checkpoint never authorises deletion.
+
+
+## Phase 2b — Locked worktrees (read-only audit, then a user choice)
+
+A Git lock is a retention marker, not evidence of an active worker, so locked worktrees are audited rather than silently kept. Run `bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/tidy-worktrees/lock-audit.sh" audit --session "<this session's id>"` (read-only). It splits them into `protected` (live claim, active PR, foreign owner, dirty, stash, tip differs from the merged PR head: KEEP with its reason), `unknown` (missing owner, PR or junction evidence: kept and surfaced) and `candidate` (this session's, inactive, clean, host-confirmed merged PR whose head equals the exact tip). Only when `decision.required` is true, ask one structured question via `AskUserQuestion`: **keep** / **release locks and re-audit only** / **release locks and remove** the listed worktrees and local branches, subset allowed, plus a separate explicit consent naming the ignored files that `remove` would discard (a clean status and a recovery SHA do not back them up). Apply only the approved `path@tip` items with `lock-audit.sh apply`, which re-audits each item immediately before acting and stops any whose evidence changed. Remote branches, labels and permissions are never touched. Details: [`references/lock-audit.md`](references/lock-audit.md).
 
 ## Phase 3 — Fan out, then decide
 
@@ -134,6 +140,6 @@ Fan out the read-only audit (one agent per repo), merge the tables, then run Pha
 2. **Squash merges hide behind phantom "ahead" commits:** trust the host's merged-PR record (`gh`, or `hpr_completed_pr_heads` on Azure DevOps) plus tip == recorded head; Forgejo has no such lookup, so there it stays on git evidence. Any lookup failure keeps.
 3. **Stashes are repo-global:** attribute them by subject; unattributed ones are a note, not a blocker.
 4. **Cleanup never opens PRs one-by-one or in unverified bulk** (#2866). On 2026-10-03 a cleanup session opened 8 PRs and all 8 duplicated work already on main. The maintainer relaxed the one-question-per-branch rule on 2026-11-07 to a single multi-select where each item is individually verified `live` with its issue open, draft-only, capped, never auto-merged, never force-pushed. `--force` never pushes or opens a PR.
-5. **Live claims, locks and the recency guard are sacrosanct** (#1759), including under `--force`.
+5. **Live claims, locks and the recency guard are sacrosanct** (#1759), including under `--force`. A lock is never cleared by the sweep: only the Phase 2b user-confirmed choice (never under `--force`) can release it.
 6. **Windows junction guard is mandatory** before any worktree removal.
 7. **When in doubt keep and report.** A slightly untidy repo is cheap; lost work is not.

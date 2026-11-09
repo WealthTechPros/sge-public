@@ -2587,9 +2587,25 @@ case "$CMD" in
       exit 0
     fi
 
+    # PR Warden owns `changes-requested` on a PR it maintains a status comment on
+    # (sge#3433): it reconciles the label from CodeRabbit's live state every cycle
+    # and re-adds it while changes stand, so stripping it here on each push made
+    # the two writers fight (five add/remove rounds on sge#3418). It is a block,
+    # never a grant, so keeping it is fail-closed; Warden removes it itself.
+    WARDEN_OWNS_CR=false
+    if printf '%s
+' "${ON_PR[@]}" | grep -qxF "changes-requested" && [[ -n "$REPO_FULL" ]]; then
+      _bodies="$(gh api "repos/$REPO_FULL/issues/$PR/comments" --paginate --jq '.[].body' 2>/dev/null)" || _bodies=""
+      [[ "$_bodies" == *'<!-- sge-warden-status -->'* ]] && WARDEN_OWNS_CR=true
+    fi
+
     # 3) Strip each provably stale verdict label.
     STRIPPED=()
     for _gl in "${ON_PR[@]}"; do
+      if [[ "$_gl" == "changes-requested" && "$WARDEN_OWNS_CR" == true ]]; then
+        echo "PR #$PR: sync-check — changes-requested is PR Warden's (status comment present); retained"
+        continue
+      fi
       _state="$(gl_classify "$_gl" "$VERDICT_SHA" "$NEW_HEAD")"
       case "$_state" in
         stale)

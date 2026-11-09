@@ -132,3 +132,7 @@ For "consolidate useful changes into main, then clean up", first review the net
 changes and take approved candidates through the repository's normal tests,
 review and merge gates. Re-audit afterwards, then confirm the deletion plan.
 Keep uncertain work and report anything still awaiting review or merge.
+
+## Locked worktrees: lock is not ownership
+
+A Git ownership lock (`git worktree lock`) is a **retention marker**, not proof that a worker is still active. After the PR merges it can outlive the work. `/sge:tidy-worktrees` Phase 2b runs `skills/tidy-worktrees/lock-audit.sh audit --session <id>` (read-only) and sorts each locked worktree into `protected` (live claim, active PR, other owner, uncommitted work, stash, tip differs from the merged PR head), `unknown` (missing owner, PR or junction evidence; kept and surfaced) or `candidate` (your session's, inactive, clean, merged PR whose head equals the exact tip). For candidates you choose **keep**, **release locks and re-audit only**, or **release locks and remove** (per item, subset allowed). Clean does not mean merged, tested or deployable, and a clean status plus a recovery SHA do **not** back up ignored files such as `node_modules`: removal discards them and needs your explicit consent. Each approved item is re-audited immediately before it is touched and stopped if anything changed. Remote branches and review labels are never touched. See [the reference](../skills/tidy-worktrees/references/lock-audit.md).
