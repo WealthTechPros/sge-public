@@ -178,7 +178,7 @@ rm -f "$(WTP stale)/new.txt"
 OUT="$(APPLY release no "$STALE_P@$STALE_T")"
 check "release-only unlocks the approved item" "$(printf '%s' "$OUT" | jq -r '.[0].status + ":" + .[0].recovery_sha + ":" + .[0].completed_pr' | tr -d '\r')" "released:$STALE_T:1"
 check "release-only does not delete worktree or branch" "$([ -d "$(WTP stale)" ] && echo dir):$(git -C "$R" rev-parse --verify -q refs/heads/feat/stale >/dev/null && echo branch)" "dir:branch"
-check "release-only left it unlocked, others still locked" "$(git -C "$R" worktree list --porcelain | grep -c '^locked')" "11"
+check "release-only left it unlocked, others still locked" "$(git -C "$R" worktree list --porcelain | grep -c '^locked')" "$((NITEMS - 1))"
 check "re-audit after release no longer lists it" "$(audit | jq '[.items[] | select(.branch=="feat/stale")] | length')" "0"
 
 # ---- apply: remove, ignored data, junctions ----

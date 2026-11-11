@@ -31,6 +31,9 @@ main() {
   local here ev sid now dir me tbl p row kind ppid args id start user intent state rec tmp depth f proc_uid my_uid
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 0
   ev="${1:-}"; sid="${2:-}"
+  if [ "$sid" = --hook-input ]; then
+    sid="$(node "$here/copilot-hooks.mjs" --session-id 2>/dev/null)" || return 0
+  fi
   case "$ev" in start|beat|end) ;; *) return 0 ;; esac
   case "$sid" in ''|*[!A-Za-z0-9._-]*) return 0 ;; esac
   [ "${#sid}" -le 128 ] || return 0

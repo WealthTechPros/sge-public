@@ -335,10 +335,12 @@ done <"$TABLE"
 echo "=== reap-orphans (posix)$([ "$DRY" -eq 1 ] && echo ' — dry run, nothing will be killed') ==="
 if [ "$STORE_OK" -ne 1 ] && [ "$((CP_LIVE + CP_KEPT + CP_SERVER + CP_RELATED + ${#COPILOT_REAP[@]}))" -gt 0 ]; then
   echo "Copilot lifecycle records unusable: ${STORE_WHY:-unknown}"
+  echo "Copilot cleanup coverage: incomplete; unknown sessions stay report-only."
+  echo "Preview optional tracking: node \"$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/copilot-hooks.mjs\" --print (installs nothing)."
 fi
 
 if [ "${#CANDIDATES[@]}" -eq 0 ] && [ "${#COPILOT_REAP[@]}" -eq 0 ]; then
-  echo "No orphaned debris found. Clean."
+  echo "No eligible orphaned debris found (uncertain processes are kept)."
 fi
 
 reaped=0

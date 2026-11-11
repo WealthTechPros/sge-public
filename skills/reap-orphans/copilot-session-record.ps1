@@ -19,12 +19,30 @@
 # SGE_REAP_NOW, SGE_REAP_USER, SGE_COPILOT_SESSION_DIR.
 param(
   [string]$Event = '',
-  [string]$Session = ''
+  [string]$Session = '',
+  [switch]$HookInput
 )
 $ErrorActionPreference = 'SilentlyContinue'
 . (Join-Path $PSScriptRoot 'copilot-signature.ps1')
 
 function Write-Record {
+  if ($HookInput) {
+    try {
+      $buffer = New-Object char[] 1048577
+      $size = 0
+      while ($size -le 1048576) {
+        $count = [Console]::In.Read($buffer, $size, $buffer.Length - $size)
+        if ($count -eq 0) { break }
+        $size += $count
+      }
+      if ($size -gt 1048576 -or $size -eq 0) { return }
+      $inputRecord = [string]::new($buffer, 0, $size) | ConvertFrom-Json -ErrorAction Stop
+      $hookSession = if ($null -ne $inputRecord.sessionId) { $inputRecord.sessionId } else { $inputRecord.session_id }
+      if ($hookSession -isnot [string]) { return }
+      if ($null -ne $inputRecord.sessionId -and $null -ne $inputRecord.session_id -and $inputRecord.sessionId -cne $inputRecord.session_id) { return }
+      $Session = $hookSession
+    } catch { return }
+  }
   if ($Event -notin @('start', 'beat', 'end')) { return }
   if ($Session -notmatch '^[A-Za-z0-9._-]{1,128}$') { return }
   $fixture = [bool]$env:SGE_REAP_PROC_FIXTURE
@@ -36,7 +54,7 @@ function Write-Record {
          else { Join-Path ([Environment]::GetFolderPath('UserProfile')) '.local/state/sge/copilot-sessions' }
 
   $t = @{}
-  $rows = if ($fixture) { @(Get-Content -Raw -LiteralPath $env:SGE_REAP_PROC_FIXTURE | ConvertFrom-Json) } else { @(Get-CimInstance Win32_Process | ForEach-Object { $_ }) }
+  $rows = if ($fixture) { @(Get-Content -Raw -LiteralPath $env:SGE_REAP_PROC_FIXTURE | ConvertFrom-Json | ForEach-Object { $_ }) } else { @(Get-CimInstance Win32_Process | ForEach-Object { $_ }) }
   foreach ($r in $rows) { $t[[int]$r.ProcessId] = $r }
 
   $p = if ($env:SGE_COPILOT_REC_FROM) { [int]$env:SGE_COPILOT_REC_FROM } else { [int]$PID }

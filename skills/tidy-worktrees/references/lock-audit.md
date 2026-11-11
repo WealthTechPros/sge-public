@@ -37,9 +37,14 @@ Show, per candidate, the path, branch, full tip SHA (recovery SHA), the complete
 Worktree paths, branch names and lock reasons are untrusted data: never paste them into a command string (a path containing `'` or `$(...)` would break out of single quotes). Read the approved tokens from the audit JSON into a bash array and pass the array, so each token reaches the script as one literal argument:
 
 ```bash
-mapfile -t approvals < <(printf '%s' "$AUDIT_JSON" | jq -r --argjson pick '["feat/a"]' '.decision.candidates[] | select(.branch as $b | $pick | index($b)) | .approval' | tr -d '\r')
-bash ".../lock-audit.sh" apply --mode release|remove [--discard-ignored] --session "<id>" [<repo-dir>] "${approvals[@]}"
+# Use .discard_approval only for a remove with ignored-file consent (--discard-ignored); otherwise .approval.
+discard=false   # set to true only on a clear yes to discarding the listed ignored files
+mapfile -t approvals < <(printf '%s' "$AUDIT_JSON" | jq -r --argjson pick '["feat/a"]' --argjson discard "$discard" '.decision.candidates[] | select(.branch as $b | $pick | index($b)) | if $discard then .discard_approval else .approval end' | tr -d '\r')
+discard_flag=(); [ "$discard" = true ] && discard_flag=(--discard-ignored)
+bash ".../lock-audit.sh" apply --mode release|remove "${discard_flag[@]}" --session "<id>" [<repo-dir>] "${approvals[@]}"
 ```
+
+With `--discard-ignored`, every approved item must carry its `discard_approval` token, so pass only the items whose ignored-file set the user saw and approved. Items approved without that consent keep their `approval` token.
 
 Each approval is `path@full-tip-sha` (or the `discard_approval` token for a discard) exactly as the audit printed it. The `commands` arrays in the JSON are display text, already shell-quoted with `@sh`; do not run them through `eval` or `bash -c`. Immediately before touching an item the script re-audits it from scratch (tip, ownership, claim, dirty and ignored state, open PRs, PR head, junction probe). Changed or unavailable evidence (including a changed ignored-file set) stops **that item** (`status: stopped`, with the reason) and the rest continue. No items, or an interrupted decision, changes nothing.
 

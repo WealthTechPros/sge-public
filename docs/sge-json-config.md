@@ -12,7 +12,8 @@ variable always wins over the file. (SPEC-130.)
   "agentBotLogin": "acme-agent[bot]",
   "decisionOwner": "Jane Doe",
   "secretsStore": "Vault",
-  "podsRegistry": "~/.acme/pods/pods.json"
+  "podsRegistry": "~/.acme/pods/pods.json",
+  "specIdPrefixes": ["MCP"]
 }
 ```
 
@@ -25,6 +26,7 @@ variable always wins over the file. (SPEC-130.)
 | `decisionOwner` | — | "the repo owner" | The person skills name when a decision needs an owner (for example in a `needs-decision` rationale). Prose only; not a build-approval role. |
 | `secretsStore` | — | "your secrets manager" | The name of the secrets manager that injects tokens into the environment. SGE never reads secrets from a file or a store directly; skills only name the store when they tell you a token is missing. |
 | `podsRegistry` | `SGE_PODS_REGISTRY` | `~/.sge/pods/pods.json` | The fleet pod registry: `pods[]` entries with `type: "review-daemon"` mark repos a review daemon covers, so `hooks/pr-created.sh` does not race it with a session-local review. A leading `~/` means `$HOME`. |
+| `specIdPrefixes` | `SGE_SPEC_ID_PREFIXES` (comma or space separated) | none (`SPEC`, `SGD` and `SGE` only) | Extra spec-id prefixes the governance record accepts as `matchedSpec`, for a repo whose specs are numbered under its own prefix (for example `MCP` for `MCP-001`). `SPEC`, `SGD` and `SGE` are always accepted; each entry is 1-16 uppercase letters or digits starting with a letter, and any other entry is ignored. Read by `scripts/governance-record.sh` and the SPEC-128 governance-record gate (`.github/scripts/check-enforcement-profile.sh`, including its spec-first match, where a file such as `docs/specs/mcp-007-x.md` then counts as a spec; a named spec is matched by number, as for the built-in prefixes) from the default branch: the writer reads `origin/HEAD` (this checkout's copy only when there is no `origin/HEAD`), and the gate reads the pull request's base branch, never the PR's own copy, so a PR cannot widen what its own gate accepts. The env override is trusted host configuration, like the gate's other `SGE_*` inputs. (sge#3458) |
 
 ## Where the values come from
 
@@ -33,6 +35,8 @@ variable always wins over the file. (SPEC-130.)
   `agentBotLogin` is the exception: it is read from the base
   repository's default branch through the GitHub API at read time, so a branch
   cannot make its own author a trusted claimant.
+  `specIdPrefixes` is read from the default branch too (the base branch in
+  CI), through git.
 - **The environment.** Every key with an env override can be set per host, for
   example in the service unit of a review daemon that covers many repos. Set
   the variable to an empty string to force the neutral default.

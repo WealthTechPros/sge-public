@@ -38,7 +38,13 @@ source "$_WI_HERE/../lib/worktree-lifecycle.sh"
 source "$_WI_HERE/../worktrees/resume-or-create.sh"
 set +e # the sourced libs enable errexit; every status here is handled explicitly
 
-_wi_clean() { printf '%s' "$1" | tr '\t\r\n' '   '; }
+_wi_clean() {
+  local value="$1"
+  value="${value//$'\t'/ }"
+  value="${value//$'\r'/ }"
+  value="${value//$'\n'/ }"
+  printf '%s' "$value"
+}
 
 # <repo> <branch> <base> -> live | superseded | unknown. Mirrors
 # rg_supersession (same two signals) for a branch that has no worktree.
