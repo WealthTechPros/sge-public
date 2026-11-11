@@ -27,6 +27,12 @@
 #   "$SGE_ROOT/scripts/with-repo-cwd.sh" assert-repo owner/repo -- \
 #     bash "$SGE_ROOT/scripts/governance-record.sh" post <N> <verdict.json>
 #
+# Spec ids: matchedSpec must be SPEC-, SGD- or SGE-NNN, plus any extra prefix the
+# repo configures (sge#3458): SGE_SPEC_ID_PREFIXES (comma or space separated; set but
+# empty means none), else .claude/sge.json "specIdPrefixes" on the default branch
+# (origin/HEAD, the branch the gate reads), else in this checkout. See
+# docs/sge-json-config.md.
+#
 # Test hooks: SGE_ISSUE_READ / SGE_ISSUE_WRITE name the seam scripts,
 # SGE_RECORD_NOW pins the timestamp.
 set -euo pipefail
@@ -40,6 +46,25 @@ VERDICTS='["MATCHES_EXISTING","MATCHES_EXISTING_MODIFIED","NEEDS_NEW_SPEC","NO_S
 err() { printf 'governance-record: %s\n' "$*" >&2; }
 usage() { sed -n '/^# Usage:/,/^# The verdict/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 command -v jq >/dev/null 2>&1 || { err "jq not found"; exit 1; }
+
+# spec_id_prefixes: the extra spec-id prefixes as a JSON array (the shape rules add
+# SPEC, SGD and SGE and drop malformed entries). Same sources as the gate, read from the
+# default branch rather than a feature branch.
+spec_id_prefixes() {
+  local extra="" cfg="" top tip
+  if [ -n "${SGE_SPEC_ID_PREFIXES+x}" ]; then extra="$SGE_SPEC_ID_PREFIXES"
+  else
+    # By sha, never "origin/HEAD:<path>": Git Bash rewrites a ref:path argument as a path list.
+    if tip="$(git rev-parse --verify -q 'origin/HEAD^{commit}' 2>/dev/null)"; then
+      cfg="$(git show "$tip:.claude/sge.json" 2>/dev/null)" || cfg=""
+    else # no default-branch ref here at all: this checkout's copy
+      top="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+      if [ -f "$top/.claude/sge.json" ]; then cfg="$(cat "$top/.claude/sge.json")"; fi
+    fi
+    extra="$(printf '%s' "$cfg" | jq -r '.specIdPrefixes // [] | if type == "array" then .[] | strings else empty end' 2>/dev/null)" || extra=""
+  fi
+  printf '%s' "$extra" | jq -Rsc '[splits("[\\s,]+") | select(test("^[A-Z][A-Z0-9]{0,15}$"))]'
+}
 
 # build_marker <verdict.json|-> <main-sha|''>  ->  the marker JSON, one line
 build_marker() {
@@ -75,8 +100,9 @@ validate_marker() {
     err "the verdict is for $repo but this checkout is $expected; the gate would reject the record, refusing"; return 1
   fi
   shaped="$(jq -n --arg b "<!-- sge-governance: $m -->" '[{body: $b, createdAt: ""}]' \
-    | jq -c --arg ref "$issue" --arg repo "$repo" --arg today "${at%%T*}" --argjson verdicts "$VERDICTS" -f "$SHAPE" 2>/dev/null)" || shaped=""
-  [ -n "$shaped" ] || { err "the record would fail the gate's shape rules (matchedSpec, mainSha, timestamp or verdict); refusing to post it"; return 1; }
+    | jq -c --arg ref "$issue" --arg repo "$repo" --arg today "${at%%T*}" --argjson verdicts "$VERDICTS" \
+        --argjson specPrefixes "$(spec_id_prefixes)" -f "$SHAPE" 2>/dev/null)" || shaped=""
+  [ -n "$shaped" ] || { err "the record would fail the gate's shape rules (matchedSpec, mainSha, timestamp or verdict; a spec id prefix other than SPEC, SGD or SGE needs specIdPrefixes in .claude/sge.json); refusing to post it"; return 1; }
 }
 
 # body <marker-json>

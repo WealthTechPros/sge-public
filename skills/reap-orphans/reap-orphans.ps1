@@ -69,7 +69,7 @@ function Get-ProcTable([int]$Phase) {
       if ($env:SGE_REAP_PROC_FIXTURE_3) { $f = $env:SGE_REAP_PROC_FIXTURE_3 }
       elseif ($env:SGE_REAP_PROC_FIXTURE_2) { $f = $env:SGE_REAP_PROC_FIXTURE_2 }
     }
-    $rows = @(Get-Content -Raw -LiteralPath $f | ConvertFrom-Json)
+    $rows = @(Get-Content -Raw -LiteralPath $f | ConvertFrom-Json | ForEach-Object { $_ })
   } else {
     $rows = @(Get-CimInstance Win32_Process | ForEach-Object { $_ })
   }
@@ -83,6 +83,7 @@ function Get-ProcTable([int]$Phase) {
       CommandLine     = [string]$r.CommandLine
       Identity        = $ident
       Owner           = if ($FixtureMode) { [string]$r.Owner } else { $null }
+      WorkingSetSize  = [int64]$r.WorkingSetSize
     }
   }
   return $t
@@ -317,10 +318,12 @@ if ($FixtureMode) {
 Write-Output "Protected session tree: $($protect.Count) procs (current session is safe)"
 if (-not $script:StoreOk -and ($cpLive + $cpKept + $cpServer + $cpRelated + $cpReap.Count) -gt 0) {
   Write-Output "Copilot lifecycle records unusable: $($script:StoreWhy)"
+  Write-Output "Copilot cleanup coverage: incomplete; unknown sessions stay report-only."
+  Write-Output "Preview optional tracking: node `"$PSScriptRoot\copilot-hooks.mjs`" --print (installs nothing)."
 }
 
 if ($kill.Count -eq 0 -and $cpReap.Count -eq 0) {
-  Write-Output "No orphaned debris found. Clean."
+  Write-Output "No eligible orphaned debris found (uncertain processes are kept)."
 }
 if ($kill.Count -gt 0) {
   $list = $kill | ForEach-Object { $alive[$_] } | Sort-Object Name, ProcessId
@@ -364,6 +367,30 @@ if (($cpLive + $cpKept + $cpServer + $cpRelated + $cpReap.Count) -gt 0) {
   foreach ($k in $cpKeep) { Write-Output ("  KEPT PID {0} copilot-{1}: {2}" -f $k[0], $k[1], $k[2]) }
   $tail = if ($DryRun) { '' } else { " reaped=$cpReaped" }
   Write-Output "Copilot: live=$cpLive kept-uncertain=$cpKept server/acp=$cpServer related=$cpRelated reapable=$($cpReap.Count)$tail"
+}
+
+# Attribute each process once, to its outermost recognised Copilot ancestor.
+# Working sets include shared pages: these totals are not reclaimable-RAM estimates.
+$cpGroups = @{}
+foreach ($proc in $alive.Values) {
+  $cursor = [int]$proc.ProcessId; $root = 0
+  $seen = New-Object System.Collections.Generic.HashSet[int]
+  while ($alive.ContainsKey($cursor) -and $seen.Add($cursor)) {
+    if ($cpKind[$cursor] -in @('client', 'server')) { $root = $cursor }
+    $cursor = [int]$alive[$cursor].ParentProcessId
+  }
+  if ($root -eq 0) { continue }
+  if (-not $cpGroups.ContainsKey($root)) { $cpGroups[$root] = @() }
+  $cpGroups[$root] += ,$proc
+}
+if ($cpGroups.Count -gt 0) {
+  Write-Output "--- Copilot process groups (snapshot working sets, shared pages included; NOT kill targets) ---"
+  foreach ($root in @($cpGroups.Keys | Sort-Object)) {
+    $members = @($cpGroups[$root])
+    $nodes = @($members | Where-Object { $_.Name -eq 'node.exe' -and $cpKind[$_.ProcessId] -eq 'none' }).Count
+    $mb = [math]::Round(($members | Measure-Object -Property WorkingSetSize -Sum).Sum / 1MB)
+    Write-Output ("  ROOT PID {0,-7} processes={1} node/MCP={2} working-set={3} MB" -f $root, $members.Count, $nodes, $mb)
+  }
 }
 
 if (-not $FixtureMode) {

@@ -39,6 +39,10 @@ copilot plugin install sge@wtp-plugins
 copilot plugin list
 ```
 
+## Automated setup: `/sge:code-map`
+
+Once the plugin loads in any runtime, `/sge:code-map` (SPEC-142) does the repo-side setup for Copilot: it writes the marketplace and `enabledPlugins` entries into `.claude/settings.json`, generates `docs/sge-code-map.md`, and adds a block to `AGENTS.md` and `.github/copilot-instructions.md` pointing Copilot at the digest and the code map. It then prints what is left for you, with the command for each step, and how to confirm the setup worked. The rest of this page explains the failure modes that report refers to.
+
 ## How enablement actually works (and where it can silently fail)
 
 Copilot CLI keeps plugin state in two different places, and both need to
@@ -143,7 +147,58 @@ SGE.
 
 Every SGE hook runs through `hooks/run-hook.cmd`, a launcher that finds a real Git Bash itself instead of trusting `bash` on PATH (sge#3264). Before it, a PATH whose first `bash` was `C:\Windows\System32\bash.exe` (the WSL launcher) or the WindowsApps stub made every hook exit 1, and the fail-closed PreToolUse hook then denied every edit and PowerShell call. The launcher skips those launchers and needs Git for Windows installed. If no working bash is found it still fails closed (exit 2), with stderr naming the hook script, what it tried and the remedy. Hooks stay on; a hook that cannot run is never treated as a pass.
 
+## Disposable worker supervision (Windows)
+
+For a **new, explicitly approved disposable dev/test worker**, the public skill
+includes `skills\reap-orphans\copilot-worker.ps1`. Invoke it from the existing
+Copilot PowerShell tool host; do not add a separate supervisor to every MCP
+server. It verifies the nearest interactive Copilot ancestor and the same
+Windows user before launching one native executable:
+
+```powershell
+$worker = @{
+  Disposable = $true
+  FilePath = (Get-Command node.exe).Source
+  ArgumentList = @('C:\path\to\disposable-worker.js')
+}
+& "<plugin>\skills\reap-orphans\copilot-worker.ps1" @worker -DryRun
+# Only after approving this specific disposable worker:
+& "<plugin>\skills\reap-orphans\copilot-worker.ps1" @worker
+```
+
+Replace the example worker path with the approved owning-repository command.
+An ordinary terminal without an interactive Copilot ancestor fails closed.
+`-OwnerProcessId <pid>` explicitly selects a different same-user owner when
+that association is deliberately requested; it never adopts a worker PID.
+The helper holds exact process handles in memory, waits while owner and child
+are alive, propagates normal child exit codes, and force-stops only the child
+it created when the owner exits or supervision unwinds. It neither needs nor
+installs lifecycle hooks. All supervision diagnostics go to stderr without
+logging command bodies. Private bytes sampled before confirmed termination
+describe that worker's allocation, not measured system-wide RAM reclaimed.
+
+Use this only for expendable workers, not shared services, detached jobs,
+Copilot clients, browsers, WSL or processes with unsaved state. It is not a
+graceful shutdown protocol or an MCP stdio proxy. A forcibly killed supervisor
+may not execute cleanup, and descendants are not recursively terminated; this
+is not Windows Job Object containment. Existing workers cannot be retroactively
+adopted. The normal reaper's eligibility rules are unchanged. Supervision has
+its own memory overhead: prefer the existing PowerShell tool host and a bounded
+dev/test worker, not a new wrapper around every small background process.
+
 ## Worktree lifecycle hooks (SPEC-139, best-effort)
+
+For **orphan-reaper tracking only**, including installations from `sge-public`,
+use the self-contained `skills/reap-orphans/copilot-hooks.mjs` bundled with the
+skill. Run `node "<plugin>/skills/reap-orphans/copilot-hooks.mjs" --print` to
+review the definition; `--check` is read-only and `--install` is a separate,
+explicit opt-in. The public plugin does not ship the private `hooks/copilot/`
+installer described below. This standalone route writes only the minimal
+reaper records, not worktree registrations or checkpoints. It uses direct
+execution of the native Windows PowerShell recorder, avoiding the Windows
+PATH-selected `bash`/WSL problem. No hook is installed by running the reaper.
+Check the intended session's `/env` and record production; an installed file
+alone does not prove loading, and missing records never authorise a kill.
 
 `hooks/copilot/worktree-lifecycle.sh` is a Copilot CLI adapter for the
 worktree-preservation family (epic #3216, SPEC-139 — an internal spec, not
@@ -158,7 +213,7 @@ or opens a PR, never releases another session's claim, and never writes prompt
 text, file contents or secrets to its state or logs. Nothing it prints means
 "backed up" or "safe to remove".
 
-### Install (user-level hook file)
+### Install from the private source (user-level hook file)
 
 Copilot CLI loads one hook source per plugin, and the plugin's
 `hooks/hooks.json` is the Claude PascalCase file, so the camelCase Copilot

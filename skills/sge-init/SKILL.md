@@ -339,6 +339,10 @@ if the repo does not have it yet, note that as a follow-up rather than reverting
 full-artefact mandate. This is the *cheap context, hard gates* split: thinning the default
 read never weakens the CI-side gates (`commit-msg` trailer, coherence gate), so it is safe.
 
+## Step 8b — Propose the code map and Copilot setup
+
+Propose running `/sge:code-map` (SPEC-142); write nothing before the user approves. Detail: [`references/step8b-code-map.md`](references/step8b-code-map.md).
+
 ---
 
 ## Step 9 — Review Package
