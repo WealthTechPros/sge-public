@@ -103,7 +103,7 @@ _la_rows() { # <sid> [only-path]
     path="${P[$i]}"; branch="${B[$i]}"
     abs="$(_wl_abs "$path" 2>/dev/null)"
     [ -z "$only" ] || [ "$abs" = "$only" ] || continue
-    cls=""; why=""; tip=unknown; dirty=unknown; icount=0; isample=-; stash=no; up=-; prs=unknown; prn=-; prhead=-; jl=-; lage=-; owner=-; claim=unknown
+    cls=""; why=""; tip=unknown; dirty=unknown; icount=0; isample=-; idig=-; stash=no; up=-; prs=unknown; prn=-; prhead=-; jl=-; lage=-; owner=-; claim=unknown
     if [ -z "$abs" ]; then
       cls=unknown; why=path-missing-or-unreadable
     else

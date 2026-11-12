@@ -86,7 +86,7 @@ Then run the **engine**: `bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-top
 | Open PR, current worktree, default branch | C KEEP |
 | Any lookup failed or the base is unresolved | C KEEP |
 
-An expired claim self-heals into the normal audit. Claim, recency, stash and squash-merge checks: [`references/safety-audit-checks.md`](references/safety-audit-checks.md). Registered worktrees also get `worktree-lifecycle.sh audit <wt> <owner-session>`; KEEP/VALUABLE/uncertain wins over `candidate`. Offer `../worktrees/checkpoint.sh checkpoint <wt> <session>` for uncommitted work (exit 10 = partial = keep); a checkpoint never authorises deletion.
+An expired claim self-heals into the normal audit. Claim, recency, stash and squash-merge checks: [`references/safety-audit-checks.md`](references/safety-audit-checks.md). The engine requires the [shared lifecycle library](../lib/worktree-lifecycle.sh); shipping that dependency does not enable lifecycle hooks. Registered worktrees also get `worktree-lifecycle.sh audit <wt> <owner-session>`; KEEP/VALUABLE/uncertain wins over `candidate`. Offer `../worktrees/checkpoint.sh checkpoint <wt> <session>` for uncommitted work (exit 10 = partial = keep); a checkpoint never authorises deletion.
 
 
 ## Phase 2b — Locked worktrees (read-only audit, then a user choice)

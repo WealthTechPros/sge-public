@@ -146,6 +146,18 @@ mkdir -p "$TMP/not-a-repo"
 check "interrupted decision: no approved items -> exit 2, nothing changed" "$rc:$([ "$(snap)" = "$before" ] && echo same)" "2:same"
 check "unlocked state untouched: stale still locked" "$(git -C "$R" worktree list --porcelain | grep -c '^locked retain for review of stale')" "1"
 
+# A registration can outlive a directory on another OS; it must still yield JSON.
+M="$TMP/missing repo"
+git init -q -b main "$M"; git -C "$M" config user.email t@t.t; git -C "$M" config user.name t
+git -C "$M" update-ref refs/heads/main "$(git -C "$M" commit-tree "$(git -C "$M" hash-object -w -t tree /dev/null)" -m init)"
+git -C "$M" worktree add -q -b feat/missing "$TMP/missing locked" main
+git -C "$M" worktree lock --reason "retain missing work" "$TMP/missing locked"
+mv "$TMP/missing locked" "$TMP/missing moved"
+MREPORT="$(la_audit "$M" "$SID")"; mrc=$?
+check "missing locked path remains unknown without aborting or authorising a decision" \
+  "$mrc:$(printf '%s' "$MREPORT" | jq -r '(.items | length | tostring) + ":" + .items[0].class + ":" + .items[0].reason + ":" + (.decision.required | tostring)' | tr -d '\r')" \
+  "0:1:unknown:path-missing-or-unreadable:false"
+
 # ---- apply: revalidation ----
 APPLY() { ( cd "$R" && la_apply "$R" "$SID" "$@" ); }
 STALE_P="$(it stale .path)"; STALE_T="$(tipof stale)"
