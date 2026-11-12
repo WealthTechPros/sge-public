@@ -7,13 +7,15 @@
 #   wl_unregister <worktree> <session-id>  # drop OUR registry entry only
 #   wl_list [<repo-path>]                  # "<session>\t<path>\t<branch>" rows
 #   wl_audit <worktree> <session-id>       # verdict block (see below)
-#   bash worktree-lifecycle.sh <register|unregister|list|audit> <args...>
+#   wl_recovery_preview <worktree>         # inspect a candidate, no changes
+#   wl_recover <worktree> <owner> <entry-hash> <head> <status-hash>
+#   bash worktree-lifecycle.sh <register|unregister|list|audit|recovery-preview|recover> <args...>
 #
 # Registry: one file per owned worktree under <git-common-dir>/sge-worktrees/,
 # so every linked worktree of a repo shares ONE registry. Entries are written
 # atomically (temp file + mv -n). Only a linked worktree of THIS common dir can
 # be registered (the main checkout never can), and only the owning session may
-# unregister it: a foreign claim is never overwritten or released.
+# unregister it. An explicit supervised recovery is a separate operator action.
 #
 # Audit verdict (stdout, exactly two lines):
 #   verdict:KEEP|VALUABLE|candidate
@@ -29,7 +31,8 @@
 # as quoted arguments, never interpolated into eval/shell text.
 #
 # Exit codes: 0 ok, 3 not a git worktree, 4 foreign claim, 5 bad session id,
-#             6 not a linked worktree of this repo.
+#             6 not a linked worktree, 7 confirmation refused, 8 changed evidence,
+#             9 registry busy.
 
 _WL_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
@@ -68,8 +71,16 @@ _wl_is_linked() {
 
 _wl_entry_field() { sed -n "s/^$2=//p" "$1" | head -n1; }
 
-wl_register() {
-  local wt="$1" sid="${2:-}" common dir f owner abs branch tmp
+_wl_lock() {
+  mkdir "$1" 2>/dev/null || { echo "error:registry-busy" >&2; return 9; }
+}
+
+_wl_status_hash() {
+  (set -o pipefail; git -C "$1" status --porcelain=v1 -z --untracked-files=all | git hash-object --stdin)
+}
+
+wl_register() (
+  local wt="$1" sid="${2:-}" common dir f owner abs branch tmp lock
   _wl_valid_session "$sid" || { echo "error:bad-session-id" >&2; return 5; }
   git -C "$wt" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "error:not-a-git-worktree" >&2; return 3; }
   _wl_is_linked "$wt" || { echo "error:not-a-linked-worktree" >&2; return 6; }
@@ -78,6 +89,9 @@ wl_register() {
   dir="$common/sge-worktrees"
   mkdir -p "$dir" || return 1
   f="$dir/$(_wl_key "$abs").entry"
+  lock="$dir/$(_wl_key "$abs").lock"
+  _wl_lock "$lock" || return $?
+  trap 'rmdir "$lock" 2>/dev/null || :' EXIT
   branch="$(git -C "$wt" symbolic-ref -q --short HEAD 2>/dev/null || echo "(detached)")"
   tmp="$(mktemp "$dir/.tmp.XXXXXX")" || return 1
   printf 'session=%s\npath=%s\nbranch=%s\n' "$sid" "$abs" "$branch" >"$tmp"
@@ -91,18 +105,83 @@ wl_register() {
     return 4
   fi
   echo "registered:new"
-}
+)
 
-wl_unregister() {
-  local wt="$1" sid="${2:-}" common f
+wl_unregister() (
+  local wt="$1" sid="${2:-}" common f abs lock
   _wl_valid_session "$sid" || { echo "error:bad-session-id" >&2; return 5; }
   common="$(_wl_common_dir "$wt")" || { echo "error:not-a-git-worktree" >&2; return 3; }
-  f="$common/sge-worktrees/$(_wl_key "$(_wl_abs "$wt")").entry"
+  abs="$(_wl_abs "$wt")" || return 3
+  f="$common/sge-worktrees/$(_wl_key "$abs").entry"
+  [ -f "$f" ] || { echo "unregistered:absent"; return 0; }
+  lock="$common/sge-worktrees/$(_wl_key "$abs").lock"
+  _wl_lock "$lock" || return $?
+  trap 'rmdir "$lock" 2>/dev/null || :' EXIT
   [ -f "$f" ] || { echo "unregistered:absent"; return 0; }
   [ "$(_wl_entry_field "$f" session)" = "$sid" ] || { echo "error:foreign-claim" >&2; return 4; }
-  rm -f "$f"
+  rm "$f" || return 1
   echo "unregistered:ok"
+)
+
+wl_recovery_preview() {
+  local wt="$1" common abs f owner hash head status
+  _wl_is_linked "$wt" || { echo "error:not-a-linked-worktree" >&2; return 6; }
+  common="$(_wl_common_dir "$wt")" || return 3
+  abs="$(_wl_abs "$wt")" || return 3
+  f="$common/sge-worktrees/$(_wl_key "$abs").entry"
+  [ -f "$f" ] && [ ! -L "$f" ] || { echo "error:registration-unavailable" >&2; return 4; }
+  owner="$(_wl_entry_field "$f" session)"
+  _wl_valid_session "$owner" || { echo "error:bad-registration" >&2; return 4; }
+  [ "$(_wl_entry_field "$f" path)" = "$abs" ] || { echo "error:bad-registration" >&2; return 4; }
+  hash="$(git hash-object "$f")" || return 1
+  head="$(git -C "$wt" rev-parse --verify HEAD)" || return 1
+  status="$(_wl_status_hash "$wt")" || return 1
+  printf 'path: %s\nowner: %s\nbranch: %s\nentry-hash: %s\nhead: %s\nstatus-hash: %s\n' \
+    "$abs" "$owner" "$(_wl_entry_field "$f" branch)" "$hash" "$head" "$status"
+  echo 'Operator must establish that no writer is active; status hash does not capture file contents.'
 }
+
+wl_recover() (
+  local wt="$1" owner="${2:-}" expected="${3:-}" head="${4:-}" status="${5:-}"
+  local common abs dir key f lock answer saved current
+  _wl_valid_session "$owner" || { echo "error:bad-session-id" >&2; return 5; }
+  _wl_is_linked "$wt" || { echo "error:not-a-linked-worktree" >&2; return 6; }
+  common="$(_wl_common_dir "$wt")" || return 3
+  abs="$(_wl_abs "$wt")" || return 3
+  dir="$common/sge-worktrees"
+  key="$(_wl_key "$abs")"
+  f="$dir/$key.entry"
+  [ -t 0 ] && [ -t 1 ] || { echo "error:interactive-terminal-required" >&2; return 7; }
+  exec 3<>/dev/tty || { echo "error:interactive-terminal-required" >&2; return 7; }
+  printf 'Recover registration for %s owned by %s.\nentry-hash: %s\nhead: %s\nstatus-hash: %s\n' \
+    "$abs" "$owner" "$expected" "$head" "$status" >&3
+  echo 'Confirm no writer is active and preserve the original worktree. This cannot be verified automatically.' >&3
+  printf 'Type RECOVER %s to proceed: ' "$owner" >&3
+  IFS= read -r answer <&3 || return 7
+  [ "$answer" = "RECOVER $owner" ] || { echo "error:confirmation-refused" >&2; return 7; }
+  lock="$dir/$key.lock"
+  _wl_lock "$lock" || return $?
+  trap 'rmdir "$lock" 2>/dev/null || :' EXIT
+  _wl_is_linked "$wt" || { echo "error:not-a-linked-worktree" >&2; return 6; }
+  [ -f "$f" ] && [ ! -L "$f" ] || { echo "error:registration-unavailable" >&2; return 4; }
+  [ "$(_wl_entry_field "$f" session)" = "$owner" ] &&
+    [ "$(_wl_entry_field "$f" path)" = "$abs" ] || { echo "error:foreign-claim" >&2; return 4; }
+  current="$(git hash-object "$f")" || return 1
+  [ "$current" = "$expected" ] || { echo "error:evidence-changed" >&2; return 8; }
+  current="$(git -C "$wt" rev-parse --verify HEAD)" || return 1
+  [ "$current" = "$head" ] || { echo "error:evidence-changed" >&2; return 8; }
+  current="$(_wl_status_hash "$wt")" || return 1
+  [ "$current" = "$status" ] || { echo "error:evidence-changed" >&2; return 8; }
+  mkdir -p "$dir/recovered" || return 1
+  saved="$(mktemp "$dir/recovered/$key.XXXXXX")" || return 1
+  if ! cp "$f" "$saved" || ! cmp -s "$f" "$saved"; then
+    rm -f "$saved"
+    echo "error:archive-failed" >&2
+    return 1
+  fi
+  rm "$f" || { echo "error:release-failed" >&2; return 1; }
+  printf 'recovered: %s\n' "$saved"
+)
 
 wl_list() {
   local common f
@@ -152,6 +231,8 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
     unregister) wl_unregister "$@" ;;
     list)       wl_list "$@" ;;
     audit)      wl_audit "$@" ;;
-    *) echo "usage: worktree-lifecycle.sh register|unregister|list|audit ..." >&2; exit 2 ;;
+    recovery-preview) wl_recovery_preview "$@" ;;
+    recover)    wl_recover "$@" ;;
+    *) echo "usage: worktree-lifecycle.sh register|unregister|list|audit|recovery-preview|recover ..." >&2; exit 2 ;;
   esac
 fi

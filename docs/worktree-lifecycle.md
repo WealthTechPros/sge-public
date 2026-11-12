@@ -48,6 +48,43 @@ and registry owner. It is read-only. `/sge:tidy-worktrees --inbox` runs it.
 
 An unreadable or incomplete open-PR set never produces `delete` or `open-a-pr`.
 
+## Supervised orphan registration recovery
+
+The normal unregister operation remains owner-only. If an owning session is
+gone, its registration does not expire and deletion of session history does not
+release it. This separate manual recovery is not a Git worktree unlock.
+
+First establish that the owner and all other writers are stopped, including old
+SGE clients and unmanaged writers; the registry cannot prove this. Inspect the
+worktree, its staged/unstaged/untracked and ignored work, stashes, open PRs and
+recovery coverage. Preserve originals and resolve uncertainty before proceeding.
+Review one exact registration:
+
+```bash
+bash skills/lib/worktree-lifecycle.sh recovery-preview "<worktree>"
+```
+
+The preview prints the owner, entry hash, HEAD and status hash. After reviewing
+these values, invoke the following with those exact values and type the
+displayed confirmation yourself in an interactive terminal:
+
+```bash
+bash skills/lib/worktree-lifecycle.sh recover "<worktree>" "<owner>" "<entry-hash>" "<head>" "<status-hash>"
+```
+
+Recovery refuses changed evidence or a busy registry, saves the old entry in
+the common Git directory under `sge-worktrees/recovered`, and removes only the
+active registration. It does not change files, release a Git lock, create a
+checkpoint or register a new owner. A new session must separately register
+after fresh discovery. The status hash covers Git's status, not file contents,
+ignored files, editor buffers or stashes; it is not a backup or liveness proof.
+
+The per-path registry lock coordinates only this version of the helper. Older
+clients and unmanaged writers bypass it. A terminal is not proof of human
+identity; do not automate the confirmation. A terminated operation can leave its
+lock directory behind; do not remove it by age or automatically. Establish
+who owns it and reconcile it explicitly. No recovery action is unattended.
+
 ## Recovery
 
 List what exists, newest first:
