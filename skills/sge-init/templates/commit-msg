@@ -131,8 +131,24 @@ case "$SUBJECT" in
 esac
 
 # Accept either repo's spec-id convention: SPEC-NNN, or legacy SGD-NNN /
-# newly-minted SGE-NNN.
-if grep -qE '^Spec:\s*(SPEC|SGD|SGE)-[0-9]+' "$COMMIT_MSG_FILE"; then
+# newly-minted SGE-NNN, plus any extra prefix the repo configures (sge#3466):
+# SGE_SPEC_ID_PREFIXES (comma or space separated; set but empty means none),
+# else the DEFAULT branch's .claude/sge.json "specIdPrefixes" (read at
+# origin/HEAD, never this branch's own copy, so a branch cannot widen its own
+# check). An entry that is not 1-16 of A-Z0-9 starting with a letter is
+# dropped; no origin/HEAD, an unreadable file or no jq means no extras.
+if [ -n "${SGE_SPEC_ID_PREFIXES+x}" ]; then
+  SPEC_EXTRA="$SGE_SPEC_ID_PREFIXES"
+else
+  SPEC_EXTRA=""
+  # By sha, never "origin/HEAD:<path>": Git Bash rewrites a ref:path argument as a path list.
+  if SPEC_TIP="$(git rev-parse --verify -q 'origin/HEAD^{commit}' 2>/dev/null)"; then
+    SPEC_EXTRA="$(git show "$SPEC_TIP:.claude/sge.json" 2>/dev/null \
+      | jq -r '.specIdPrefixes // [] | if type == "array" then .[] | strings else empty end' 2>/dev/null)" || SPEC_EXTRA=""
+  fi
+fi
+SPEC_ALT="SPEC|SGD|SGE$(printf '%s\n' "$SPEC_EXTRA" | tr ', \t\r' '\n\n\n\n' | { LC_ALL=C grep -E '^[A-Z][A-Z0-9]{0,15}$' || :; } | sed 's/^/|/' | tr -d '\n')"
+if grep -qE "^Spec:[[:space:]]*(${SPEC_ALT})-[0-9]+" "$COMMIT_MSG_FILE"; then
   exit 0
 fi
 # Accept the SGE-Override trailer (and the legacy SGD-Override spelling, so
