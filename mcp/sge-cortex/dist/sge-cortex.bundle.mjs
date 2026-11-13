@@ -28504,16 +28504,27 @@ var newHeadersFromIncoming = (incoming) => globalThis.Headers === GlobalHeaders 
 var reValidRequestUrl = /^\/[!#$&-;=?-\[\]_a-z~]*$/;
 var reDotSegment = /\/\.\.?(?:[/?#]|$)/;
 var reValidHost = /^[a-z0-9._-]+(?::(?:[1-5]\d{3,4}|[6-9]\d{3}))?$/;
+var validateRequestTarget = (target) => {
+  const backslash = target.indexOf("\\");
+  if (backslash !== -1) {
+    const query = target.indexOf("?");
+    if (query === -1 || backslash < query) throw new RequestError("Backslash in request path");
+  }
+};
 var buildUrl = (scheme, host, incomingUrl) => {
   const url = `${scheme}://${host}${incomingUrl}`;
   if (!reValidHost.test(host)) {
+    validateRequestTarget(incomingUrl);
     const urlObj = new URL(url);
     if (urlObj.hostname.length !== host.length && urlObj.hostname !== (host.includes(":") ? host.replace(/:\d+$/, "") : host).toLowerCase()) throw new RequestError("Invalid host header");
     return urlObj.href;
   } else if (incomingUrl.length === 0) return url + "/";
   else {
     if (incomingUrl.charCodeAt(0) !== 47) throw new RequestError("Invalid URL");
-    if (!reValidRequestUrl.test(incomingUrl) || reDotSegment.test(incomingUrl)) return new URL(url).href;
+    if (!reValidRequestUrl.test(incomingUrl) || reDotSegment.test(incomingUrl)) {
+      validateRequestTarget(incomingUrl);
+      return new URL(url).href;
+    }
     return url;
   }
 };
@@ -28869,6 +28880,7 @@ Object.defineProperty(requestPrototype, "signal", { get() {
   "cache",
   "credentials",
   "destination",
+  "duplex",
   "integrity",
   "mode",
   "redirect",
@@ -28926,6 +28938,7 @@ var newRequest = (incoming, defaultHostname) => {
   if (incomingUrl[0] !== "/" && (incomingUrl.startsWith("http://") || incomingUrl.startsWith("https://"))) {
     if (incoming instanceof Http2ServerRequest) throw new RequestError("Absolute URL for :path is not allowed in HTTP/2");
     try {
+      validateRequestTarget(incomingUrl);
       req[urlKey] = new URL(incomingUrl).href;
     } catch (e) {
       throw new RequestError("Invalid absolute URL", { cause: e });
@@ -29089,6 +29102,11 @@ function writeFromReadableStreamDefaultReader(reader, writable, currentReadPromi
     reader.cancel(error2).catch(() => {
     });
   };
+  const stream = writable.stream;
+  if (writable.destroyed || stream?.closed || stream?.destroyed) {
+    cancel();
+    return reader.closed;
+  }
   writable.on("close", cancel);
   writable.on("error", cancel);
   (currentReadPromise ?? reader.read()).then(flow, handleStreamError);
@@ -29106,7 +29124,7 @@ function writeFromReadableStreamDefaultReader(reader, writable, currentReadPromi
     try {
       if (done) writable.end();
       else if (!writable.write(value)) writable.once("drain", onDrain);
-      else return reader.read().then(flow, handleStreamError);
+      else reader.read().then(flow, handleStreamError);
     } catch (e) {
       handleStreamError(e);
     }
@@ -29114,7 +29132,11 @@ function writeFromReadableStreamDefaultReader(reader, writable, currentReadPromi
 }
 function writeFromReadableStream(stream, writable) {
   if (stream.locked) throw new TypeError("ReadableStream is locked.");
-  else if (writable.destroyed) return;
+  else if (writable.destroyed) {
+    stream.cancel().catch(() => {
+    });
+    return;
+  }
   return writeFromReadableStreamDefaultReader(stream.getReader(), writable);
 }
 var buildOutgoingHttpHeaders = (headers, defaultContentType2) => {
@@ -29306,10 +29328,7 @@ var responseViaResponseObject = async (res, outgoing, options = {}) => {
       let maxReadCount = 2;
       for (let i = 0; i < maxReadCount; i++) {
         currentReadPromise ||= reader.read();
-        const chunk = await readWithoutBlocking(currentReadPromise).catch((e) => {
-          console.error(e);
-          done = true;
-        });
+        const chunk = await readWithoutBlocking(currentReadPromise);
         if (!chunk) {
           if (i === 1) {
             await new Promise((resolve3) => setTimeout(resolve3));
