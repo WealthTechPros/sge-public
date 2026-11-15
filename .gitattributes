@@ -12,6 +12,10 @@
 *.psd1 text eol=crlf
 *.cmd text eol=crlf
 *.bat text eol=crlf
+# Exception: the hook launcher is a cmd/sh polyglot that sh dot-sources on
+# Linux and macOS. With CRLF, `esac\r` is a syntax error and every Stop hook
+# exits 2. Its cmd half is written to work LF-only.
+hooks/run-hook.cmd text eol=lf
 
 # Binary files — never normalise or diff as text.
 *.png binary
