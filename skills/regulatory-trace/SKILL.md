@@ -1,10 +1,12 @@
 ---
 name: regulatory-trace
-description: Use when a regulated repo must map specs and capabilities to FCA/UK obligations and ISO 27001/42001/27701 and export that as audit evidence — due-diligence packs, FG26/4 registration, ISO audits — or when /sge:sge-align C12 flags a missing obligation mapping.
+description: Use when mapping specs and capabilities to FCA/UK and ISO obligations, or exporting that as audit evidence.
 argument-hint: "[add|map|review|export] [SPEC-NNN | CAP-NNN]"
 context: fork
 allowed-tools: Read, Write, Edit, Glob, Grep, AskUserQuestion, Bash(git status:*), Bash(git log:*), Bash(git rev-parse:*), Bash(git ls-files:*), Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/regulatory-trace/assets/check-regulatory-trace.sh:*), Bash(bash scripts/resolve-sge-root.sh:*)
 ---
+
+> Use when a regulated repo must map specs and capabilities to FCA/UK obligations and ISO 27001/42001/27701 and export that as audit evidence — due-diligence packs, FG26/4 registration, ISO audits — or when /sge:sge-align C12 flags a missing obligation mapping.
 
 # SGE Regulatory Traceability
 

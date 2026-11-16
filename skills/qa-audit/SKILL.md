@@ -1,8 +1,10 @@
 ---
-description: Use when a PR needs runtime QA evidence that the change works in the running app — exercising acceptance criteria or spec Gherkin against a live build, a QA report for a high-risk PR, or (--adversarial) proving a control enforces what it claims. Applies no gate labels.
+description: Use when a PR needs runtime QA evidence that the change works in the running app.
 argument-hint: <pr-number> [--adversarial]
 context: fork
 ---
+
+> Use when a PR needs runtime QA evidence that the change works in the running app — exercising acceptance criteria or spec Gherkin against a live build, a QA report for a high-risk PR, or (--adversarial) proving a control enforces what it claims. Applies no gate labels.
 
 # QA Audit
 
@@ -118,7 +120,7 @@ done
 
 Choose the highest rung available; never hardcode a specific test framework:
 
-1. **chrome-devtools MCP tools** (when the chrome-devtools MCP server is present) — the standard path for UI/web changes. Navigate to the affected pages, drive the user flow (click/fill/submit), and capture evidence with screenshots, console messages, and network requests. A clean console (no new errors) on the exercised pages is part of the evidence.
+1. **Browser MCP tools** (the Playwright MCP, `mcp__playwright__browser_*`, or the chrome-devtools MCP, whichever is present) — the standard path for UI/web changes. Navigate to the affected page, take a snapshot (`browser_snapshot`, or chrome-devtools `take_snapshot`), pick click/fill targets from that snapshot rather than guessing selectors from source, then act; re-snapshot after each navigation. Capture evidence with screenshots, console messages, and network requests. A clean console (no new errors) on the exercised pages is part of the evidence.
 
 2. **The repo's own e2e suite** — when no browser MCP is available, run the repo's end-to-end/integration suite per its CLAUDE.md ("the repo's quality suite"), scoped to the affected area where the runner supports it, and capture the runner output.
 

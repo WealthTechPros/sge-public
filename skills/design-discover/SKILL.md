@@ -1,7 +1,9 @@
 ---
-description: Use when a repo has no design references to hand to /sge:design-gate — the operator cannot name 2-3 sites they rate. Proposes unverified benchmarks, synthesises patterns, renders variants of one real screen, records the operator's choice as taste-profile.md. Run before design-gate.
+description: Use when a repo has no design references for /sge:design-gate and the operator cannot name 2-3 sites they rate.
 allowed-tools: Read, Write, Edit, Glob, Grep, AskUserQuestion, Bash(mkdir:*), Bash(node:*), Bash(git status:*), mcp__playwright__browser_navigate, mcp__playwright__browser_resize, mcp__playwright__browser_take_screenshot, mcp__playwright__browser_snapshot
 ---
+
+> Use when a repo has no design references to hand to /sge:design-gate — the operator cannot name 2-3 sites they rate. Proposes unverified benchmarks, synthesises patterns, renders variants of one real screen, records the operator's choice as taste-profile.md. Run before design-gate.
 
 ## Role
 

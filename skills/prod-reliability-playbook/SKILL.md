@@ -1,7 +1,9 @@
 ---
-description: Use when a simple fix drags into an all-day slog, debugging keeps bouncing through production, or a deploy ships plausible-but-wrong output; or before/after an incident. Stack-agnostic playbook — fail loud, shift-left validation, a fast green path, a triage checklist. Advisory.
+description: Use when a simple fix drags into an all-day slog, debugging keeps bouncing through production, or a deploy ships plausible-but-wrong output.
 argument-hint: "[incident note or PR/issue ref]"
 ---
+
+> Use when a simple fix drags into an all-day slog, debugging keeps bouncing through production, or a deploy ships plausible-but-wrong output; or before/after an incident. Stack-agnostic playbook — fail loud, shift-left validation, a fast green path, a triage checklist. Advisory.
 
 # Prod Reliability Playbook
 

@@ -1,10 +1,12 @@
 ---
 name: sge-ai-inventory
-description: Use when a financial-services firm must register or review its AI/LLM use cases — FCA/PRA or EU AI Act scrutiny, a DORA third-party register entry, model-risk docs, AI vendor due diligence, "what AI are we running and is it governed?", or a new AI feature with no entry.
+description: Use when registering or reviewing AI/LLM use cases for FCA/PRA, EU AI Act or DORA scrutiny, or model-risk docs.
 argument-hint: "[add|review|report] [use-case name]"
 context: fork
 allowed-tools: Read, Write, Edit, Glob, Grep, AskUserQuestion, Bash(git status:*), Bash(git log:*), Bash(git rev-parse:*)
 ---
+
+> Use when a financial-services firm must register or review its AI/LLM use cases — FCA/PRA or EU AI Act scrutiny, a DORA third-party register entry, model-risk docs, AI vendor due diligence, "what AI are we running and is it governed?", or a new AI feature with no entry.
 
 # SGE AI Inventory
 

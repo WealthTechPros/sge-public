@@ -1,9 +1,11 @@
 ---
-description: Use when you want a token cost attribution report — "where did our tokens go?", per-spec and per-PR breakdowns, the governed-vs-unattributed gap, or a sprint-end/CI snapshot. Reporting only; for live budget checks use /sge:cost-guard.
+description: Use when you want a token cost attribution report (where did our tokens go?).
 argument-hint: "[--period 7d|30d|90d]"
 context: fork
 allowed-tools: Read, Grep, Glob, Bash(cat:*), Bash(ls:*), Bash(jq:*), Bash(node:*), Bash(gh pr list:*), Bash(gh pr view:*), mcp__plugin_sge_sge-memory__search_nodes, mcp__plugin_sge_sge-memory__create_entities, mcp__plugin_sge_sge-memory__attribute_costs
 ---
+
+> Use when you want a token cost attribution report — "where did our tokens go?", per-spec and per-PR breakdowns, the governed-vs-unattributed gap, or a sprint-end/CI snapshot. Reporting only; for live budget checks use /sge:cost-guard.
 
 ## Role
 

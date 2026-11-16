@@ -1,7 +1,9 @@
 ---
-description: Use when a repo should publish, refresh or CI-wire the brand-neutral SGE coherence dashboard (Vision → Capabilities → Features → Specs → Tests → Decisions) generated from docs/sge-dag.json and the SGE markdown. Not for authoring specs or applying WTP's brand.
+description: Use when publishing or refreshing a repo's SGE coherence dashboard from docs/sge-dag.json.
 argument-hint: "[--ci]"
 ---
+
+> Use when a repo should publish, refresh or CI-wire the brand-neutral SGE coherence dashboard (Vision → Capabilities → Features → Specs → Tests → Decisions) generated from docs/sge-dag.json and the SGE markdown. Not for authoring specs or applying WTP's brand.
 
 # SGE Dashboard
 

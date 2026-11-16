@@ -1,8 +1,10 @@
 ---
-description: Use when a working tree has untracked clutter — stray build logs, leftover report files, byte-identical duplicates of committed content. Removes only provably safe or allowlisted files and reports the rest. Not for worktrees (/sge:tidy-worktrees) or processes (/sge:reap-orphans).
+description: Use when a working tree has untracked clutter (stray logs, report files, duplicates) to remove safely.
 argument-hint: "[--dry-run] [path]"
 allowed-tools: Read, Grep, Glob, Bash
 ---
+
+> Use when a working tree has untracked clutter — stray build logs, leftover report files, byte-identical duplicates of committed content. Removes only provably safe or allowlisted files and reports the rest. Not for worktrees (/sge:tidy-worktrees) or processes (/sge:reap-orphans).
 
 # /sge:clean-root — Untracked File Hygiene
 

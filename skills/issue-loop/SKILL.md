@@ -1,7 +1,9 @@
 ---
-description: Use when draining a repo's backlog one issue at a time — each build-ready issue taken through implement, review and merge until none are left ("work the backlog one issue at a time"). Serial and queue-bounded; for parallel or time-boxed runs use /sge:team-pipeline.
+description: Use when draining a repo's backlog serially, one issue at a time through implement, review and merge.
 argument-hint: "[--repo owner/repo] [--max-issues N] [--module <name>] [--milestone <name>] [--merge-wait|--no-merge-wait] [--duration Nh] [--dry-run]"
 ---
+
+> Use when draining a repo's backlog one issue at a time — each build-ready issue taken through implement, review and merge until none are left ("work the backlog one issue at a time"). Serial and queue-bounded; for parallel or time-boxed runs use /sge:team-pipeline.
 
 # /sge:issue-loop — Serial Issue-Drain Loop
 

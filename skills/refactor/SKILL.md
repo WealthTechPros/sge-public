@@ -1,7 +1,9 @@
 ---
-description: Use when the user asks to refactor, restructure, or clean up existing code, or mentions code smells, duplication, a god class or god function, tangled dependencies, dead code, cleanup, or tech debt. Behaviour-preserving restructuring only — not for new features or bug fixes.
+description: Use when asked to refactor or clean up code (smells, duplication, dead code, tech debt) without changing behaviour.
 argument-hint: "[target path] [--dry-run] [--focus <path|smell>]"
 ---
+
+> Use when the user asks to refactor, restructure, or clean up existing code, or mentions code smells, duplication, a god class or god function, tangled dependencies, dead code, cleanup, or tech debt. Behaviour-preserving restructuring only — not for new features or bug fixes.
 
 # Refactor
 

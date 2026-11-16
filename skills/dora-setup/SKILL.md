@@ -1,9 +1,11 @@
 ---
 name: dora-setup
-description: Use when rolling out status monitoring for a new org — stand up an Upptime status repo, GitHub Pages site, custom domain, optional brand skin and a DORA incident signal from scratch. Generic; no org-specific assumptions.
+description: Use when standing up Upptime status monitoring and a DORA incident signal for a new org.
 argument-hint: "[<org-name> <domain>]"
 allowed-tools: Bash(gh:*), Read, Write, Edit
 ---
+
+> Use when rolling out status monitoring for a new org — stand up an Upptime status repo, GitHub Pages site, custom domain, optional brand skin and a DORA incident signal from scratch. Generic; no org-specific assumptions.
 
 # DORA Setup — New-Org Upptime Rollout Runbook
 

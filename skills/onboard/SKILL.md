@@ -1,6 +1,6 @@
 ---
 name: onboard
-description: Use when onboarding people to SGE — a guided first-week path for a new developer (--dev) or ceremony-overlay adoption for an existing agile team (--team). Interactive.
+description: Use when onboarding a new developer (--dev) or an existing agile team (--team) to SGE.
 argument-hint: "[--dev | --team]"
 allowed-tools: Bash(gh:*), Read, Glob, Grep
 context:
@@ -8,6 +8,8 @@ context:
   - docs-site/getting-started/onboard-a-team.md
   - docs-site/getting-started/roles.md
 ---
+
+> Use when onboarding people to SGE — a guided first-week path for a new developer (--dev) or ceremony-overlay adoption for an existing agile team (--team). Interactive.
 
 ## Role
 Guide a new developer or an existing agile team through SGE onboarding — turning static documentation into a step-by-step interactive session that ends with the first governed PR or the first SGE-overlaid sprint.

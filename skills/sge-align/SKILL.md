@@ -1,9 +1,11 @@
 ---
-description: Use when checking a repo or fleet for SGE governance drift — features without specs, specs without Gherkin, ungoverned code, issues out of scope after a change — or for an Audit Score scorecard before a review. --dimension adds agent-security, regulatory or skill-quality scoring.
+description: Use when checking a repo or fleet for SGE governance drift, or scoring its Audit Score.
 argument-hint: "[--dry-run] [--apply] [--fleet <repos…>|<org>/*] [--check C1..C14,C19,C43] [--dimension agent-security|regulatory|skill-quality] [--label <label>] [--max <n>]"
 allowed-tools: Read, Glob, Grep, Agent, Bash(git status:*), Bash(git log:*), Bash(git rev-parse:*), Bash(git ls-files:*), Bash(git diff:*), Bash(gh issue list:*), Bash(gh issue view:*), Bash(gh pr list:*), Bash(gh repo list:*), Bash(gh repo clone:*), Bash(gh search:*), Bash(gh api:*)
 context: fork
 ---
+
+> Use when checking a repo or fleet for SGE governance drift — features without specs, specs without Gherkin, ungoverned code, issues out of scope after a change — or for an Audit Score scorecard before a review. --dimension adds agent-security, regulatory or skill-quality scoring.
 
 # SGE Align
 

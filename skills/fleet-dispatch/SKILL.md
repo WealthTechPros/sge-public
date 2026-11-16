@@ -1,7 +1,9 @@
 ---
-description: Use when dispatching build-ready issues across many repos at once — "dispatch across the fleet", "work issues org-wide", "run the pipeline across all our repos" — with at most one lane per repo. Composes /sge:available-issues --fleet and /sge:team-pipeline.
+description: Use when dispatching build-ready issues across many repos at once, one lane per repo.
 argument-hint: "[--fleet <org|owner/a,owner/b,…>] [--count N] [--repo-agents N] [--wave-size N] [--module <name>] [--milestone <name>] [--dry-run]"
 ---
+
+> Use when dispatching build-ready issues across many repos at once — "dispatch across the fleet", "work issues org-wide", "run the pipeline across all our repos" — with at most one lane per repo. Composes /sge:available-issues --fleet and /sge:team-pipeline.
 
 # /fleet-dispatch — Cross-Repo Issue Dispatch with Per-Repo Agent-Locks
 

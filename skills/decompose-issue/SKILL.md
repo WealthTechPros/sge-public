@@ -1,7 +1,9 @@
 ---
-description: Use when an issue is too large for one session and should be split into ordered, parallel-safe child issues (an enabler plus vertical slices) — decompose, break down, split or fan out, or /sge:sge-implement sizes it Large. Creates the child issues and plan; does not build.
+description: Use when an issue is too large for one session and should be split into ordered child issues.
 argument-hint: "<issue-number> [--dry-run] [--no-comment]"
 ---
+
+> Use when an issue is too large for one session and should be split into ordered, parallel-safe child issues (an enabler plus vertical slices) — decompose, break down, split or fan out, or /sge:sge-implement sizes it Large. Creates the child issues and plan; does not build.
 
 # Decompose Issue — Split a Large Issue into Parallel-Safe Sub-Tasks
 

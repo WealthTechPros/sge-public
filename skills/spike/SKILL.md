@@ -1,7 +1,9 @@
 ---
-description: Use when an architecture bet (a new extraction approach, pipeline, or adapter/integration layer) could be built two ways and the right shape is unknown. Time-boxes a throwaway exploration with a keep/kill checkpoint before the winner goes through the normal SGE pipeline.
+description: Use when an architecture bet could be built two ways and needs a time-boxed throwaway exploration.
 argument-hint: "[issue-number or one-line description of the bet]"
 ---
+
+> Use when an architecture bet (a new extraction approach, pipeline, or adapter/integration layer) could be built two ways and the right shape is unknown. Time-boxes a throwaway exploration with a keep/kill checkpoint before the winner goes through the normal SGE pipeline.
 
 # /spike — Time-Boxed Architecture Spike
 

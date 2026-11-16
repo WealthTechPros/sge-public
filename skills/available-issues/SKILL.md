@@ -1,7 +1,9 @@
 ---
-description: Use when you need a conflict-safe set of open issues that agents can work in parallel — a /sge:team-pipeline work pool, "what can we work on at once", "pick the next non-conflicting issue", or blocked vs ready. --fleet spans many repos. Read-only; does not implement.
+description: Use when picking a conflict-safe set of open issues agents can work in parallel, or checking which are blocked vs ready.
 argument-hint: "[--parallel] [--count N] [--setup] [--autonomous] [--mode autonomous-next] [--blocking] [--analyze N] [--module <name>] [--milestone <name>] [--repo <owner/name>] [--fleet <org|r1,r2,...>]"
 ---
+
+> Use when you need a conflict-safe set of open issues that agents can work in parallel — a /sge:team-pipeline work pool, "what can we work on at once", "pick the next non-conflicting issue", or blocked vs ready. --fleet spans many repos. Read-only; does not implement.
 
 # Available Issues — conflict-safe parallel issue discovery
 
