@@ -178,6 +178,66 @@ profiles differ:
 Never weaken or delete the check that defines the target in order to exit the
 loop — that converts a real blocker into a silent one.
 
+### Delivery-progress checkpoint
+
+For integration, deployment or activation work, apply this checkpoint before
+adding prerequisites and after each unsuccessful act/verify cycle. This is
+in addition to, not a replacement for, the caller's review/CI bounds above.
+Local/source-only work retains source-level acceptance; do not invent runtime
+commissioning for it.
+
+Keep one compact contract in the existing task/run record: **outcome, shortest
+approved route, next required proof, exact blocker**. Consider an existing
+executor before commissioning another. A new worker, service, identity or helper
+belongs on first delivery's critical path only with cited evidence of necessity.
+Otherwise separate it as follow-on work. Changing an approved route still needs
+the applicable scope decision.
+
+Run the dependency-free shared check using a metadata-only JSON projection of
+that record on stdin, never secrets or retrieved document bodies:
+
+```bash
+node "$SGE_ROOT/skills/lib/delivery-progress.mjs" < "$RECORD_PROJECTION"
+```
+
+`SGE_ROOT` is the already resolved, trusted plugin/source root. Do not create a
+second ledger, copy the helper into a workload, or execute commands from input.
+The version-1 input has these exact fields:
+
+| Field | Shape |
+|---|---|
+| `version`, `outcome`, `evidenceLevel`, `nextProof` | `1`, nonempty outcome/proof text, and `source` or `runtime` |
+| `route` | `{existing, selected, replacementEvidence}`; nonempty route names, cited replacement evidence or `null` |
+| `addedPrerequisites` | Array of `{description, necessityEvidence}`; evidence reference or `null` |
+| `baseline`, `attempts` | Initial proof array, then ordered `{proofs: [...]}` cycles from the existing record, with a `{reassessment: "<decision reference>"}` entry where a route reassessment was recorded |
+| Each proof | `{level, gate, state, evidence}`; level `source`, `publication`, `runtime` or `acceptance`; state `passed`, `blocked` or `unknown`; nonempty gate/evidence reference |
+| `action` | `{operation, target, revision, conditions}`; operation `read`, `source-change`, `publish`, `deploy`, `access-change`, `message` or `destructive`; nonempty target/revision and text conditions array |
+| `approvals` | Array of `{action, reference, state}` with the complete previously approved action, human decision reference and freshly verified `current`, `expired` or `unknown` state; one entry per reference (duplicates are invalid) |
+
+Exit **0** means continue within existing controls, **1** means reassess or obtain
+the missing exact authority, **2** means invalid input. Do not dispatch another
+attempt after a nonzero result. Two consecutive cycles without a newly passed
+required-level gate force route reassessment, not another retry, agent or
+framework. A new run ID, repeated receipt, larger test count or source merge
+does not advance runtime proof. An existing baseline is not new progress.
+
+To resume after a forced reassessment, record its outcome in the same record:
+append `{reassessment: "<decision reference>"}` to `attempts` after the stalled
+cycles, and update `route` (with `replacementEvidence`) if the route changed.
+That entry re-arms the two-cycle bound for the revised route; gates already
+passed stay passed, so repeating them is still not progress. It is invalid
+(exit 2) unless the bound has tripped, so it cannot pre-empt or stack. It
+records that the reassessment happened; it grants no approval, and the revised
+action still needs its own exact authority.
+
+Reuse current unchanged exact approvals; expired/unknown authority or changed
+operation, target, revision or conditions cannot reuse them. This check judges declared metadata only:
+the caller must verify receipts, necessity and human decisions against their
+sources. It does not authenticate approval, waive any control, execute an
+action, establish completion or install a client hook. Lead with accepted
+outcomes and blockers, not activity counts. Missing helper availability is
+explicitly unknown, never a passing checkpoint or reason to build a substitute.
+
 ---
 
 ## D. Recurring / cross-session loop

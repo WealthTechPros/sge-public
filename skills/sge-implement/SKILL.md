@@ -147,6 +147,11 @@ Read governance context **as deep as the work's risk demands, and no deeper** (#
 
 ## Phase 3: Implement (TDD in a worktree)
 
+For integration/deployment work, use the shared
+[delivery-progress checkpoint](../loops/SKILL.md#delivery-progress-checkpoint)
+before expanding prerequisites and after unsuccessful delivery cycles. Keep
+the next real proof on the critical path; source-only tasks do not gain runtime gates.
+
 ### Step 1: Isolate in a worktree — all work happens here, never on main
 
 Sibling worktree per [`worktrees`](../worktrees/SKILL.md) (`../<repo>-worktrees/issue-<N>`), **resume before create** (#1171); branch `feat/sge-<NNN>-<short-desc>` or the 0B taxonomy. [Commands](references/worktree-setup.md).
