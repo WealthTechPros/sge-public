@@ -1,9 +1,11 @@
 ---
-description: Use when a repo's SGE Audit Score (the /sge:sge-align rollup, SM-2) or a drift metric needs raising, not just measuring. Picks the highest-leverage gap, opens one bounded PR, re-measures independently, and repeats until the target or a bound. Advisory, PR-first.
+description: Use when a repo's SGE Audit Score or a drift metric needs raising, one bounded PR at a time.
 argument-hint: "[--target <n>] [--metric C3|C4|C5|C6|orphan_rate|…] [--dimension token-economy|skill-quality | --auto-dimension] [--max-rounds <n>] [--min-gain <n>] [--dry-run] [--fleet <org>/*]"
 allowed-tools: Read, Glob, Grep, Agent, Bash(git status:*), Bash(git log:*), Bash(git rev-parse:*), Bash(git ls-files:*), Bash(git diff:*), Bash(git checkout:*), Bash(git branch:*), Bash(node:*), Bash(gh issue list:*), Bash(gh issue view:*), Bash(gh pr list:*), Bash(gh pr view:*), Bash(gh pr checks:*), Bash(gh api:*)
 context: fork
 ---
+
+> Use when a repo's SGE Audit Score (the /sge:sge-align rollup, SM-2) or a drift metric needs raising, not just measuring. Picks the highest-leverage gap, opens one bounded PR, re-measures independently, and repeats until the target or a bound. Advisory, PR-first.
 
 # Drift Hill-Climb
 

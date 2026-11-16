@@ -1,9 +1,11 @@
 ---
 name: spec-validate
-description: Use when running a spec's `## Validation` section against a demo fixture to check its business-rule invariants actually hold — after editing that section, at spec graduation (draft → approved → implemented), or when /sge:sge-align C4 flags a missing or unverified section.
+description: Use when running a spec's Validation section against a demo fixture to check its invariants hold.
 argument-hint: "<spec-file> [fixture.json]"
 allowed-tools: Read, Bash(node ${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/spec-validate/assets/spec-validate.mjs:*)
 ---
+
+> Use when running a spec's `## Validation` section against a demo fixture to check its business-rule invariants actually hold — after editing that section, at spec graduation (draft → approved → implemented), or when /sge:sge-align C4 flags a missing or unverified section.
 
 # Spec Validate
 

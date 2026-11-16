@@ -1,9 +1,11 @@
 ---
-description: Use when preparing to implement an SGE feature spec — before any branch, plan, or code exists — when asked to preflight or check build-readiness of a SPEC-NNN, or when /sge:sge-implement Phase 1 delegates its entry-criteria checks.
+description: Use when checking a SPEC-NNN is ready to implement, before any branch, plan or code for it exists.
 argument-hint: <SPEC-NNN or issue#>
 context: fork
 allowed-tools: Read, Grep, Glob, Agent, AskUserQuestion, Bash(ls:*), Bash(cat:*), Bash(git log:*), Bash(git show:*), Bash(git ls-files:*), Bash(gh issue view:*), Bash(gh issue list:*), Bash(gh issue comment:*), Bash(node ${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/resolve-context-scope.mjs:*), Bash(node ${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/resolve-context-depth.mjs:*)
 ---
+
+> Use when preparing to implement an SGE feature spec — before any branch, plan, or code for it exists — when asked to preflight or check build-readiness of a SPEC-NNN, or when /sge:sge-implement Phase 1 delegates its entry-criteria checks.
 
 # SGE Preflight
 

@@ -1,8 +1,10 @@
 ---
-description: Use when closing a delivery cycle or on a schedule - one command, no arguments, turns the window's review findings, already-done closures, exit-reports and corrections into classified lessons, one bundled fix issue per recurring class, a lessons log and Cortex memory.
+description: Use when closing a delivery cycle, to turn review findings and corrections into lessons and fix issues.
 argument-hint: "[--since DATE] [--repo owner/repo] [--fleet] [--dry-run]"
 allowed-tools: Read, Grep, Glob, Bash, AskUserQuestion, mcp__plugin_sge_sge-memory__search_nodes, mcp__plugin_sge_sge-memory__create_entities
 ---
+
+> Use when closing a delivery cycle or on a schedule - one command, no arguments, turns the window's review findings, already-done closures, exit-reports and corrections into classified lessons, one bundled fix issue per recurring class, a lessons log and Cortex memory.
 
 <!-- UNTRUSTED DATA -->
 

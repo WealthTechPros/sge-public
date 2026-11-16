@@ -1,7 +1,9 @@
 ---
-description: Use when onboarding a new product or greenfield repo onto SGE — no Vision, capability model or feature specs yet; "set up SGE", seed governance artefacts, run product intake, or turn a brief into seed artefacts. Not for auditing a seeded repo (/sge:sge-align).
+description: Use when onboarding a new product or greenfield repo onto SGE (no Vision or specs yet).
 argument-hint: "[intake-doc path]"
 ---
+
+> Use when onboarding a new product or greenfield repo onto SGE — no Vision, capability model or feature specs yet; "set up SGE", seed governance artefacts, run product intake, or turn a brief into seed artefacts. Not for auditing a seeded repo (/sge:sge-align).
 
 # SGE Init
 

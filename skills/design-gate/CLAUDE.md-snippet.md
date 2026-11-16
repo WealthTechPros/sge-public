@@ -12,8 +12,12 @@
 - Never declare UI work complete without a design-reviewer PASS in
   `.claude/design-review/latest.md`. If the reviewer fails you, apply
   its fixes and re-run it — do not argue with it in prose.
-- For any new page or component, use the frontend-design skill's
-  process: plan direction and tokens first, self-critique the plan
-  against generic defaults, then build.
+- For any new page or component, plan, critique, then build (the same
+  steps as the design-gate skill's Extraction steps 2-3):
+  1. Plan: name the direction in one sentence, grounded in what this
+     product is and who uses it, and list the DESIGN.md tokens it uses.
+  2. Critique: check the plan once against generic defaults. If any
+     part reads like the template answer, revise it and say what changed.
+  3. Build from the revised plan.
 - New visual work starts from the `/design-system` route: compose from
   existing primitives before inventing new ones.

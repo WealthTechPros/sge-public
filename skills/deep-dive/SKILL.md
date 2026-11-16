@@ -1,7 +1,9 @@
 ---
-description: Use when an issue needs investigation and a recorded decision rather than an immediate build — an unclear root cause, blast radius or alternatives to weigh, a suspected duplicate or stale issue, or a /sge:sge-align drift issue to triage. Not for building.
+description: Use when an issue needs investigation and a recorded decision (root cause, options) rather than a build.
 argument-hint: "<issue-number> [--quick|--code-only|--no-code] [--no-comment]"
 ---
+
+> Use when an issue needs investigation and a recorded decision rather than an immediate build — an unclear root cause, blast radius or alternatives to weigh, a suspected duplicate or stale issue, or a /sge:sge-align drift issue to triage. Not for building.
 
 # Deep Dive — Issue Investigation & Discussion
 

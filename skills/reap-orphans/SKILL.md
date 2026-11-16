@@ -1,8 +1,10 @@
 ---
-description: Use when the box is sluggish or after long sessions — kills orphaned Claude Code processes (claude/node/bash, dev servers with dead parents) and proven-abandoned Copilot CLI orphans, reports hogs; --heavy also kills headless Chromium and stops WSL. Protects live sessions.
+description: Use when the machine is sluggish after long sessions. Kills orphaned Claude Code and Copilot CLI processes safely.
 argument-hint: "[--heavy [-NoWSL]] [-DryRun] [-HogMB <MB>]"
 allowed-tools: Bash(pwsh:*), Bash(powershell:*), Bash(bash:*)
 ---
+
+> Use when the box is sluggish or after long sessions — kills orphaned Claude Code processes (claude/node/bash, dev servers with dead parents) and proven-abandoned Copilot CLI orphans, reports hogs; --heavy also kills headless Chromium and stops WSL. Protects live sessions.
 
 # /sge:reap-orphans — Safe Process Reaper
 

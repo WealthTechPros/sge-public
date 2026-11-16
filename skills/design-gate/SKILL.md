@@ -1,7 +1,9 @@
 ---
-description: Use when installing the design-quality gate (SPEC-115) in a repo — "install the design gate", "enforce design quality". Extracts a DESIGN.md contract from reference sites (or brand/), scaffolds a /design-system route, and wires .claude/design-review/ and CLAUDE.md.
+description: Use when installing the design-quality gate (a DESIGN.md contract plus design review) in a repo.
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash(mkdir:*), Bash(git status:*), Bash(git ls-files:*), Bash(git checkout:*), Bash(git add:*), Bash(git commit:*), Bash(git push:*), Bash(gh repo view:*), Bash(gh pr create:*), mcp__playwright__browser_navigate, mcp__playwright__browser_resize, mcp__playwright__browser_take_screenshot
 ---
+
+> Use when installing the design-quality gate (SPEC-115) in a repo — "install the design gate", "enforce design quality". Extracts a DESIGN.md contract from reference sites (or brand/), scaffolds a /design-system route, and wires .claude/design-review/ and CLAUDE.md.
 
 ## Role
 

@@ -1,8 +1,10 @@
 ---
-description: Use when committing work in a WTP/SGE repo — end of an implementation slice, before opening a PR, or when another skill says "commit via /sge:commit". Runs quality gates and adds SGE traceability trailers. Not for amending history or interactive rebase.
+description: Use when committing work in an SGE repo. Runs quality gates and adds traceability trailers.
 argument-hint: "[message hint] [--no-push]"
 allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git branch:*), Bash(git rev-parse:*), Bash(git config:*), Bash(git symbolic-ref:*), Bash(git ls-files:*), Bash(git add:*), Bash(git commit:*), Bash(git push:*), Read, Grep, Glob
 ---
+
+> Use when committing work in a WTP/SGE repo — end of an implementation slice, before opening a PR, or when another skill says "commit via /sge:commit". Runs quality gates and adds SGE traceability trailers. Not for amending history or interactive rebase.
 
 # Commit
 

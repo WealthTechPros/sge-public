@@ -1,6 +1,8 @@
 ---
-description: Use when writing the next increment of implementation code — the inner Red/Green/Refactor loop inside any implementation workflow. Triggers on implementing a feature slice, fixing a bug test-first, or any task where production code is about to be written.
+description: Use when writing implementation code. The Red/Green/Refactor loop for a feature slice or bug fix.
 ---
+
+> Use when writing the next increment of implementation code — the inner Red/Green/Refactor loop inside any implementation workflow. Triggers on implementing a feature slice, fixing a bug test-first, or any task where production code is about to be written.
 
 # TDD Workflow
 

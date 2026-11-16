@@ -1,8 +1,10 @@
 ---
 name: code-map
-description: Use when a repo should give GitHub Copilot (or any session) a cheap read of what each component and directory does — generate or refresh docs/sge-code-map.md, point AGENTS.md and .github/copilot-instructions.md at it, and set up the SGE plugin for Copilot. Not for editing architecture.yaml.
+description: Use when generating or refreshing docs/sge-code-map.md, or setting up the SGE plugin for Copilot, so Copilot or a session can read a repo cheaply.
 argument-hint: "[--check]"
 ---
+
+> Use when a repo should give GitHub Copilot (or any session) a cheap read of what each component and directory does — generate or refresh docs/sge-code-map.md, point AGENTS.md and .github/copilot-instructions.md at it, and set up the SGE plugin for Copilot. Not for editing architecture.yaml.
 
 # Code Map
 

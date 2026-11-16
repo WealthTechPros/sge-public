@@ -1,8 +1,10 @@
 ---
-description: 'Use when cleaning up git worktrees, branches, stashes or leftover files, after merging PRs or before new work (--force: fast merged-only sweep). Audits everything, builds one delete plan, assesses unmerged work for PR or discard. Destructive only after one confirmed plan with tip SHAs.'
+description: Use when cleaning up git worktrees, branches, stashes or leftover files, after merging PRs or before new work.
 argument-hint: "[--force] [--inbox] [--audit] [repo dirs…]"
 allowed-tools: Read, Grep, Glob, Agent, AskUserQuestion, Bash, mcp__plugin_sge_sge-memory__search_nodes, mcp__plugin_sge_sge-memory__create_entities
 ---
+
+> Use when cleaning up git worktrees, branches, stashes or leftover files, after merging PRs or before new work (--force: fast sweep of merged work and superseded/empty work, not necessarily merged). Audits everything, builds one delete plan, assesses unmerged work for PR or discard. Destructive only after one confirmed plan with tip SHAs.
 
 # Tidy Worktrees
 

@@ -1,9 +1,11 @@
 ---
-description: Use when classifying an issue against a repo's SGE governance (Vision, Capability Model, Feature Specs) before code is written — matches a spec, modifies one, needs a new spec, needs none, or is out of scope. Dispatched by /sge:sge-implement Phase 0.5 and /sge:deep-dive.
+description: Use when classifying an issue against a repo's SGE governance (specs, capabilities) before coding.
 argument-hint: "<issue-number> [--repo <owner/repo>] [--spec SPEC-NNN] [--no-comment]"
 context: fork
 allowed-tools: Read, Grep, Glob, Bash(gh issue view:*), Bash(gh issue list:*), Bash(gh issue comment:*), Bash(git log:*), Bash(git show:*), Bash(ls:*), Bash(bash:*), Bash(stat:*), Bash(find:*), mcp__plugin_sge_sge-memory__search_nodes, mcp__plugin_sge_sge-memory__create_entities
 ---
+
+> Use when classifying an issue against a repo's SGE governance (Vision, Capability Model, Feature Specs) before code is written — matches a spec, modifies one, needs a new spec, needs none, or is out of scope. Dispatched by /sge:sge-implement Phase 0.5 and /sge:deep-dive.
 
 # Governance Trace
 

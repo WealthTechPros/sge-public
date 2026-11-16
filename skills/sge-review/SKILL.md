@@ -1,8 +1,10 @@
 ---
-description: Use when a finished implementation needs an independent review against its SGE spec — after coding completes and before a PR is opened, when /sge:sge-implement Phase 5 delegates its pre-PR review, or when asked to verify that work satisfies a SPEC-NNN.
+description: Use when a finished implementation needs independent review against its SGE spec before a PR.
 argument-hint: "[SPEC-NNN]"
 context: fork
 ---
+
+> Use when a finished implementation needs an independent review against its SGE spec — after coding completes and before a PR is opened, when /sge:sge-implement Phase 5 delegates its pre-PR review, or when asked to verify that work satisfies a SPEC-NNN.
 
 # SGE Review
 

@@ -1,7 +1,9 @@
 ---
-description: Use when running several SGE implementation agents in parallel as a continuous implement-and-review pipeline — "run the pipeline", "work issues in parallel", "batch implement issues". With --duration it is the time-boxed swarm ("swarm the issues for 2 hours") and never overruns.
+description: Use when running several implementation agents in parallel as a pipeline or time-boxed swarm.
 argument-hint: "[--duration <Nm|Nh>] [--agents N] [--module <name>] [--milestone <name>] [--ci-limit N] [--session-budget <tokens>] [--unattended] [--dry-run]"
 ---
+
+> Use when running several SGE implementation agents in parallel as a continuous implement-and-review pipeline — "run the pipeline", "work issues in parallel", "batch implement issues". With --duration it is the time-boxed swarm ("swarm the issues for 2 hours") and never overruns.
 
 # /team-pipeline — Parallel Multi-Agent SGE Pipeline Orchestrator
 

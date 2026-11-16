@@ -1,9 +1,11 @@
 ---
-description: "Use when checking the session's token use against the active spec's BudgetPolicy — \"are we within token budget?\", before another expensive slice, or when SGE_SPEC_ID is set. Advisory: reports ok/alert/deny and never stops the session. For cost reports use /sge:roi-report."
+description: Use when checking this session's token use against the active spec's budget policy.
 argument-hint: "[--spec SPEC-NNN] [--session <session-id>]"
 context: fork
 allowed-tools: Read, Grep, Glob, Bash(cat:*), Bash(ls:*), Bash(jq:*), Bash(wc:*), Bash(node:*), mcp__plugin_sge_sge-memory__search_nodes, mcp__plugin_sge_sge-memory__create_entities
 ---
+
+> Use when checking the session's token use against the active spec's BudgetPolicy — "are we within token budget?", before another expensive slice, or when SGE_SPEC_ID is set. Advisory: reports ok/alert/deny and never stops the session. For cost reports use /sge:roi-report.
 
 ## Role
 

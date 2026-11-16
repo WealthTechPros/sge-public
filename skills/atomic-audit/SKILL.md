@@ -1,9 +1,11 @@
 ---
-description: Use when scoring how far a repo or portfolio has adopted atomic design — design tokens, primitive layer, catalog, enforcement maturity — for /sge:sge-align check C10 or before planning a design-system roadmap. Advisory and read-only.
+description: Use when scoring a repo's atomic-design adoption (tokens, primitives, catalog), e.g. for /sge:sge-align C10.
 argument-hint: "[repo path] [--json] [--stack <key>] [--out <file>] [--fleet <repos…>]"
 context: fork
 allowed-tools: Read, Glob, Grep, Agent, Bash(bash:*), Bash(sh:*), Bash(ls:*), Bash(find:*), Bash(grep:*), Bash(cat:*), Bash(head:*), Bash(wc:*), Bash(git ls-files:*), Bash(git rev-parse:*), Bash(gh repo list:*), Bash(gh repo clone:*)
 ---
+
+> Use when scoring how far a repo or portfolio has adopted atomic design — design tokens, primitive layer, catalog, enforcement maturity — for /sge:sge-align check C10 or before planning a design-system roadmap. Advisory and read-only.
 
 # Atomic Audit — Atomic-Design Adoption Assessment
 

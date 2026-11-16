@@ -1,9 +1,11 @@
 ---
-description: 'Use when gating issues as build-ready before any agent picks them up — clear acceptance criteria, bounded scope, no open questions, dependencies resolved, plus the /sge:governance-trace classification. Writes routing labels; does not implement. Per-spec checks: /sge:sge-preflight.'
+description: Use when gating issues as build-ready before an agent picks them up. Writes routing labels.
 argument-hint: "<issue# | issue#,issue# | --milestone <name> | --module <name>> [--skip-governance]"
 context: fork
 allowed-tools: Read, Grep, Glob, Agent, Bash(gh issue view:*), Bash(gh issue list:*), Bash(gh issue comment:*), Bash(gh issue edit:*), Bash(gh label create:*), Bash(gh label list:*), Bash(git ls-files:*), Bash(git log:*), Bash(*issue-read.sh:*), Bash(*with-repo-cwd.sh:*), Bash(node:*), Write
 ---
+
+> Use when gating issues as build-ready before any agent picks them up — clear acceptance criteria, bounded scope, no open questions, dependencies resolved, plus the /sge:governance-trace classification. Writes routing labels; does not implement. Per-spec checks: /sge:sge-preflight.
 
 # Build-Ready Audit — Gate Issues Before They Flow
 
