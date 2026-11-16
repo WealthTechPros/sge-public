@@ -65,6 +65,59 @@ or a "small" tweak to a migration, is still CRITICAL. Security paths **never**
 run below the `deep` class (opus-class; an OpenAI entry only if listed in
 `model-roles.json`).
 
+## Per-phase tiers and Opus-advisor escalation (sge#3511)
+
+The routing table above picks a tier **at dispatch time, by task type**. This
+section adds the second half: the default tier and effort for each **phase**
+of an SGE skill run, and the explicit triggers on which a lower-tier session
+**escalates mid-run to an Opus advisor**. It is a rule in the skill text, not
+a scoring service: no confidence-scoring layer, no CLI flags, no harness
+change. `/sge:sge-implement`, `/sge:sge-review` and `/sge:governance-trace`
+cite this section.
+
+### Phase defaults
+
+| Phase | Tier | Effort | How |
+|---|---|---|---|
+| Exploration, lookups, doc/spec research | **haiku** (or the `Explore` agent) | lower | Parallel read-only spawns; return conclusions, not file dumps. |
+| Implementation and tests (TDD inner loop) | **sonnet** | medium | The build lane; matches the routing table's implementation rows. |
+| Main-session planning and final verification | the session's own model | high | The orchestrating session plans the change and runs Phase 4/5 verification itself; it does not hand these to a lower tier. |
+
+The CRITICAL escalation rule above still overrides every row: a security/auth,
+migration or multi-tenant path runs at **opus** whatever its phase.
+
+### Opus-advisor escalation triggers
+
+On each trigger, spawn **one read-only advisor** at tier **opus** (`deep`
+class): an agent with no Edit/Write tools (for example the `Plan` subagent
+type) and `model: opus`. Give it the context it needs (issue, plan or diff,
+the failure output) and ask for advice: a recommendation, the risk it sees,
+and what to check. **The advisor never writes code, commits, pushes or
+labels.** The session that called it owns the decision and makes every
+change. Log the trigger and the advisor's recommendation in the run's
+output (PR body, review verdict or trace report) so the escalation is
+auditable.
+
+| # | Trigger | Observable condition | Skill | Dispatches |
+|---|---|---|---|---|
+| A1 | Plan advisor | Phase 2 has resolved `SGE_GOVERNANCE_TIER` to **T1 or T2** (non-trivial), and the plan is ready but no production file has been edited yet. T0 skips it. | `/sge:sge-implement` (end of Phase 2, before Phase 3 edits) | Read-only opus advisor reviews the plan: scope, blast radius, missed ACs, safer alternatives. |
+| A2 | Repeat-failure advisor | The **same** failure occurs a **second** time: the same test, CI check or tool error with the same signature after a fix attempt. | Any phase of `/sge:sge-implement` | Read-only opus advisor gets both failure outputs and the attempted fixes, and diagnoses the root cause before a third attempt. |
+| A3 | Classification advisor | `/sge:governance-trace` cannot classify confidently: two or more specs or capabilities match about equally, Step 4 reaches the no-capability judgment call (`NEEDS_NEW_SPEC` vs `NOT_SGE_SCOPE`), or the change may conflict with a Vision non-goal that is not explicitly quoted. | `/sge:governance-trace` (Steps 2-4, before the verdict) | Read-only opus advisor reads the candidate artefacts and the non-goals and recommends a verdict with reasons; the trace still emits its own verdict. |
+| A4 | Before-done advisor | The change is **security-sensitive** (any file matches `rl_security_glob_regex` in `skills/pr-review/review-lib.sh`, or a CRITICAL path above) or sized **Large** (score > 30). | `/sge:sge-review` (before the Step 9 verdict) | Read-only opus advisor reviews the diff against the spec and ACs; its findings feed the verdict. |
+
+Each trigger fires **once per occurrence**: A2 fires again only for a
+different failure, never in a loop on the same one. A session already running
+at opus applies the advisor check itself instead of spawning. If the opus class is not
+available in the harness, record the trigger as not run. Never substitute a
+lower tier for the advisor.
+
+### Security paths are unchanged
+
+This section only adds escalations. It does not lower any tier: the CRITICAL
+escalation rule, `@security-auditor` at `deep`, and `@code-reviewer`
+escalating to `deep` on security-globbed diffs stand exactly as written
+above. Security paths never run below opus.
+
 ## Target mix
 
 Across a typical pipeline run, the registry is calibrated to land roughly:

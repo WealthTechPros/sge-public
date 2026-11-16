@@ -139,6 +139,8 @@ Split via `/sge:decompose-issue` ([taxonomy](references/child-splitting.md)).
 
 **Tier resolution (T0/T1/T2 — proportional governance).** Resolve via `resolve-governance-tier.mjs` (paths/score/lane), export `SGE_GOVERNANCE_TIER`, log it — never silent. Phase 0.5/5, commit, pr-review read it. Mechanics: [`governance-tier.md`](references/governance-tier.md).
 
+**Model tiers and Opus advisor (#3511).** Research on haiku, build on sonnet (medium effort), plan and verify here at high effort. On T1/T2, a read-only opus advisor reviews the plan before Phase 3 edits (A1); the same failure twice triggers one before a third fix (A2). The advisor never writes code. [Registry](../../docs/agent-registry.md#per-phase-tiers-and-opus-advisor-escalation-sge3511).
+
 ---
 
 ## Phase 2.5: Governance Context — Complexity-Tiered, Scoped Read

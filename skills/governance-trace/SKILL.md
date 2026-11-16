@@ -203,6 +203,8 @@ Read the Vision's Non-goals section (or equivalent — some Visions call it "Out
 
 **No capability maps and no non-goal conflict?** Decide `NEEDS_NEW_SPEC` vs `NOT_SGE_SCOPE` — **bias toward `NEEDS_NEW_SPEC`**: [`references/matching.md`](references/matching.md#no-capability-mapping-judgment-call).
 
+**Not confident? Escalate (A3, #3511).** Two or more near-equal spec/capability matches, the judgment call above, or a possible unquoted non-goal conflict: consult one read-only opus advisor (never writes) before the verdict, and record its advice in the report. [Triggers](../../docs/agent-registry.md#opus-advisor-escalation-triggers).
+
 ---
 
 ## Step 5: Spec-stub (and capability-model) drafting (`NEEDS_NEW_SPEC` only)

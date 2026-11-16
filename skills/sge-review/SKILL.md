@@ -102,6 +102,8 @@ of tier — a 150-line diff can still miss an AC or violate TDD discipline.
 
 Record the classification: you will report `"review_mode"` in the Step 9 verdict.
 
+**Opus before-done advisor (A4, #3511).** If any file matches `rl_security_glob_regex`, the change touches a CRITICAL path (security/auth, database migrations, or multi-tenant / data-isolation boundaries; [rule](../../docs/agent-registry.md#critical-escalation-rule-overrides-the-table)) whatever its path, or the change is sized Large (score > 30), consult one read-only opus advisor on the diff against the spec before Step 9 (skip the spawn if this review already runs at opus). It advises only and never edits; fold its findings into the verdict. [Triggers](../../docs/agent-registry.md#opus-advisor-escalation-triggers).
+
 ---
 
 ## Step 1: Identify What to Review
