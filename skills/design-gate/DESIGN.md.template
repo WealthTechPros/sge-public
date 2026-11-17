@@ -30,6 +30,12 @@ confident — because compliance officers trust precision, not delight.")
 - Radius: ___px (one value; exceptions listed here or they don't exist)
 - Shadow: define 1-2 elevations max, as exact CSS values.
 
+## Layout
+- Measure: body text at most ___ch per line (45-75ch; 65ch is a safe default).
+- Content width: ___px maximum; gutters come from the Space scale.
+- Alignment: text is left-aligned by default; centre only ______. Headings,
+  body text and controls in a section share one left edge.
+
 ## Motion
 - What animates, when, and why. Durations and easing named here.
 - prefers-reduced-motion: everything above becomes opacity-only or none.
