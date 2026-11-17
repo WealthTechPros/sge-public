@@ -97,22 +97,24 @@ Then install dependencies / prepare the environment per the repo's CLAUDE.md. Al
 
 ## Step 3: Start the environment and wait for health
 
-Start the dev environment **in the background** using the repo's documented command (refer to the repo's CLAUDE.md — do not guess stack-specific commands), then wait until it is actually healthy before exercising anything. This is the [wait-for-condition loop](../loops/SKILL.md#b-wait-for-condition-loop): wait on the health condition, not the clock.
-
-**Primary mechanism — `Monitor` with an until-healthy condition** on the background server task: it wakes you when `curl -fsS "http://localhost:${PORT}/"` first succeeds, with an explicit timeout. No foreground sleep-polling.
-
-Fallback only when `Monitor` is unavailable — a bounded curl loop:
+Start the dev environment with `scripts/with-dev-server.mjs`, using the repo's documented dev command (refer to the repo's CLAUDE.md — do not guess stack-specific commands). Run `node "$SGE_ROOT/scripts/with-dev-server.mjs" --help` for its contract; don't read the source. It starts each `--server` with its log in `--log-dir`, waits until the port answers HTTP (an open port alone is not health), runs one command, then **always kills the server's whole process tree**, so nothing leaks. A one-shot run (rung 2 suite, an evidence capture) is that command:
 
 ```bash
-# Health-check fallback — adapt URL/port to the repo's documented dev server
-for i in $(seq 1 60); do
-  curl -fsS "http://localhost:${PORT}/" >/dev/null 2>&1 && { echo "healthy"; break; }
-  sleep 2
-done
+node "$SGE_ROOT/scripts/with-dev-server.mjs" --server "<repo dev command>" --port "$PORT" \
+  --log-dir "$WT/.qa-logs" -- "<repo e2e command>"
 ```
 
-- Do **not** start exercising criteria until the health check passes.
-- If the server never becomes healthy, mark **every** criterion `blocked`, capture the server log tail as evidence, and still post the report — a broken boot is itself a QA finding.
+For interactive browser work (rung 1), run it as a **background** task holding the server until a sentinel file appears, and wait (`Monitor`, no sleep-polling) for its stderr to say `answered` or `not ready`. Step 7 touches the sentinel:
+
+```bash
+node "$SGE_ROOT/scripts/with-dev-server.mjs" --server "<repo dev command>" --port "$PORT" --log-dir "$WT/.qa-logs" \
+  -- node -e "setInterval(()=>require('fs').existsSync(process.argv[1])&&process.exit(0),500)" "$WT/.qa-done"
+```
+
+Base-vs-head comparison: pass two `--server`/`--port` pairs (e.g. `--server "cd ../base && <dev command>"`). Static output (generated HTML such as sge-dashboard or docs) needs no server: point the capture at `--base-url file:///abs/path/to/site`.
+
+- Do **not** start exercising criteria until the helper reports the server answered.
+- Exit 3 (or `not ready`) means the server never became healthy: mark **every** criterion `blocked`, quote the log tail it printed as evidence, and still post the report — a broken boot is itself a QA finding.
 
 ---
 
@@ -219,14 +221,26 @@ criteria:
     status: pass
   - requirement: "[criterion 2]"
     status: fail
+pages:
+  - path: "[/route exercised]"
+    console_errors:
+      - "[console error message]"
+    page_errors: []
+    network:
+      failed:
+        - "[METHOD URL STATUS-or-failure]"
 recommendation: APPROVED | CHANGES_REQUESTED
 audited_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 \`\`\`
 EOF
-gh pr comment $1 --body-file /tmp/qa-report-$1.md
+# Post as the review identity (the wtp-sge App via rl_gh): /sge:pr-review reads only
+# that author's report and lists any other as qa_evidence_ignored (#3518).
+source "$SGE_ROOT/skills/pr-review/review-lib.sh"
+rl_app_token_cached >/dev/null || echo "qa-audit: no wtp-sge App token; this report posts as the ambient login and pr-review will list it as qa_evidence_ignored, not use it" >&2
+rl_gh pr comment $1 --body-file /tmp/qa-report-$1.md
 ```
 
-Fill the bracketed placeholders with real content before posting — the table rows **and** the `qa-audit-verdict` block's `criteria` list come directly from the Step 5 result objects (`requirement`/`status`), not retyped independently. `head_sha` is `$HEAD_SHA` from Step 2/above — the commit actually exercised in `$WT`, never the PR's current tip if new commits landed mid-audit.
+Fill the bracketed placeholders with real content before posting — the table rows **and** the `qa-audit-verdict` block's `criteria` list come directly from the Step 5 result objects (`requirement`/`status`), not retyped independently. `pages` has one entry per page exercised in a browser: every console error, every uncaught page error, and every failed request or response with status ≥400 (from the browser tools, or a capture's `measurements.network.failed`), one double-quoted string per line, `[]` when none. Every page entry carries all three keys (`console_errors`, `page_errors`, `network.failed`): an omitted or empty-valued one makes the counts `unparsed`. Omit `pages` only when no browser was used; /sge:pr-review counts these items. `head_sha` is `$HEAD_SHA` from Step 2/above — the commit actually exercised in `$WT`, never the PR's current tip if new commits landed mid-audit.
 
 **Format stability:** the leading `<!-- qa-audit-report -->` marker, the section headings above, and the fenced ` ```qa-audit-verdict ` YAML block (mirroring `/sge:pr-review`'s own `sge-verdict` block and its `commit:` field) are how /sge:pr-review Phase 4.3 finds and parses this comment. Keep all three stable; add new sections only after `### Recommendation`, and only after the `qa-audit-verdict` block.
 
@@ -237,7 +251,9 @@ Fill the bracketed placeholders with real content before posting — the table r
 ## Step 7: Clean up
 
 ```bash
-# stop the background dev server, then:
+touch "$WT/.qa-done"   # the with-dev-server helper exits and kills the server tree
+# Wait for that background helper task to finish (Monitor/task notification) BEFORE
+# removing the worktree: removing it first deletes the sentinel unseen and the servers live on.
 git worktree remove "$WT" --force
 ```
 

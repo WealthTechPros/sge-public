@@ -12,7 +12,7 @@
  * then dispatches design-reviewer naming the output directory. The reviewer
  * itself never runs this script (its tool allowlist has no Bash — SPEC-115).
  *
- * Commands
+ * Commands (`--help` prints this whole contract and exits 0)
  * --------
  *   node capture-design-evidence.mjs capture --base-url <url>
  *        [--routes </,/pricing,...> | --plan <plan.json>]
@@ -23,11 +23,30 @@
  *     Exit 0 when every capture succeeded, 1 when any capture failed (the
  *     failures are recorded in the manifest's `errors[]`; partial evidence is
  *     still written), 2 on bad arguments / Playwright not installed.
+ *     --channel msedge|chrome uses an installed system browser instead of
+ *     Playwright's downloaded chromium. --timeout-ms bounds each navigation.
+ *
+ *   node capture-design-evidence.mjs discover --base-url <url>
+ *        [--routes /,/pricing] [--viewports 1440x900] [--out <file.json>]
+ *        [--channel msedge|chrome] [--timeout-ms <ms>]
+ *     Lists every visible button, link and input on each route with its role,
+ *     accessible name and a suggested selector (`unique` = it matches exactly
+ *     one element), so `--plan` actions are built from the rendered page
+ *     instead of written blind. Prints `sge-design-discovery/v1` JSON:
+ *       { schema, baseUrl, routes: [{ route, url, httpStatus, error?,
+ *         elements: [{ kind: button|link|input, role, name, tag, type,
+ *                      selector, unique }] }] }
+ *     to stdout (or --out). Exit 0, 1 if any route failed to load, 2 bad args.
  *
  *   node capture-design-evidence.mjs validate <dir>
  *     Checks <dir>/measurements.json against the v1 format below and that
  *     every referenced screenshot exists inside <dir>. Dependency-free (no
  *     Playwright). Exit 0 valid, 1 invalid (problems on stderr), 2 bad args.
+ *
+ * Static output (sge-dashboard, docs): skip the dev server and pass
+ *   --base-url file:///abs/path/to/site . A route ending in "/" loads its
+ *   index.html; an extensionless route loads <route>.html when it exists,
+ *   else <route>/index.html. httpStatus is null for file:// pages.
  *
  * Plan file (optional; `--routes` is shorthand for one `default` state each):
  *   {
@@ -61,6 +80,8 @@
  *         scrollWidth, clientWidth, scrollHeight, horizontalOverflow,
  *         overflowingElements: [{ el, right }],                // right edge > clientWidth
  *         console: { errors: [], warnings: [] }, pageErrors: [],
+ *         network: { failed: [{ url, method, status, failure }] },  // optional in validate:
+ *                      // requestfailed (status null) + responses with status >= 400
  *         focus: [{ step, el, text, outline, boxShadow, visible }] | null,
  *         smallTouchTargets: [{ el, width, height }],          // interactive < 44px
  *         typography: { body|h1|h2|h3|p|a|button: {fontFamily, fontSize,
@@ -85,6 +106,7 @@ import { isAbsolute, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const SCHEMA = "sge-design-evidence/v1";
+export const DISCOVERY_SCHEMA = "sge-design-discovery/v1";
 export const DEFAULT_VIEWPORTS = [
   { width: 1440, height: 900 },
   { width: 768, height: 1024 },
@@ -193,6 +215,83 @@ export function buildPlan(flags, planObj = null) {
   return { viewports, routes };
 }
 
+/**
+ * Full URL for a route. http(s) bases just concatenate; a file:// base maps
+ * "/x/" -> "/x/index.html" and "/x" -> "/x.html" when it exists, else
+ * "/x/index.html" (a static build has no server to do that routing).
+ */
+export function resolveRouteUrl(baseUrl, path) {
+  const base = String(baseUrl).replace(/\/+$/, "");
+  if (!/^file:/i.test(base)) return base + path;
+  const cut = String(path).search(/[?#]/);
+  const p = cut === -1 ? String(path) : String(path).slice(0, cut);
+  const rest = cut === -1 ? "" : String(path).slice(cut); // keeps ?query AND #fragment
+  // A route must stay inside the static site: no ".." segment and no encoded
+  // slash (raw or percent-encoded), and the resolved file must sit under the base dir.
+  if (p.split("/").some((seg) => /^\.\.$|[\\/]/.test(safeDecode(seg)))) {
+    throw new Error(`route escapes the static site: ${path}`);
+  }
+  const root = resolve(fileURLToPath(base));
+  let target = p;
+  if (target.endsWith("/")) target += "index.html";
+  else if (!/\.[A-Za-z0-9]+$/.test(target.split("/").pop())) {
+    target = existsSync(fileURLToPath(base + target + ".html")) ? target + ".html" : target + "/index.html";
+  }
+  const full = resolve(fileURLToPath(base + target));
+  if (full !== root && !full.startsWith(root + sep)) throw new Error(`route escapes the static site: ${path}`);
+  return base + target + rest;
+}
+
+function safeDecode(s) {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
+const INPUT_ROLES = {
+  button: "button", submit: "button", reset: "button", image: "button",
+  checkbox: "checkbox", radio: "radio", range: "slider", number: "spinbutton",
+  search: "searchbox", email: "textbox", tel: "textbox", text: "textbox", url: "textbox", password: "textbox",
+};
+
+/** ARIA role of a discovered element: explicit role wins, else the implicit one. */
+export function implicitRole({ tag, type, role, href }) {
+  if (role) return role.split(/\s+/)[0];
+  if (tag === "a") return href != null ? "link" : null;
+  if (tag === "button") return "button";
+  if (tag === "select") return "combobox";
+  if (tag === "textarea") return "textbox";
+  if (tag === "input") return INPUT_ROLES[(type || "text").toLowerCase()] ?? "textbox";
+  return null;
+}
+
+/** button | link | input, from the role (a role=button div is a button). */
+export function elementKind(el) {
+  const role = implicitRole(el);
+  if (role === "link") return "link";
+  if (role === "button") return "button";
+  return "input";
+}
+
+const cssString = (v) => JSON.stringify(String(v));
+const CSS_IDENT = /^-?[A-Za-z_][A-Za-z0-9_-]*$/;
+
+/**
+ * Suggested selector, most stable first: data-testid, #id, form-field name,
+ * Playwright role+name, then the bare tag (ambiguous; `unique` reports it).
+ * All forms are accepted by Playwright's page.click/fill, i.e. by --plan.
+ */
+export function suggestSelector(el) {
+  const role = implicitRole(el);
+  if (el.testId) return `[data-testid=${cssString(el.testId)}]`;
+  if (el.id && CSS_IDENT.test(el.id)) return `#${el.id}`;
+  if (el.nameAttr && ["input", "select", "textarea"].includes(el.tag)) return `${el.tag}[name=${cssString(el.nameAttr)}]`;
+  if (role && el.name) return `role=${role}[name=${cssString(el.name)}]`;
+  return el.tag + (el.type ? `[type=${cssString(el.type)}]` : "");
+}
+
 /** True when `rel` is a relative path that stays inside its base dir. */
 function isContainedRelative(rel) {
   if (typeof rel !== "string" || rel === "" || isAbsolute(rel) || /^[A-Za-z]:/.test(rel)) return false;
@@ -247,6 +346,10 @@ export function validateEvidenceDir(dir) {
         for (const k of REQUIRED_MEASUREMENTS) if (!(k in ms)) problems.push(`${where}: measurements.${k} missing`);
         if (ms.console && (!Array.isArray(ms.console.errors) || !Array.isArray(ms.console.warnings))) {
           problems.push(`${where}: measurements.console needs errors[] and warnings[]`);
+        }
+        // optional (older evidence predates it), but well-formed when present
+        if ("network" in ms && !Array.isArray(ms.network?.failed)) {
+          problems.push(`${where}: measurements.network needs failed[]`);
         }
       }
     });
@@ -365,6 +468,41 @@ function describeFocus(step) {
     visible: Boolean(hasOutline || hasShadow),
   };
 }
+/** Raw facts about each visible interactive element; Node derives role/name/selector. */
+function collectInteractive() {
+  const text = (n) => (n ? (n.innerText || n.textContent || "").replace(/\s+/g, " ").trim() : "");
+  const nameOf = (el) => {
+    const by = el.getAttribute("aria-labelledby");
+    if (by) {
+      const labelled = by.split(/\s+/).map((id) => text(document.getElementById(id))).join(" ").trim();
+      if (labelled) return labelled;
+    }
+    const aria = el.getAttribute("aria-label");
+    if (aria) return aria.trim();
+    if (el.labels && el.labels.length) return text(el.labels[0]);
+    if (el.tagName === "INPUT" && ["submit", "button", "reset"].includes(el.type)) return el.value || "";
+    const t = text(el) || (el.querySelector("img[alt]")?.getAttribute("alt") ?? "");
+    return (t || el.getAttribute("title") || el.getAttribute("placeholder") || "").trim();
+  };
+  const sel = "a[href], button, input:not([type=hidden]), select, textarea, [role=button], [role=link], [role=checkbox], [role=tab], [role=menuitem]";
+  return Array.from(document.querySelectorAll(sel))
+    .filter((el) => {
+      const r = el.getBoundingClientRect();
+      const cs = getComputedStyle(el);
+      return r.width > 0 && r.height > 0 && cs.visibility !== "hidden" && cs.display !== "none";
+    })
+    .slice(0, 200)
+    .map((el) => ({
+      tag: el.tagName.toLowerCase(),
+      type: el.getAttribute("type"),
+      role: el.getAttribute("role"),
+      href: el.getAttribute("href"),
+      id: el.id || null,
+      testId: el.getAttribute("data-testid"),
+      nameAttr: el.getAttribute("name"),
+      name: nameOf(el).slice(0, 80),
+    }));
+}
 /* c8 ignore stop */
 
 // ─── Playwright-driven capture ───────────────────────────────────────────────
@@ -459,8 +597,17 @@ async function cmdCapture(flags) {
             else if (msg.type() === "warning") warnings.push(msg.text());
           });
           page.on("pageerror", (err) => pageErrors.push(String(err?.message || err)));
+          const networkFailed = [];
+          page.on("requestfailed", (req) =>
+            networkFailed.push({ url: req.url(), method: req.method(), status: null, failure: req.failure()?.errorText ?? "failed" })
+          );
+          page.on("response", (res) => {
+            if (res.status() >= 400) {
+              networkFailed.push({ url: res.url(), method: res.request().method(), status: res.status(), failure: null });
+            }
+          });
           try {
-            const resp = await page.goto(baseUrl + route.path, { waitUntil: "load", timeout: navTimeout });
+            const resp = await page.goto(resolveRouteUrl(baseUrl, route.path), { waitUntil: "load", timeout: navTimeout });
             // networkidle never settles on dev servers with HMR/long-poll sockets;
             // best-effort wait, then continue.
             await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
@@ -473,7 +620,7 @@ async function cmdCapture(flags) {
               state: state.name,
               viewport: vp,
               url: page.url(),
-              httpStatus: resp ? resp.status() : null,
+              httpStatus: resp && !/^file:/i.test(baseUrl) ? resp.status() : null,
               screenshot: rel,
             };
             if (flags["full-page"]) {
@@ -499,7 +646,7 @@ async function cmdCapture(flags) {
               let runningReduced = null;
               try {
                 const rmPage = await rmContext.newPage();
-                await rmPage.goto(baseUrl + route.path, { waitUntil: "load" });
+                await rmPage.goto(resolveRouteUrl(baseUrl, route.path), { waitUntil: "load" });
                 await runActions(rmPage, state.actions);
                 runningReduced = await rmPage.evaluate(COUNT_RUNNING_ANIMATIONS);
               } finally {
@@ -509,6 +656,7 @@ async function cmdCapture(flags) {
             }
             measurements.console = { errors, warnings };
             measurements.pageErrors = pageErrors;
+            measurements.network = { failed: [...networkFailed] }; // snapshot: close() can still fire requestfailed
             capture.measurements = measurements;
             manifest.captures.push(capture);
           } catch (err) {
@@ -535,6 +683,54 @@ async function cmdCapture(flags) {
   process.exit(0); // never wait on a lingering browser process
 }
 
+async function cmdDiscover(flags) {
+  if (typeof flags["base-url"] !== "string") return usage("--base-url is required");
+  const plan = buildPlan(flags);
+  const baseUrl = flags["base-url"].replace(/\/+$/, "");
+  const navTimeout = flags["timeout-ms"] ? parseInt(flags["timeout-ms"], 10) : 30000;
+  const pw = await loadPlaywright();
+  if (!pw?.chromium) {
+    process.stderr.write("capture-design-evidence: Playwright not found (see --help).\n");
+    process.exit(2);
+  }
+  const out = { schema: DISCOVERY_SCHEMA, baseUrl, viewport: plan.viewports[0], routes: [] };
+  const browser = await pw.chromium.launch(typeof flags.channel === "string" ? { channel: flags.channel } : {});
+  try {
+    const context = await browser.newContext({ viewport: plan.viewports[0] });
+    const page = await context.newPage();
+    for (const route of plan.routes) {
+      const entry = { route: route.path, url: resolveRouteUrl(baseUrl, route.path), httpStatus: null, elements: [] };
+      try {
+        const resp = await page.goto(entry.url, { waitUntil: "load", timeout: navTimeout });
+        await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
+        if (resp && !/^file:/i.test(baseUrl)) entry.httpStatus = resp.status();
+        for (const raw of await page.evaluate(collectInteractive)) {
+          const selector = suggestSelector(raw);
+          const count = await page.locator(selector).count().catch(() => 0);
+          entry.elements.push({
+            kind: elementKind(raw),
+            role: implicitRole(raw),
+            name: raw.name,
+            tag: raw.tag,
+            type: raw.type,
+            selector,
+            unique: count === 1,
+          });
+        }
+      } catch (err) {
+        entry.error = String(err?.message || err);
+      }
+      out.routes.push(entry);
+    }
+  } finally {
+    await Promise.race([browser.close().catch(() => {}), new Promise((r) => setTimeout(r, 10_000).unref())]);
+  }
+  const json = JSON.stringify(out, null, 2) + "\n";
+  if (typeof flags.out === "string") writeFileSync(flags.out, json, "utf8");
+  else process.stdout.write(json);
+  process.exit(out.routes.some((r) => r.error) ? 1 : 0);
+}
+
 function cmdValidate(positional) {
   const dir = positional[0];
   if (!dir) return usage("validate needs a directory");
@@ -547,11 +743,23 @@ function cmdValidate(positional) {
   process.exit(1);
 }
 
+/** The header comment of this file: the full CLI contract, printed by --help. */
+export function helpText() {
+  return readFileSync(fileURLToPath(import.meta.url), "utf8")
+    .match(/\/\*\*([\s\S]*?)\*\//)[1]
+    .split("\n")
+    .map((l) => l.replace(/^ \* ?/, "").replace(/^ \*$/, ""))
+    .join("\n")
+    .trim();
+}
+
 function usage(msg) {
   process.stderr.write(
     `capture-design-evidence: ${msg}\n` +
-      "Usage: capture-design-evidence.mjs capture --base-url <url> [--routes /,/x | --plan plan.json] [--viewports 1440x900,375x812] [--out dir] [--commit sha] [--tab-presses n] [--full-page]\n" +
-      "       capture-design-evidence.mjs validate <dir>\n"
+      "Usage: capture-design-evidence.mjs capture --base-url <url> [--routes /,/x | --plan plan.json] [--viewports 1440x900,375x812] [--out dir] [--commit sha] [--tab-presses n] [--full-page] [--channel msedge|chrome] [--timeout-ms ms]\n" +
+      "       capture-design-evidence.mjs discover --base-url <url> [--routes /,/x] [--viewports WxH] [--out file.json] [--channel msedge|chrome] [--timeout-ms ms]\n" +
+      "       capture-design-evidence.mjs validate <dir>\n" +
+      "Run with --help for the full contract (output format, plan file, file:// static sites).\n"
   );
   process.exit(2);
 }
@@ -559,9 +767,15 @@ function usage(msg) {
 // ─── Entry point (only when run directly, so tests can import the helpers) ──
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const { command, positional, flags } = parseArgs(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  const { command, positional, flags } = parseArgs(argv);
+  if (argv.includes("--help") || argv.includes("-h") || command === "help") {
+    process.stdout.write(helpText() + "\n");
+    process.exit(0);
+  }
   try {
     if (command === "capture") await cmdCapture(flags);
+    else if (command === "discover") await cmdDiscover(flags);
     else if (command === "validate") cmdValidate(positional);
     else usage(`unknown command: ${command ?? "(none)"}`);
   } catch (err) {

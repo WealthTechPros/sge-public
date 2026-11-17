@@ -168,10 +168,18 @@ installed; `--channel msedge|chrome` uses a system browser), validate it, then
 dispatch design-reviewer naming the printed directory:
 
 ```bash
-EVIDENCE="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/capture-design-evidence.mjs" capture \
-  --base-url http://localhost:3000 --routes /,/design-system --commit "$(git rev-parse HEAD)")"
-node "${CLAUDE_PLUGIN_ROOT}/scripts/capture-design-evidence.mjs" validate "$EVIDENCE"
+CDE="${CLAUDE_PLUGIN_ROOT}/scripts/capture-design-evidence.mjs"
+EVIDENCE="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/with-dev-server.mjs" --server "<repo dev command>" --port 3000 \
+  -- node "$CDE" capture --base-url http://localhost:3000 --routes /,/design-system --commit "$(git rev-parse HEAD)")"
+node "$CDE" validate "$EVIDENCE"
 ```
+
+`with-dev-server.mjs` waits for an HTTP answer, runs the capture, then kills
+the server's whole process tree (exit 3 = the app never started). Run
+`node "$CDE" --help` for the full contract (`--channel`, `--timeout-ms`,
+`--plan`); don't read the source. `discover` lists each route's buttons,
+links and inputs with a suggested selector, so `--plan` actions come from
+the rendered page. Static output needs no server: `--base-url file:///...`.
 
 The reviewer then scores from the screenshots plus `measurements.json`
 (overflow, touch targets, focus walk, typography/palette, console, reduced

@@ -113,7 +113,9 @@ gives you base evidence:
   the same refusal checks (schema, non-empty, commit matches the named base
   sha).
 - **Live mode** — the dispatcher names a base dev URL serving the
-  merge-base build. Repeat Workflow step 3 against it on the same routes.
+  merge-base build, started beside head by `scripts/with-dev-server.mjs`
+  (two `--server`/`--port` pairs; it kills both server trees afterwards).
+  Repeat Workflow step 3 against it on the same routes.
 - **No base evidence named, or it fails a refusal check** — do not guess a
   base score. Write `Base: not captured — <reason>`; the gate then applies
   the absolute rule (a FAIL blocks).
