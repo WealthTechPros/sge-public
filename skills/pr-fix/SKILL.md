@@ -177,7 +177,7 @@ This is the [bounded refinement loop](../loops/SKILL.md#c-bounded-refinement-loo
    - **Out-of-date branch** → `gh pr update-branch` first; a recently merged PR may fix it for free.
    - **Lockfile / dependency sync** → regenerate the lockfile with the repo's package manager, commit it. This is the most common cross-job failure because install runs before everything.
    - **Config-missing** (a linter/formatter with no config dropping into an interactive prompt) → add the config the tool's own recommended setup would generate.
-   - **Real code/test failure** → reproduce locally, fix the root cause.
+   - **Real code/test failure** → reproduce locally, fix the root cause by the [systematic-debugging](../lib/systematic-debugging.md) steps; three failed fixes on one problem → stop and escalate.
 4. **Reproduce locally** with the repo's own commands — and only the failing area. You don't need to re-run the whole suite to fix one failing test; run the specific check/type-check/test that CI flagged to get the exact error fast.
 5. **Apply the smallest fix** that addresses the root cause — no shotgun edits.
 6. **Pre-push quality gate** (see below) — run the repo's lint-fix + type-check locally *before* pushing.

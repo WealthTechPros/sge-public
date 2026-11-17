@@ -20,22 +20,8 @@ Implement a GitHub issue end-to-end — entry-criteria preflight through TDD, in
 - Classifying the issue against capabilities/specs/non-goals — that logic lives in `/sge:governance-trace` (dispatched from Phase 0.5); this skill only branches on its verdict
 
 ## Tool sequencing
-| Situation | Tool |
-|---|---|
-| Check Cortex cache for named entity before reading | `search_nodes` (sge-memory, if available) |
-| Populate Cortex after a cache miss | `create_entities` (sge-memory, if available) |
-| Read issue body, spec files, CLAUDE.md | Read / Grep / Glob |
-| Pick the context depth tier for the change (Phase 2.5, Step A) | Bash via `node "$SGE_ROOT/scripts/resolve-context-depth.mjs"` |
-| Resolve which specs/ADRs govern the touched paths (Phase 2.5, `standard` tier) | Bash via `node "$SGE_ROOT/scripts/resolve-context-scope.mjs"` |
-| Register a dispatched governance-trace fork handle (Phase 0.5) | Bash via `node "$SGE_ROOT/skills/lib/fork-util.mjs" register` |
-| Join a pending fork at the Edit/Write gate (Phase 3, before Step 2) | Bash via `node "$SGE_ROOT/skills/lib/fork-util.mjs" join` |
-| Run shell commands, quality suite, git | Bash |
-| GitHub API (issues, PRs, labels) | Bash via `gh` |
-| Edit existing files | Edit |
-| Create new files | Write |
-| Spawn forked review, preflight, or the governance-trace gate | Agent (fork) |
 
-Pipeline overview: [invocation notes](references/invocation-notes.md#pipeline-overview).
+Which tool for which step (Cortex, depth/scope resolvers, fork register/join, Bash, `gh`, Edit/Write, Agent): [table](references/invocation-notes.md#tool-sequencing). Pipeline overview: [invocation notes](references/invocation-notes.md#pipeline-overview).
 
 ## Usage
 
@@ -132,6 +118,7 @@ Five mandatory Gherkin rules: [`bdd-quality-rules.md`](references/bdd-quality-ru
 
 **Spec lane:** use `complexityScore` from the preflight report — do **not** recompute it.
 **No-spec lane:** score your 0B plan with the same rubric — (models×3) + (methods×1) + (routes×2) + (scenarios×1); **≤ 15** Small, **16–30** Medium (commit per vertical slice), **> 30** Large → **split into child issues before implementing.** [Rubric](references/child-splitting.md#complexity-rubric-moved-from-skillmd).
+**Medium, either lane:** write the plan from the [template](references/medium-plan-template.md).
 
 ### Splitting into child issues (score > 30)
 
@@ -141,7 +128,7 @@ Split via `/sge:decompose-issue` ([taxonomy](references/child-splitting.md)).
 
 **Tier resolution (T0/T1/T2 — proportional governance).** Resolve via `resolve-governance-tier.mjs` (paths/score/lane), export `SGE_GOVERNANCE_TIER`, log it — never silent. Phase 0.5/5, commit, pr-review read it. Mechanics: [`governance-tier.md`](references/governance-tier.md).
 
-**Model tiers and Opus advisor (#3511).** Research on haiku, build on sonnet (medium effort), plan and verify here at high effort. On T1/T2, a read-only opus advisor reviews the plan before Phase 3 edits (A1); the same failure twice triggers one before a third fix (A2). The advisor never writes code. [Registry](../../docs/agent-registry.md#per-phase-tiers-and-opus-advisor-escalation-sge3511).
+**Model tiers and Opus advisor (#3511).** Research on haiku, build on sonnet (medium effort), plan and verify here at high effort. On T1/T2, a read-only opus advisor reviews the plan before Phase 3 edits (A1); the same failure twice triggers one before a third fix (A2). The advisor never writes code. A third failed fix stops: [debugging](../lib/systematic-debugging.md). [Registry](../../docs/agent-registry.md#per-phase-tiers-and-opus-advisor-escalation-sge3511).
 
 ---
 
@@ -196,7 +183,7 @@ Repeat per acceptance criterion.
 
 ## Phase 4: Verify
 
-**All must pass before review.** Run the repo's quality suite (commands per repo CLAUDE.md): type-checking / static analysis (zero errors), linting (zero warnings), tests (all pass). Fix any failures before proceeding.
+**All must pass before review.** Run the repo's quality suite (commands per repo CLAUDE.md): type-checking / static analysis (zero errors), linting (zero warnings), tests (all pass). Fix any failures before proceeding. **Bug fix:** run the [revert-the-fix check](../lib/systematic-debugging.md#revert-the-fix-check). Keep each gate's command, exit code and output tail for Phase 5.
 
 **Run in the foreground — never a backgrounded full suite** (#2433). Full suite stays the default; a scoped run is only a fallback when it would exceed a stated time budget, per the fail-closed `test-scope:` convention. [`phase4-verify-scope.md`](references/phase4-verify-scope.md).
 
@@ -206,7 +193,7 @@ Repeat per acceptance criterion.
 
 **`T0`/`T1`:** skip this phase entirely. Otherwise fork a fresh-context **`/sge:sge-review`** with a starting map; `verdict: "fail"` blocks the PR; on `pass` keep `sha`/`verdict`/`blockers` for the PR body. [Detail](references/pre-pr-review.md#phase-5-dispatch-rule-moved-from-skillmd).
 
-**Lean flow — one reviewer (#2914):** PR Warden is the reviewer. The builder adds no other review layer before it: no skeptic subagent and no advisory pr-review run. **The one exception:** when the diff is security- or control-bearing (auth, secrets, permission or policy gates, a hook/script/CI check that enforces a control), run **one** adversarial pass with a reverted-fix test, and fix its blockers/majors first. Update the branch by merging main, never rebase + force-push: [`pre-pr-review.md`](references/pre-pr-review.md#pre-pr-adversarial-pass-sge2914), [`merge-not-rebase.md`](../lib/merge-not-rebase.md).
+**Lean flow — one reviewer (#2914):** PR Warden; no skeptic subagent, no advisory pr-review run. **Exception:** a security- or control-bearing diff (auth, secrets, policy gates, a control-enforcing hook/script/CI check) gets **one** adversarial pass with a reverted-fix test; fix its blockers/majors first. Merge main, never rebase + force-push: [`pre-pr-review.md`](references/pre-pr-review.md#pre-pr-adversarial-pass-sge2914), [`merge-not-rebase.md`](../lib/merge-not-rebase.md).
 
 ---
 
@@ -263,7 +250,7 @@ ${SGE_AUTHOR_WRAPPER:+"$SGE_AUTHOR_WRAPPER"} gh pr ready <PR_NUMBER>
 
 ### 7.2 Review → Fix loop (repeat until clean — bound to 3 rounds)
 
-A [bounded refinement loop](../loops/SKILL.md#c-bounded-refinement-loop) of **3 rounds**: invoke `/sge:pr-review`; triage by the **gate state** (`pr-reviewed` applied + no Blockers/Majors = clean), never by the `gh pr review` verb — a self-authored PR always gets `--comment`. **Fix every Blocker and Major** with the smallest root-cause fix, TDD-first, re-run Phase 4, push via plain `/sge:commit`, reply with the SHA, re-run `/sge:pr-review`. **Never** suppress a check, weaken an assertion, or delete a failing test to make a finding "pass"; red CI → `/sge:pr-fix`. Blockers left after 3 rounds → **stop**, gate stays closed, summarise, AskUserQuestion. **Never** apply `pr-reviewed` to silence a Blocker. Full procedure: [`review-fix-loop.md`](references/review-fix-loop.md).
+A [bounded refinement loop](../loops/SKILL.md#c-bounded-refinement-loop) of **3 rounds**: invoke `/sge:pr-review`; triage by the **gate state** (`pr-reviewed` applied + no Blockers/Majors = clean), never by the `gh pr review` verb — a self-authored PR always gets `--comment`. **Verify each finding** against the head; decline a wrong one with a recorded reason, fix every valid Blocker and Major with the smallest root-cause fix, TDD-first, re-run Phase 4, push via plain `/sge:commit`, reply with the SHA, re-run `/sge:pr-review`. **Never** suppress a check, weaken an assertion, or delete a failing test to make a finding "pass"; red CI → `/sge:pr-fix`. Blockers left after 3 rounds → **stop**, gate stays closed, summarise, AskUserQuestion. **Never** apply `pr-reviewed` to silence a Blocker. Full procedure: [`review-fix-loop.md`](references/review-fix-loop.md).
 
 ### 7.3 Confirm the end state
 

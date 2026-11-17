@@ -118,7 +118,7 @@ Assemble the plan from the merged subagent inventories. For each finding:
 | Long parameter list | Introduce parameter object |
 | Duplicate code | Extract method / pull up |
 | Feature envy | Move method |
-| Switch statements | Replace with polymorphism |
+| Switch statements | Replace with polymorphism, only where a second implementation or variation already exists |
 | Primitive obsession | Replace with value object |
 
 ### Plan artifact (machine-checkable)
@@ -199,11 +199,13 @@ For refactors spanning **10+ files**, prefer ultracode / Workflow orchestration:
 
 ## SOLID Checklist
 
+Apply O, I and D only where a second implementation or variation already exists. One concrete implementation stays concrete: an interface with one implementation is the unrequested abstraction the least-code ruleset (SPEC-124) rules out.
+
 - [ ] **S** — Single Responsibility: each class/function has one reason to change
-- [ ] **O** — Open/Closed: open for extension, closed for modification
+- [ ] **O** — Open/Closed: open for extension where a variation already exists, closed for modification
 - [ ] **L** — Liskov Substitution: subtypes are substitutable
 - [ ] **I** — Interface Segregation: no forced dependency on unused interfaces
-- [ ] **D** — Dependency Inversion: depend on abstractions, not concretions
+- [ ] **D** — Dependency Inversion: depend on abstractions, not concretions, once a second implementation exists
 
 ---
 

@@ -106,7 +106,11 @@ auditable.
 | A4 | Before-done advisor | The change is **security-sensitive** (any file matches `rl_security_glob_regex` in `skills/pr-review/review-lib.sh`, or a CRITICAL path above) or sized **Large** (score > 30). | `/sge:sge-review` (before the Step 9 verdict) | Read-only opus advisor reviews the diff against the spec and ACs; its findings feed the verdict. |
 
 Each trigger fires **once per occurrence**: A2 fires again only for a
-different failure, never in a loop on the same one. A session already running
+different failure, never in a loop on the same one. A2 comes before the
+three-failed-fixes stop in [`systematic-debugging.md`](../skills/lib/systematic-debugging.md#three-failed-fixes-stop-and-question-the-design)
+(#3517): if the third attempt also fails, the session stops fixing and
+escalates to a human (or, if A2 never fired, to one design-level advisor
+first). A session already running
 at opus applies the advisor check itself instead of spawning. If the opus class is not
 available in the harness, record the trigger as not run. Never substitute a
 lower tier for the advisor.

@@ -175,6 +175,12 @@ profiles differ:
 | `sge-implement` Phase 7 | **3 rounds** of review→fix | gate stays closed; AskUserQuestion |
 | `pr-monitor` | **5 idle cycles** (`IDLE_LIMIT`) | per-lane blocker summary, then stop |
 
+Inside any of these loops, a fix attempt follows
+[systematic debugging](../lib/systematic-debugging.md): root cause first, one
+hypothesis at a time, and a per-problem stop after three failed fixes that
+escalates past the #3511 A2 advisor. That cap sits under each caller's bound;
+whichever is hit first stops the loop.
+
 Never weaken or delete the check that defines the target in order to exit the
 loop — that converts a real blocker into a silent one.
 

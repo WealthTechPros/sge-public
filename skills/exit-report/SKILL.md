@@ -61,7 +61,7 @@ the fenced block is the default.
 | `outcomes[]` | array | ✅ | one entry per work item — see below; empty array = nothing actionable (pair with `stopReason: "queue-empty"`) |
 | `stopReason` | enum | ✅ | why the run ended: `goal-met` \| `queue-empty` \| `bound-hit` \| `no-progress` \| `thrashing` \| `budget-exhausted` \| `blocked` \| `error` \| `user-stop` |
 | `followUps[]` | array | — | follow-up issues actually **filed** (`{ref, summary}`), not merely suggested |
-| `questionsPerRun` | integer | — | Spec-quality metric (#1235, SPEC-093): count of tier-b decision-journal entries for the run — ambiguities resolved via most-reversible-option fallback rather than a spec rule. Target trend → 0. Emitted by `team-pipeline` on unattended runs; 0 on attended runs. |
+| `questionsPerRun` | integer | — | Spec-quality metric (#1235, SPEC-093): count of tier-b decision-journal entries for the run — ambiguities resolved via most-reversible-option fallback rather than a spec rule. Entries with `kind: "approach"` (unattended no-spec approach choices, #3522) are excluded. Target trend → 0. Emitted by `team-pipeline` on unattended runs; 0 on attended runs. |
 
 Each **outcome** requires `item` (a stable `<kind>:<id>` key — `pr:812`,
 `issue:806`, `lane:2`, `repo:owner/name`) and `status`

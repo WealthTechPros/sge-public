@@ -8,7 +8,9 @@ Reached only via `NO_SPEC_WARRANTED`, `NOT_ONBOARDED`, or an accepted `NOT_SGE_S
 
 Parse the issue body for **What** (feature/bug/task), **Why** (business context), **Acceptance Criteria** (specific requirements), and **Scope** (layers affected). **If the issue has no acceptance criteria**, derive them from What/Why/Scope and show them for approval before any code.
 
-Then plan briefly: identify affected layers (data model, service/logic, API/interface, async processing, frontend/UI, infrastructure — per repo CLAUDE.md) and write a phased plan with checkboxes.
+**Weigh 2-3 approaches before building (#3522).** Set out 2-3 approaches, each with its trade-offs (size of change, risk, reversibility, fit with existing code), and name the chosen one and why. A Small change can do this in a line per approach. Unattended, record the choice in the decision journal as "what, why, cost if wrong" ([unattended contract](unattended-contract.md)).
+
+Then plan: identify affected layers (data model, service/logic, API/interface, async processing, frontend/UI, infrastructure — per repo CLAUDE.md) and write a phased plan with checkboxes. Once Phase 2 sizes it **Medium** (16-30), write the plan from the [Medium-tier plan template](medium-plan-template.md) instead; Small keeps the brief checklist.
 
 **Branch taxonomy** (Phase 3, instead of `feat/sge-<NNN>-…`): `feature/issue-<N>-…`, `fix/issue-<N>-…`, `chore/issue-<N>-…`.
 
@@ -20,4 +22,4 @@ The no-spec lane **skips Phase 1** (no spec to gate) and joins at Phase 2.
 
 Moved verbatim from `SKILL.md` (issue #2917, 24 KB size budget).
 
-Reached only via `NO_SPEC_WARRANTED`, `NOT_ONBOARDED`, or an accepted `NOT_SGE_SCOPE` override — never as a default. Derive missing acceptance criteria from What/Why/Scope and get approval before code; plan the affected layers; branch `feature|fix|chore/issue-<N>-…`; commit with an `SGE-Override:` trailer (`/sge:commit` derives it); skip Phase 1 and join at Phase 2. Full detail: [`no-spec-lane.md`](no-spec-lane.md).
+Reached only via `NO_SPEC_WARRANTED`, `NOT_ONBOARDED`, or an accepted `NOT_SGE_SCOPE` override — never as a default. Derive missing acceptance criteria from What/Why/Scope and get approval before code; weigh 2-3 approaches and name the chosen one; plan the affected layers (Medium: [template](medium-plan-template.md)); branch `feature|fix|chore/issue-<N>-…`; commit with an `SGE-Override:` trailer (`/sge:commit` derives it); skip Phase 1 and join at Phase 2. Full detail: [`no-spec-lane.md`](no-spec-lane.md).
