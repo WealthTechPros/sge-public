@@ -84,7 +84,10 @@
 #                                   is present, or #n is a tracking/umbrella
 #                                   issue (#2241). Fails toward NOT appending.
 #   rl_qa_evidence <pr>             sets QA_COMMENT / QA_HEAD_SHA from the
-#                                   latest qa-audit-report comment (#732)
+#                                   latest qa-audit-report comment (#732),
+#                                   plus QA_CONSOLE_ERRORS / QA_PAGE_ERRORS /
+#                                   QA_NETWORK_FAILED counts, review identity
+#                                   authors only (#3518)
 #   rl_changes_requested <pr>       count of CHANGES_REQUESTED reviews across
 #                                   the whole PR (must be 0 to arm auto-merge)
 #   rl_failing_checks <pr>          count of checks in a terminal FAILURE state
@@ -1547,18 +1550,164 @@ rl_ensure_closing_link() {
 # QA evidence (#732): sets QA_COMMENT (latest qa-audit-report comment body,
 # "" when none) and QA_HEAD_SHA (the head the QA run actually exercised —
 # empty when the block/field is missing, i.e. stale@unknown). UNTRUSTED DATA.
+# Only a comment authored by the review identity counts (#3518, the same
+# GL_TRUST_FILTER the sge-verdict readers apply, sge#2808: the wtp-sge App, or
+# the REVIEW_DAEMON_TRUSTED_VERDICT_AUTHORS allow-list). A qa-audit-report
+# comment from any other author is ignored, so QA_COMMENT is "" (qa_evidence:
+# none) instead of a spoofed clean report, and is reported, never dropped
+# silently: QA_IGNORED_COUNT / QA_IGNORED_AUTHORS / QA_IGNORED_LINE.
 rl_qa_evidence() {
-  local pr="$1" repo
+  local pr="$1" repo gl filter all
   repo=$(rl__repo) || return 1
+  gl="$(dirname "${BASH_SOURCE[0]}")/gate-labels.sh"
+  # shellcheck disable=SC2016  # $1 expands in the child bash, not here
+  filter=$(bash -c '. "$1" >/dev/null 2>&1; printf "%s" "${GL_TRUST_FILTER:-}"' _ "$gl")
+  [ -n "$filter" ] || { echo "rl_qa_evidence: cannot load GL_TRUST_FILTER from $gl" >&2; return 1; }
   if [ "$(sge_pr_host)" = azdo ]; then
-    QA_COMMENT=$(sge_pr_comments_json "$pr" | jq -r \
-      '[.[].body // "" | select(contains("qa-audit-report"))] | last') || return 1   # Azure Repos (#3028)
+    all=$(sge_pr_comments_json "$pr") || return 1   # Azure Repos (#3028)
   else
-  QA_COMMENT=$(gh api "repos/$repo/issues/$pr/comments" --jq \
-    '[.[].body // "" | select(contains("qa-audit-report"))] | last') || return 1
+    all=$(gh api --paginate "repos/$repo/issues/$pr/comments?per_page=100") || return 1
   fi
-  QA_HEAD_SHA=$(printf '%s' "$QA_COMMENT" | grep -A20 'qa-audit-verdict' \
-    | grep -o 'head_sha: *[0-9a-f]*' | grep -o '[0-9a-f]\{7,40\}' | head -1) || true
+  QA_COMMENT=$(printf '%s' "$all" | jq -rs \
+    "[.[] | if type == \"array\" then .[] else . end | select($filter) | .body // \"\"
+      | select(contains(\"qa-audit-report\"))] | last // \"\"") || return 1
+  # Never drop evidence silently (#3518): count the qa-audit-report
+  # comments ignored for an untrusted author and name the authors (logins
+  # reduced to [A-Za-z0-9_.[]-]). The reviewer surfaces QA_IGNORED_LINE in
+  # the verdict (phase4-evidence-gates.md 4.3c); it is also printed to stderr.
+  local ign
+  ign=$(printf '%s' "$all" | jq -rs \
+    "[.[] | if type == \"array\" then .[] else . end
+      | select((.body // \"\") | contains(\"qa-audit-report\")) | select(($filter) | not)
+      | (.user.login // \"unknown\") | gsub(\"[^A-Za-z0-9_.\\\\[\\\\]-]\"; \"\")]
+      | \"\\(length) \\(unique | join(\",\"))\"") || ign="unknown"
+  QA_IGNORED_COUNT="${ign%% *}"
+  QA_IGNORED_AUTHORS="${ign#* }"
+  [ "$QA_IGNORED_AUTHORS" = "$ign" ] && QA_IGNORED_AUTHORS=""
+  QA_IGNORED_LINE=""
+  if [ "$QA_IGNORED_COUNT" != "0" ]; then
+    QA_IGNORED_LINE="qa_evidence_ignored: ${QA_IGNORED_COUNT} report(s) from untrusted author(s): ${QA_IGNORED_AUTHORS:-unknown}"
+    echo "rl_qa_evidence: $QA_IGNORED_LINE" >&2
+  fi
+  rl_qa_page_signals
+}
+
+# Parses the qa-audit-verdict block of QA_COMMENT (#3518). Uses the LAST
+# fenced block (``` or ~~~, any length, optionally indented). The block ends
+# only at a bare fence of the opener's character, at least as long, indented
+# no more than the opener + 3, so an indented example fence inside it is
+# content. Sets:
+#   QA_HEAD_SHA        head_sha of that same block ("" when absent)
+#   QA_CONSOLE_ERRORS / QA_PAGE_ERRORS / QA_NETWORK_FAILED
+#     integers: list items under pages[].console_errors / page_errors /
+#       network.failed (any quoting; a non-empty inline flow list counts >= 1)
+#     ""        the block has no `pages:` key (a pre-#3518 report, or a run
+#               that used no browser): not observed, never zero
+#     unknown   more than one qa-audit-verdict fence (pasted output could plant
+#               a clean block), or the parser failed
+#     unparsed  `pages:` holds content the parser does not recognise
+# Non-integer non-empty values are findings (phase4-evidence-gates.md 4.3c).
+# Only counts leave the function; the untrusted message text never does.
+rl_qa_page_signals() {
+  local out rc
+  out=$(printf '%s\n' "${QA_COMMENT:-}" | awk '
+    function indent(s) { match(s, /^[[:space:]]*/); return RLENGTH }
+    function reset() { sha = ""; pages = 0; inpages = 0; pnull = 0; netwait = 0; inpage = 0; mode = ""; bad = 0; n["c"] = 0; n["p"] = 0; n["f"] = 0 }
+    # A signal key with no value and no "- " items is YAML null, not an empty
+    # list: never report it as zero (CodeRabbit, #3541). Same for a bare
+    # "pages:" with no entries and a bare "network:" with no "failed:" under it.
+    function nullcheck() { if ((mode != "" && !items) || netwait) bad = 1; mode = ""; netwait = 0 }
+    # Every page must carry all three signals; an omitted one is not zero.
+    function pagecheck() { if (inpage && !(seen["c"] && seen["p"] && seen["f"])) bad = 1; inpage = 0 }
+    function endpages() { nullcheck(); pagecheck(); inpages = 0 }
+    function val(s) { sub(/^[^:]*:[[:space:]]*/, "", s); sub(/[[:space:]]+#.*$/, "", s); sub(/[[:space:]]+$/, "", s); return s }
+    function inline(m, v) {   # an inline value for a list key: "" opens a block list
+      if (v == "") { mode = m; items = 0; return }
+      mode = ""
+      if (v ~ /^\[[[:space:]]*\]$/) return
+      if (v ~ /^\[/) { n[m]++; return }
+      bad = 1
+    }
+    { sub(/\r$/, "") }
+    function opens(s, t) {   # remember the opener fence: char, length, indent
+      oind = indent(s); t = s; sub(/^[[:space:]]*/, "", t); fc = substr(t, 1, 1)
+      if (fc == "`") match(t, /^`+/); else match(t, /^~+/)
+      fl = RLENGTH
+    }
+    function closes(s, t) {  # only a bare fence of the opener char, >= its length, indented <= opener + 3
+      if (indent(s) > oind + 3) return 0
+      t = s; sub(/^[[:space:]]+/, "", t); sub(/[[:space:]]+$/, "", t)
+      if (substr(t, 1, 1) != fc || length(t) < fl) return 0
+      return (fc == "`") ? (t ~ /^`+$/) : (t ~ /^~+$/)
+    }
+    # Every verdict opener counts toward blocks, even one seen while a block is
+    # still open, so a planted second fence still fails closed as "unknown".
+    /^[[:space:]]*(```|~~~)[`~]*[[:space:]]*qa-audit-verdict[[:space:]]*$/ { inb = 1; blocks++; reset(); opens($0); next }
+    # An indented example fence inside the verdict (e.g. ```js in a literal
+    # requirement) is verdict content, not its end (CodeRabbit, #3541).
+    inb && closes($0) { inb = 0; next }
+    !inb { next }
+    /^[[:space:]]*(#.*)?$/ { next }
+    /^head_sha:/ { v = val($0); if (match(v, /^[0-9a-f]+/) && RLENGTH >= 7 && RLENGTH <= 40) sha = substr(v, 1, RLENGTH); next }
+    /^pages:/ { pages = 1; inpages = 1; mode = ""; v = val($0); pnull = (v == ""); if (v != "" && v !~ /^\[[[:space:]]*\]$/) bad = 1; next }
+    # A column-zero line usually means pages: has ended (a new top-level key
+    # started). But valid YAML can align a sequence item ("- path: ...") with
+    # its own "pages:" key at column zero too; while pages is open, a
+    # column-zero "- " item is still one of its entries, not the end of it.
+    /^[^[:space:]]/ && !(inpages && /^-([[:space:]]|$)/) { if (inpages) endpages(); next }
+    !inpages { next }
+    {
+      ind = indent($0)
+      pnull = 0
+      if (mode != "") {
+        if (ind >= keyind && $0 ~ /^[[:space:]]*-([[:space:]]|$)/) { n[mode]++; items++; next }
+        if (ind > keyind) { if (!items) bad = 1; next }   # continuation of an item; before any item it is not a list
+        nullcheck()
+      }
+      if ($0 ~ /^[[:space:]]*-([[:space:]]|$)/) {   # a new page entry
+        pagecheck(); inpage = 1; seen["c"] = 0; seen["p"] = 0; seen["f"] = 0
+      }
+      line = $0; sub(/^[[:space:]]*-[[:space:]]+/, "", line); sub(/^[[:space:]]+/, "", line)
+      key = line; sub(/:.*$/, "", key); v = val(line)
+      netok = 0
+      if (netwait) { netwait = 0; if (ind > netind && key == "failed") netok = 1; else bad = 1 }
+      if (!inpage) bad = 1   # pages: holds a mapping, not a sequence of page entries
+      keyind = ind
+      if (line !~ /^[A-Za-z_]+:/) { bad = 1; next }
+      if (key == "console_errors") { seen["c"] = 1; inline("c", v) }
+      else if (key == "page_errors") { seen["p"] = 1; inline("p", v) }
+      else if (key == "failed") { if (!netok) bad = 1; seen["f"] = 1; inline("f", v) }   # only as network.failed
+      else if (key == "network") {
+        if (v == "") { netwait = 1; netind = ind }
+        if (v ~ /failed:/) seen["f"] = 1
+        if (v != "" && v !~ /^\{[[:space:]]*failed:[[:space:]]*\[[[:space:]]*\][[:space:]]*\}$/) {
+          if (v ~ /failed:[[:space:]]*\[/) n["f"]++; else bad = 1
+        }
+      }
+      else if (key != "path") bad = 1
+    }
+    END {
+      if (blocks > 1) { printf "%s unknown\n", (sha == "" ? "-" : sha); exit }
+      if (!pages) { printf "%s none\n", (sha == "" ? "-" : sha); exit }
+      if (inpages) endpages()
+      if (pnull) bad = 1
+      if (bad) { printf "%s unparsed\n", (sha == "" ? "-" : sha); exit }
+      printf "%s %d %d %d\n", (sha == "" ? "-" : sha), n["c"], n["p"], n["f"]
+    }')
+  rc=$?
+  local s a b c
+  read -r s a b c <<< "$out"
+  if [ "$rc" -ne 0 ] || [ -z "$out" ]; then
+    QA_HEAD_SHA="" QA_CONSOLE_ERRORS=unknown QA_PAGE_ERRORS=unknown QA_NETWORK_FAILED=unknown
+    return 0
+  fi
+  [ "$s" = "-" ] && s=""
+  QA_HEAD_SHA="$s"
+  case "$a" in
+    none) QA_CONSOLE_ERRORS="" QA_PAGE_ERRORS="" QA_NETWORK_FAILED="" ;;
+    unknown|unparsed) QA_CONSOLE_ERRORS="$a" QA_PAGE_ERRORS="$a" QA_NETWORK_FAILED="$a" ;;
+    *) QA_CONSOLE_ERRORS="$a" QA_PAGE_ERRORS="$b" QA_NETWORK_FAILED="$c" ;;
+  esac
 }
 
 # CHANGES_REQUESTED count across ALL reviews on the PR — must be 0 before

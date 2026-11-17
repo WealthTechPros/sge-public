@@ -185,7 +185,7 @@ Run the repo's quality suite (commands in CLAUDE.md) **as background tasks in th
 
 **4.2 SGE spec traceability (SM-1).** Diff traces to a `SPEC-NNN` (body/branch/trailers) or a model capability → `traceability: SPEC-NNN`; else advisory `{severity:"minor", category:"traceability", finding:"untraceable — no SPEC-NNN/capability linkage"}`, `traceability: untraceable` — never a Blocker.
 
-**4.3 QA evidence (runtime complement — issue #732).** A QA report vouches only for the commit it exercised. `rl_qa_evidence "$PR"` reads the qa-audit-verdict block's head_sha → `QA_COMMENT`/`QA_HEAD_SHA`: no report → `qa_evidence: none`; match → current, consume for 4.1 rows + cite URL; mismatch → `qa_evidence: stale@<sha>`, treat as if it had no QA report. High-risk + no report: optionally dispatch `/sge:qa-audit`.
+**4.3 QA evidence (#732).** `rl_qa_evidence "$PR"` reads the qa-audit-verdict block's head_sha → `QA_COMMENT`/`QA_HEAD_SHA`: no report → `qa_evidence: none`; match → current, consume for 4.1 rows + cite URL; mismatch → `qa_evidence: stale@<sha>`, treat as if it had no QA report. High-risk + no report: optionally dispatch `/sge:qa-audit`. Page signals (`QA_CONSOLE_ERRORS`…): [4.3c](references/phase4-evidence-gates.md).
 
 **4.3a–4.6 Conditional evidence gates** — run each whose trigger fires: **4.3a** adversarial (`CONTROL_BEARING=1`; none/stale = **BLOCKER**) · **4.3b** oracle-derivation (`ORACLE_BEARING=1`) · **4.4** dual-backend seam-evidence ([`references/seam-evidence.md`](references/seam-evidence.md)) · **4.5** UI design evidence · **4.6** Invariants. Rules + finding literals: [`phase4-evidence-gates.md`](references/phase4-evidence-gates.md).
 
