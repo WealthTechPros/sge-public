@@ -48,6 +48,42 @@ and registry owner. It is read-only. `/sge:tidy-worktrees --inbox` runs it.
 
 An unreadable or incomplete open-PR set never produces `delete` or `open-a-pr`.
 
+## Finish a clean handoff before `/clear`
+
+An orderly handoff is not orphan recovery. Once the owning session has stopped
+its workers and writes, it can preserve and release its own worktree in one
+noninteractive operation:
+
+```bash
+bash skills/worktrees/checkpoint.sh handoff "<worktree>" "<own-session-id>"
+```
+
+The command holds the existing per-path registry lock, completes a checkpoint,
+and rechecks ownership and permitted source bytes before releasing that
+owner's registration. Its output includes recovery handles, coverage and
+`ownership:released`. The worktree, branch, index, working files and native
+retention lock remain intact. A fresh session can register the same worktree;
+it does not need the operator-only `RECOVER` confirmation.
+
+Completed partial coverage (exit 10) also releases ownership, while reporting
+the exclusions and requiring the original worktree to remain. Ignored caches
+or deliberately excluded secrets are not a reason to leave a dead writer claim.
+This is neither complete backup nor deletion permission.
+
+Failed or inconsistent preservation, changed permitted bytes, a busy registry
+or a foreign claim fails closed and leaves ownership in place. Keep the original
+worktree and report the exact failure or concurrency gap; do not loop through recovery.
+The operation does not discover or stop unmanaged writers: the current owner
+must finish those before handoff. Each worker hands off its own registered
+worktree, including when the coordinator's cwd is a different repository.
+
+Run this during the agent's closeout, before clearing its conversation.
+`/clear` alone does not run this command or release legacy registrations.
+No hook installation, automatic ownership takeover or deletion is implied.
+The existing Copilot adapter's `sessionEnd` event can also occur at a completed
+headless turn, so it is not sufficient proof that every writer has stopped.
+Raw interactive `/clear` end-to-end integration remains unqualified.
+
 ## Supervised orphan registration recovery
 
 The normal unregister operation remains owner-only. If an owning session is
