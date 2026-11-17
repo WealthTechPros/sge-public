@@ -259,3 +259,22 @@ this — do not fix opportunistically outside those).
   unreadable or uncertain-ownership coverage is reported as unsupported (never
   with contents), the result is `partial`, and it never says a worktree is safe
   to remove; removal stays a user-confirmed `/sge:tidy-worktrees` step.
+- **Finish ownership before clearing the conversation.** After this owner has
+  stopped its workers and writes, run the existing checkpoint tool's `handoff`
+  operation for each worktree it owns:
+
+  ```bash
+  bash "${CLAUDE_PLUGIN_ROOT}/skills/worktrees/checkpoint.sh" handoff "$WT" "$SESSION_ID"
+  ```
+
+  It checkpoints and releases only that owner's unchanged registration,
+  leaving the worktree, branch and native retention lock intact. Record the
+  recovery handles, coverage and `ownership:released` result. A completed
+  partial checkpoint still releases ownership, with exit 10 and exclusions
+  reported: retain the original, never claim complete backup or deletion
+  safety. The successor can register the same worktree without interactive
+  orphan recovery. Failed/inconsistent capture, changed permitted source, a
+  busy registry or foreign ownership retains the claim. A coordinator
+  launched elsewhere must have each actual worker finish its own handoff,
+  not impersonate a predecessor. `/clear` alone is not this operation, and
+  installing hooks or automatically recovering old claims is not authorised.

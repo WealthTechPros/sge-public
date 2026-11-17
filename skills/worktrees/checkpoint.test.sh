@@ -339,4 +339,76 @@ for p in .GIT/hooks/x 'a/.git./x' 'git~1/x' 'a:b' '../x' '/abs'; do _ck_safe_rel
 check "hostile recorded paths rejected (.GIT, ADS, traversal)" "$bad_allowed" ""
 check ".gitignore-style names remain allowed" "$(_ck_safe_rel ".gitignore" && _ck_safe_rel "sub/.github/x.yml" && echo ok)" "ok"
 
+# ---------------------------------------------------------------- clean handoff, not orphan recovery
+new_fixture handoff; dirty_fixture
+git -C "$ROOT" worktree lock --reason "retain unfinished work" "$WT"
+before="$(snapshot)"
+out="$(ck handoff "$WT" "$SID" 2>&1)"; rc=$?
+check "handoff preserves then releases without interactive recovery" "$rc" "0"
+check_has "handoff reports released ownership" "$out" "ownership:released"
+check "handoff leaves checkout unchanged" "$(snapshot)" "$before"
+check "handoff leaves native retention lock" "$(git -C "$ROOT" worktree list --porcelain | grep -c '^locked retain unfinished work$')" "1"
+check "handoff leaves no orphan claim" "$(wl_list "$ROOT")" ""
+hid="$(printf '%s\n' "$out" | sed -n 's/^id://p')"
+ck restore "$WT" "$hid" "$TMP/handoff-restore" >/dev/null 2>&1; rc=$?
+check "handoff checkpoint remains restorable" "$rc" "0"
+check "handoff preserves staged and unstaged work" \
+  "$(git -C "$TMP/handoff-restore" diff --cached --binary | cksum):$(git -C "$TMP/handoff-restore" diff --binary | cksum)" \
+  "$(git -C "$WT" diff --cached --binary | cksum):$(git -C "$WT" diff --binary | cksum)"
+wl_register "$WT" successor >/dev/null; rc=$?
+check "fresh session reuses same worktree without RECOVER" "$rc" "0"
+out="$(ck handoff "$WT" "$SID" 2>&1)"; rc=$?
+check "old session cannot hand off successor work" "$rc" "4"
+check "successor ownership remains" "$(wl_list "$ROOT" | cut -f1)" "successor"
+
+new_fixture partial-handoff
+printf 'private fixture\n' >"$WT/.env"
+out="$(ck handoff "$WT" "$SID" 2>&1)"; rc=$?
+check "completed partial checkpoint releases only ownership, retaining exit 10" "$rc:$(wl_list "$ROOT" | cut -f1)" "10:"
+check_has "partial handoff exposes its coverage limit" "$out" "coverage:partial"
+check_has "partial handoff reports released ownership" "$out" "ownership:released"
+check_has "partial handoff requires retaining original" "$out" "retain-worktree:yes"
+check "excluded original stays in place" "$(cat "$WT/.env")" "private fixture"
+check_lacks "partial handoff never logs private contents" "$out" "private fixture"
+wl_register "$WT" successor >/dev/null; rc=$?
+check "partial coverage does not force successor through orphan recovery" "$rc" "0"
+
+new_fixture mismatched-handoff
+entry="$(_wl_common_dir "$WT")/sge-worktrees/$(_wl_key "$(_wl_abs "$WT")").entry"
+sed -i 's|^path=.*|path=/different-worktree|' "$entry"
+out="$(ck handoff "$WT" "$SID" 2>&1)"; rc=$?
+check "mismatched registered path retains ownership" "$rc:$(wl_list "$ROOT" | cut -f1)" "4:$SID"
+check "mismatched registered path creates no checkpoint" "$(ck list "$WT")" ""
+
+new_fixture failed-handoff
+out="$(SGE_CHECKPOINT_DIR="$WT/unsafe-store" ck handoff "$WT" "$SID" 2>&1)"; rc=$?
+check "failed preservation retains ownership" "$rc:$(wl_list "$ROOT" | cut -f1)" "6:$SID"
+
+new_fixture busy-handoff
+common="$(_wl_common_dir "$WT")"
+lock="$common/sge-worktrees/$(_wl_key "$(_wl_abs "$WT")").lock"
+mkdir "$lock"
+out="$(ck handoff "$WT" "$SID" 2>&1)"; rc=$?
+check "busy handoff never races another registry operation" "$rc:$(wl_list "$ROOT" | cut -f1)" "9:$SID"
+rmdir "$lock"
+check "busy handoff creates no checkpoint" "$(ck list "$WT")" ""
+
+new_fixture changed-handoff
+printf 'before\n' >"$WT/new.txt"
+out="$(
+  source "$CK"
+  ck_checkpoint() { printf 'after\n' >"$1/new.txt"; printf 'result:complete\n'; }
+  ck_handoff "$WT" "$SID" 2>&1
+)"; rc=$?
+check "same-status untracked byte change refuses release" "$rc:$(wl_list "$ROOT" | cut -f1)" "7:$SID"
+
+new_fixture changed-registration-handoff
+out="$(
+  source "$CK"
+  ck_checkpoint() { printf 'changed=yes\n' >>"$entry"; printf 'result:complete\n'; }
+  entry="$(_wl_common_dir "$WT")/sge-worktrees/$(_wl_key "$(_wl_abs "$WT")").entry"
+  ck_handoff "$WT" "$SID" 2>&1
+)"; rc=$?
+check "changed registration refuses release" "$rc:$(wl_list "$ROOT" | cut -f1)" "4:$SID"
+
 exit "$fail"

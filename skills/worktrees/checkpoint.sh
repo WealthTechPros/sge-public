@@ -4,6 +4,7 @@
 # without modifying the user's checkout" + "Incomplete coverage fails safe").
 #
 #   checkpoint.sh checkpoint <worktree> <session-id>
+#   checkpoint.sh handoff    <worktree> <session-id>  # after this owner's writers stop
 #   checkpoint.sh list       <path-in-repo>
 #   checkpoint.sh restore    <path-in-repo> <id> <dest> [--allow-partial]
 #   checkpoint.sh prune      <path-in-repo> <id> --yes       # MANUAL only
@@ -41,7 +42,8 @@
 #
 # Exit codes: 0 ok/complete, 2 usage, 3 not a git worktree, 4 ownership
 #   uncertain, 5 bad session id, 6 unsafe store/destination, 7 inconsistent
-#   capture (active writer), 8 failure/integrity, 9 partial restore refused,
+#   capture (active writer), 8 failure/integrity,
+#   9 partial restore refused / handoff registry busy,
 #   10 checkpoint partial (unsupported coverage).
 
 set -uo pipefail
@@ -452,6 +454,67 @@ ck_checkpoint() {
   return 10
 }
 
+# Include untracked bytes, not just status: an edit can leave "?? file" unchanged.
+_ck_handoff_fingerprint() (
+  set -o pipefail
+  {
+    _ck_fingerprint || return 1
+    _ck_git rev-parse --symbolic-full-name HEAD || return 1
+    _ck_git ls-files --others --exclude-standard -z |
+      while IFS= read -r -d '' p; do
+        printf '%s\0' "$p"
+        if _ck_secret_name "$p" || [ -L "$_CK_WT/$p" ] || [ ! -f "$_CK_WT/$p" ]; then
+          printf 'unsupported\0'
+        else
+          h="$(_ck_hash_rel "$p")" || exit 1
+          printf '%s\0' "$h"
+        fi
+      done
+  } | git hash-object --stdin
+)
+
+# Explicit owner closeout, never inferred from age, a turn-end event or /clear.
+ck_handoff() (
+  local wt="${1:-}" sid="${2:-}" common abs key entry lock entry_hash before after report rc
+  [ "$#" = 2 ] || { _ck_err usage; return 2; }
+  _wl_valid_session "$sid" || { _ck_err bad-session-id; return 5; }
+  _wl_is_linked "$wt" || { _ck_refuse 4 ownership-uncertain-not-linked; return 4; }
+  common="$(_wl_common_dir "$wt")" || return 3
+  abs="$(_wl_abs "$wt")" || return 3
+  key="$(_wl_key "$abs")"
+  entry="$common/sge-worktrees/$key.entry"
+  lock="$common/sge-worktrees/$key.lock"
+  _wl_lock "$lock" || { printf 'ownership:retained\n'; return 9; }
+  trap 'rmdir "$lock" 2>/dev/null || true' EXIT
+  if [ ! -f "$entry" ] || [ -L "$entry" ] ||
+     [ "$(_wl_entry_field "$entry" session)" != "$sid" ] ||
+     [ "$(_wl_entry_field "$entry" path)" != "$abs" ]; then
+    _ck_refuse 4 ownership-uncertain-other-session
+    printf 'ownership:retained\n'
+    return 4
+  fi
+  entry_hash="$(_ck_hash_file "$entry")" || return 8
+  _CK_WT="$abs"
+  before="$(_ck_handoff_fingerprint)" || { _ck_err status-failed; return 8; }
+  report="$(ck_checkpoint "$abs" "$sid")"; rc=$?
+  printf '%s\n' "$report"
+  if [ "$rc" != 0 ] && [ "$rc" != 10 ]; then printf 'ownership:retained\n'; return "$rc"; fi
+  after="$(_ck_handoff_fingerprint)" || { _ck_err status-failed; printf 'ownership:retained\n'; return 8; }
+  if [ "$before" != "$after" ]; then
+    _ck_err inconsistent-handoff-active-writer
+    printf 'ownership:retained\n'
+    return 7
+  fi
+  if [ ! -f "$entry" ] || [ -L "$entry" ] || [ "$(_ck_hash_file "$entry")" != "$entry_hash" ]; then
+    _ck_err ownership-changed
+    printf 'ownership:retained\n'
+    return 4
+  fi
+  rm -- "$entry" || { printf 'ownership:retained\n'; return 8; }
+  printf 'ownership:released\n'
+  return "$rc"
+)
+
 # ------------------------------------------------------------------ repo/store lookup
 _ck_locate() { # <path-in-repo> -> sets _CK_COMMON _CK_KEYDIR (no creation)
   local root
@@ -622,6 +685,7 @@ ck_prune() {
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   cmd="${1:-}"; shift || true
   case "$cmd" in
+    handoff)    ck_handoff "$@"; exit $? ;;
     checkpoint)
       ck_checkpoint "$@"; rc=$?
       case "$rc" in 3|7|8) printf 'result:failed
@@ -633,6 +697,6 @@ safe-to-remove:no
     list)       ck_list "$@"; exit $? ;;
     restore)    ck_restore "$@"; exit $? ;;
     prune)      ck_prune "$@"; exit $? ;;
-    *) echo "usage: checkpoint.sh checkpoint <wt> <sid> | list <path> | restore <path> <id> <dest> [--allow-partial] | prune <path> <id> --yes" >&2; exit 2 ;;
+    *) echo "usage: checkpoint.sh checkpoint|handoff <wt> <sid> | list <path> | restore <path> <id> <dest> [--allow-partial] | prune <path> <id> --yes" >&2; exit 2 ;;
   esac
 fi
