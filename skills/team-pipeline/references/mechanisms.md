@@ -744,17 +744,21 @@ When the gated front-end tools are unavailable, each step degrades safely:
 
 Aggregate `decisionJournal[]` from every lane completion file written to
 `/tmp/team-pipeline-agent-*.json`. Each entry is a SPEC-093 tier-b decision
-(most-reversible-option fallback — not a spec rule). The array length is the
-per-lane `questionsPerRun` contribution; sum across all lanes for the run total.
-Also group by `specId` for the per-spec attribution line in the report.
+(most-reversible-option fallback — not a spec rule), except entries with
+`"kind": "approach"`: those record a no-spec-lane choice between approaches
+(#3522), not a spec gap, so they are left out of the metric and the per-spec
+attribution (they still show in the Decision Journal). The count of the
+remaining entries is the per-lane `questionsPerRun` contribution; sum across
+all lanes for the run total. Also group them by `specId` for the per-spec
+attribution line in the report.
 
 ```bash
 QUESTIONS_PER_RUN=$(
-  jq -s '[.[].decisionJournal // [] | length] | add // 0' \
+  jq -s '[.[].decisionJournal // [] | map(select((.kind // "ambiguity") != "approach")) | length] | add // 0' \
     /tmp/team-pipeline-agent-*.json 2>/dev/null || echo 0
 )
 QUESTIONS_BY_SPEC=$(
-  jq -s '[.[].decisionJournal // [] | .[] | {specId, trigger}] | group_by(.specId)' \
+  jq -s '[.[].decisionJournal // [] | .[] | select((.kind // "ambiguity") != "approach") | {specId, trigger}] | group_by(.specId)' \
     /tmp/team-pipeline-agent-*.json 2>/dev/null || echo '[]'
 )
 ```
@@ -777,10 +781,12 @@ wiring is:
   failed precondition, or regulated boundary). Fields: `blockerKind`, `blocker`,
   `action`, `context`. Set `stopReason: "blocked"` in the exit report and add a
   top-level `blockedReport` field.
-- **Decision Journal** — one `{specId, trigger, optionTaken, rationale}` entry
-  per tier (b) autonomous choice (the same array the questions-per-run
-  computation above sums). Add `decisionJournal: [...]` to the exit report; emit
-  an empty array when no tier (b) calls were made.
+- **Decision Journal** — one `{specId, trigger, optionTaken, rationale,
+  costIfWrong, kind}` entry per tier (b) autonomous choice or unattended
+  no-spec approach choice (the same array the questions-per-run computation
+  above counts, minus `kind: "approach"` entries). Add `decisionJournal: [...]`
+  to the exit report; emit an empty array only when no tier (b) calls and no
+  unattended approach choices were made.
 
 Both are omitted on attended runs (the agent asks the clarifying question
 normally instead).

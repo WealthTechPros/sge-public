@@ -39,8 +39,8 @@ a PR until blockers are fixed and a fresh review passes.
 
 `$ARGUMENTS` is the spec id (or an issue number that references one). If
 omitted, derive it from the branch name (`feat/sge-NNN-…`) or the linked
-issue. The dispatcher may also state that the quality suite has just run —
-see Step 8.
+issue. The dispatcher may also hand over evidence that the quality suite has
+just passed (command, exit code, output tail) — see Step 8.
 
 > **Target repo.** This review is only correct when the `git diff`/`git log`
 > calls below **and** the spec/code reads (`Read`/`Grep`/`Glob`) resolve
@@ -177,6 +177,14 @@ For each Gherkin scenario (or derived criterion):
 ❌ FAIL: [scenario] — not implemented
 ```
 
+**Bug-fix issues: check the revert-the-fix evidence (#3515).** When the issue
+is a bug fix (`bug` label, a `fix/` branch, or a `--sentry` run), the
+regression test must be shown failing with the fix reverted and passing with
+it restored ([procedure](../lib/systematic-debugging.md#revert-the-fix-check)).
+Accept the dispatcher's evidence only with the command and the failing output
+tail; otherwise run the check yourself. A regression test that also passes
+with the fix reverted proves nothing: that is a **blocker**.
+
 ---
 
 ## Step 4: TDD Git-Log-Order Check
@@ -259,12 +267,39 @@ Terminology:
 
 ---
 
+## Step 7b: Least-Code Scope Check (SPEC-124 §2.4, non-blocking)
+
+For each hunk in the diff, name the acceptance criterion (or derived
+criterion) that needs it. A hunk no criterion needs is a **warning**:
+never a blocker, and it never changes the verdict. Add it to `warnings[]` as
+`least-code: <kind> — <file:line> — <one line why>`, where `<kind>` is one of:
+
+- **unrequested abstraction** — an interface with one implementation, config
+  for a value that never changes, scaffolding "for later";
+- **new dependency** — a package added where the stdlib, a native feature or
+  an installed dependency would do;
+- **unrelated edit** — reformatting, renaming or "improving" code no
+  criterion touches (removing orphans the change itself created is fine).
+
+Never flag tests, or the ruleset's non-negotiables (input validation at trust
+boundaries, data-loss error handling, security, accessibility, anything the
+user asked for), as excess. Report the count on the `Least-code` line in
+Step 9.
+
+---
+
 ## Step 8: Quality Gates (skippable on request)
 
-**If the dispatcher stated the suite has just run** (as `/sge:sge-implement`
-Phase 4 does immediately before delegating here), do **not** re-run it —
-record `Quality gates: skipped (dispatcher-verified, just ran)` and move on.
-Re-running adds cost and no signal.
+**Skip only on evidence (#3515).** A dispatcher's claim that the suite just
+passed (as `/sge:sge-implement` Phase 4 makes before delegating here) counts
+only when it hands over, for each gate, the **command** it ran, its **exit
+code** and the **tail of its output** (the last lines, showing the pass
+summary), for the HEAD you are reviewing. With that evidence, check it is
+plausible (exit code 0, a pass summary, the repo's real commands), record
+`Quality gates: skipped (dispatcher-verified: <commands>)` and move on.
+A bare "the suite has just run", missing evidence, a non-zero exit code or
+evidence for another SHA is not enough: otherwise re-run the suite yourself
+as for standalone use below.
 
 **Standalone use:** run the repo's full quality suite (refer to repo
 CLAUDE.md for exact commands) — launch it as a **background task** and
@@ -293,6 +328,7 @@ First the human-readable report:
 ### Traceability (SM-1): PASS / FAIL / N/A (no spec)
 ### Graceful Degradation: PASS / FAIL / N/A
 ### Patterns & Terminology: PASS / WARN
+### Least-code (SPEC-124, non-blocking): N warning(s)
 ### Quality Gates: PASS / FAIL / SKIPPED (dispatcher-verified)
 
 ### Recommendations
@@ -325,7 +361,7 @@ the dispatcher parses it:
 - `blockers[]` — failed criteria, untested implementation (Step 4),
   traceability failures (Step 5), degradation failures, red quality gates.
 - `warnings[]` — partial criteria, test-after ordering, pattern/terminology
-  deviations, anything advisory.
+  deviations, `least-code:` scope findings (Step 7b), anything advisory.
 - `criteria[]` — one entry per acceptance criterion; `status` is `"pass"`,
   `"partial"`, or `"fail"`; `evidence` cites the test or implementation
   location that proves it.

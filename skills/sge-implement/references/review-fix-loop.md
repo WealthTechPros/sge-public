@@ -12,12 +12,17 @@ This is the [bounded refinement loop](../../loops/SKILL.md#c-bounded-refinement-
 - **Clean** — no Blockers/Majors AND `/sge:pr-review` applied `pr-reviewed` (confirm via 7.3) → auto-merge armed, loop done → go to 7.3.
 - **Blockers / Major issues / REQUEST_CHANGES** — `/sge:pr-review` closes the gate (`pr-labels.sh fail`, freeing the mutex for the next attempt). You must **fix**, not stop.
 
-**Fix every Blocker and Major** (plus any trivially-correct Minor):
+**Verify each finding against the current head, then fix it or decline it** (#3515, the rule [`pr-fix/references/review-comments.md`](../../pr-fix/references/review-comments.md#address-dont-resolve) already applies). A reviewer can be wrong, or right about a commit you have since changed, so do not apply a finding on trust:
+- Read the whole finding and its thread, then check it against the current head (read the code, run the test or command it implies).
+- Classify it: **valid** (fix it, below), **declined-with-reason** (wrong, already fixed, or out of scope: reply on the thread with the evidence, plus a follow-up issue where the finding is real but out of scope), or **still-open** (you cannot tell yet: say so, do not guess).
+- A decline is recorded, never silent. **Unattended, a decline never blocks the run:** record the reason on the thread and in the decision journal ([unattended contract](unattended-contract.md)) and continue. The gate is still the next `/sge:pr-review`, which re-judges the declined finding; never apply `pr-reviewed` yourself.
+
+**Fix every valid Blocker and Major** (plus any trivially-correct Minor), debugging by [systematic-debugging](../../lib/systematic-debugging.md) (root cause first; three failed fixes on one problem → stop and escalate):
 1. Apply the smallest root-cause fix in the worktree. **Never** suppress a check, weaken an assertion, or delete a failing test to make a finding "pass".
 2. Keep TDD discipline: if the finding is a missing or weak test, write the failing test first, then fix.
 3. Re-run the quality suite (Phase 4) — green.
 4. Commit + push each fix via **`/sge:commit`** (plain — it pushes so the PR updates; carries the trailer).
-5. Reply to each addressed inline comment with the resolving commit SHA, then **re-run `/sge:pr-review`** for a fresh verdict.
+5. Reply to each addressed inline comment with the resolving commit SHA (or the decline reason), then **re-run `/sge:pr-review`** for a fresh verdict.
 
 **If it's CI checks (not review findings) that are red**, hand them to `/sge:pr-fix` — it reads live CI, reproduces locally, and applies the smallest root-cause fix without suppressing checks.
 

@@ -441,14 +441,16 @@ Prompt:
          "completedAt":"<ISO>",
          "note":"<one line>",
          "decisionJournal": [
-           {"specId":"<SPEC-NNN or null>","trigger":"<ambiguity description>","optionTaken":"<what was done>","rationale":"<why this is most reversible>"}
+           {"specId":"<SPEC-NNN or null>","trigger":"<ambiguity description>","optionTaken":"<what was done>","rationale":"<why this is most reversible>","costIfWrong":"<what breaks if wrong, and what undoing it takes>","kind":"<ambiguity|approach>"}
          ]
        }
      `decisionJournal` contains one entry for each SPEC-093 tier-b decision made
      during the run (most-reversible-option fallback — not a spec rule, not a
-     BLOCKED exit). Omit the field or use an empty array `[]` when no tier-b
-     decisions were made. This array is the source for the `questions-per-run`
-     metric (#1235) — Phase 6 sums its length across all lanes.
+     BLOCKED exit), plus one `"kind":"approach"` entry for each no-spec-lane
+     choice between approaches made unattended (#3522). Omit the field or use
+     an empty array `[]` when no such decisions were made. This array is the
+     source for the `questions-per-run` metric (#1235) — Phase 6 counts its
+     entries across all lanes, excluding `"kind":"approach"`.
      Do NOT self-report a token count: `tokensUsed`
      is DEPRECATED (#857) and the orchestrator no longer reads it for any budget
      or accounting decision — real spend comes from the harness-measured
