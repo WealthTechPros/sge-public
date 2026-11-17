@@ -137,14 +137,20 @@ the merge gate reads a FAIL, never what you score.
   DESIGN.md. Rogue hex values, off-scale spacing, or fonts outside the
   defined roles score 0.
 - R2 Typographic hierarchy: clear scale, one display voice used with
-  restraint, readable measure and line-height, deliberate weights.
+  restraint, readable measure and line-height (the DESIGN.md Layout
+  measure when it sets one), deliberate weights.
 - R3 Spacing rhythm and alignment: consistent scale, no cramped or
   floaty sections, no drifting gutters between sections.
 - R4 Distinctiveness: the DESIGN.md signature element is present and
   working. Automatic 0 for any banned-default tell: purple-gradient
-  hero, Inter/Roboto (unless DESIGN.md names them), generic
-  card-grid-with-big-stat template, cream-serif-terracotta default,
-  near-black page with a single acid accent chosen for no reason.
+  hero, Inter/Roboto, generic card-grid-with-big-stat template,
+  cream-serif-terracotta default, near-black page with a single acid
+  accent chosen for no reason. **Every tell is exempt when DESIGN.md
+  names it** in its Direction, Tokens, Layout, Motion or Signature
+  element: a confirmed direction is the contract, not a tell, so score
+  how well it is executed instead and cite the DESIGN.md line. Naming
+  is explicit. A tell that only resembles the direction is not exempt,
+  and nothing on DESIGN.md's Banned list is ever exempt.
 - R5 Responsive integrity: at 375px nothing overflows, clips, or
   collapses illegibly; touch targets >= 44px.
 - R6 Accessibility floor: visible keyboard focus, body text contrast
@@ -179,6 +185,37 @@ category below 2 when a base was captured. Lead Top fixes with
 `[introduced]` findings; list `[pre-existing]` ones after them as
 follow-up debt. `scripts/design-verdict-gate.mjs` parses exactly this
 shape for the `/sge:pr-review` gate, so do not reword the field labels.
+
+## Interface wording (#3521, advisory, unscored)
+
+Read the visible text on every reviewed route (buttons, links, headings,
+form labels, errors, empty states) and check it against these rules:
+
+- Buttons and links state the action ("Save changes", "Send invite"), not
+  "OK", "Submit" or "Click here".
+- An action keeps one name through the flow. "Invite" on the button is
+  not "Add member" on the dialog and "Share" on the toast.
+- Errors say what went wrong and how to fix it, not just "Something went
+  wrong" or "Invalid input".
+- Empty states invite the next action rather than only saying "No data".
+- Sentence case for UI labels, headings and buttons, unless DESIGN.md
+  names another case.
+
+This check is advisory. It never changes a rubric score, never counts
+toward the 14/16 threshold, never makes a PASS a FAIL, and never goes in
+Top fixes. Append it to the verdict file after Top fixes, in exactly
+this shape:
+
+```
+Wording (advisory, unscored):
+- [selector or quoted text] — rule broken — suggested wording
+```
+
+Write `- no findings` when the text is clean, or
+`- not checked — <reason>` when you could not read the text (for
+example, static evidence with no readable copy). Start every line under
+the heading with `- `. The gate parses only the VERDICT, Score, Base and
+R1-R8 lines, so this block cannot change its result.
 
 ## Benchmark comparison and second opinion (#3293, advisory)
 

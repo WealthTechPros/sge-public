@@ -105,12 +105,18 @@ quality the user rates. The job is extraction and synthesis, not cloning.
    sentence, grounded in what this product actually is and who uses it.
    It must not be a clone of any reference, and it must not be a generic
    default that would apply to any brief.
-3. Critique the plan once before writing: if any part reads like the
-   template answer, revise it and say what changed.
+3. Test the plan against its counterfactual before writing. In two or
+   three lines, describe the generic version a default prompt would
+   produce for this product: its layout, palette, type, hero and cards.
+   Then say how the plan's Direction, Tokens, Layout and Signature element
+   each differ from it. Revise any part that matches the generic version,
+   and say what changed. A plan that differs only in its colours fails
+   the test.
 4. Write `.claude/design-review/DESIGN.md` using `DESIGN.md.template`'s
    shape (below) as the skeleton: Dev URL, Direction, Tokens (4-6 named
-   hex values, type roles + scale, spacing scale, radius/shadow), Motion
-   rules, Signature element, Banned list, Quality floor.
+   hex values, type roles + scale, spacing scale, radius/shadow), Layout
+   (maximum line length, alignment), Motion rules, Signature element,
+   Banned list, Quality floor.
 5. Propose (do not build unless asked) a `/design-system` route.
 
 `DESIGN.md` is a contract: short, prescriptive, hex-exact. Vague
