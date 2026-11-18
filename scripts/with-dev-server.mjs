@@ -16,6 +16,7 @@
  *        [--host localhost]                      probe host (default localhost)
  *        [--timeout-ms 120000]                   per-server readiness timeout
  *        [--log-dir <dir>]                       server logs (default: a temp dir)
+ *        [--env NAME ...]                        repeatable: pass this variable through too
  *        -- <command> [args...]
  *
  *   Each --server is started through the shell (so `cd ../base && npm run dev`
@@ -25,6 +26,15 @@
  *   does not count), then runs <command> with inherited stdio. A single
  *   argument after `--` runs through the shell (use this for npm/npx on
  *   Windows); several arguments are executed directly.
+ *
+ *   Environment (#3529): the servers and the command run code under review,
+ *   so they get only an allowlist of the caller's variables: PATH, PATHEXT,
+ *   HOME, USERPROFILE, APPDATA, LOCALAPPDATA, SYSTEMROOT, SYSTEMDRIVE, WINDIR,
+ *   COMSPEC, TEMP, TMP, TMPDIR, NODE_ENV and PORT, plus each `--env NAME`.
+ *   Env-held tokens and keys (GH_TOKEN, *_PRIVATE_KEY, secrets-manager-injected
+ *   values) never reach them unless named with --env. This is defence in
+ *   depth: code running as the same OS user can still read on-disk
+ *   credentials, so it is not a sandbox.
  *
  *   Whatever happens (success, failure, timeout, Ctrl+C) every server's
  *   process tree is killed: Windows `taskkill /T /F /PID <pid>`, POSIX the
@@ -52,11 +62,20 @@ import { fileURLToPath } from "node:url";
 
 const IS_WIN = process.platform === "win32";
 
+export const ENV_ALLOWLIST = ["PATH", "PATHEXT", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "SYSTEMROOT", "SYSTEMDRIVE",
+  "WINDIR", "COMSPEC", "TEMP", "TMP", "TMPDIR", "NODE_ENV", "PORT"];
+
+/** The allowlisted subset of `env` plus `extra` names. Names match case-insensitively (Windows `Path`). */
+export function childEnv(env = process.env, extra = []) {
+  const keep = new Set([...ENV_ALLOWLIST, ...extra].map((n) => n.toUpperCase()));
+  return Object.fromEntries(Object.entries(env).filter(([k]) => keep.has(k.toUpperCase())));
+}
+
 /** Parse argv (after the script) into { servers[], command[], opts } or throw. */
 export function parseArgs(args) {
   const servers = [];
   const ports = [];
-  const opts = { path: "/", host: "localhost", timeoutMs: 120000, logDir: null, help: false };
+  const opts = { path: "/", host: "localhost", timeoutMs: 120000, logDir: null, env: [], help: false };
   let command = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -80,6 +99,11 @@ export function parseArgs(args) {
       opts.timeoutMs = Number(val());
       if (!Number.isFinite(opts.timeoutMs) || opts.timeoutMs <= 0) throw new Error(`bad --timeout-ms ${args[i]}`);
     } else if (a === "--log-dir") opts.logDir = val();
+    else if (a === "--env") {
+      const n = val();
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(n)) throw new Error(`bad --env ${n} (a variable name, not NAME=value)`);
+      opts.env.push(n);
+    }
     else throw new Error(`unknown argument ${a}`);
   }
   if (opts.help) return { servers: [], command: [], opts };
@@ -192,11 +216,11 @@ function logTail(file, lines = 40) {
   }
 }
 
-function startServer(cmd, logFile) {
+function startServer(cmd, logFile, env) {
   const fd = openSync(logFile, "a");
   // detached on POSIX = own process group, so the whole tree dies with -pid.
   // On Windows detached would open a new console; taskkill /T walks the tree instead.
-  const child = spawn(cmd, { shell: true, stdio: ["ignore", fd, fd], detached: !IS_WIN, windowsHide: true });
+  const child = spawn(cmd, { shell: true, env, stdio: ["ignore", fd, fd], detached: !IS_WIN, windowsHide: true });
   closeSync(fd);
   const state = { child, exit: null };
   child.on("exit", (code, signal) => (state.exit = `server exited early (code ${code}, signal ${signal})`));
@@ -204,11 +228,11 @@ function startServer(cmd, logFile) {
   return state;
 }
 
-function runCommand(command, track) {
+function runCommand(command, track, env) {
   return new Promise((res) => {
     // Own process group on POSIX (like the servers), so a signal to the helper
     // can take the command's whole tree down too.
-    const opts = { stdio: "inherit", detached: !IS_WIN, windowsHide: true };
+    const opts = { stdio: "inherit", env, detached: !IS_WIN, windowsHide: true };
     const child =
       command.length === 1
         ? spawn(command[0], { ...opts, shell: true })
@@ -246,6 +270,7 @@ export async function main(argv) {
     return 0;
   }
   const { servers, command, opts } = parsed;
+  const env = childEnv(process.env, opts.env);
   const logDir = resolve(opts.logDir || join(tmpdir(), `sge-dev-server-${Date.now()}`));
   mkdirSync(logDir, { recursive: true });
 
@@ -280,7 +305,7 @@ export async function main(argv) {
     for (const [i, s] of servers.entries()) {
       const log = join(logDir, `server-${i}-port-${s.port}.log`);
       process.stderr.write(`with-dev-server: log ${log}\n`);
-      started.push({ log, state: startServer(s.cmd, log) });
+      started.push({ log, state: startServer(s.cmd, log, env) });
     }
     for (const [i, s] of servers.entries()) {
       const { state, log } = started[i];
@@ -301,7 +326,7 @@ export async function main(argv) {
       }
     }
     if (interrupted) return 130;
-    return await runCommand(command, cmd);
+    return await runCommand(command, cmd, env);
   } finally {
     await cleanup();
     for (const s of signals) process.off(s, onSignal);

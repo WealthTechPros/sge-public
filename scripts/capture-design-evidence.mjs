@@ -47,6 +47,13 @@
  *   --base-url file:///abs/path/to/site . A route ending in "/" loads its
  *   index.html; an extensionless route loads <route>.html when it exists,
  *   else <route>/index.html. httpStatus is null for file:// pages.
+ *   The site is served over a loopback HTTP server rooted at that directory
+ *   (127.0.0.1, random port, stopped on exit), never loaded from file://, so
+ *   a page cannot pull any other local file into a screenshot (#3529).
+ *   Other requests from such a page are allowed only as https: to a public
+ *   DNS name (no http:, IP literals or local names), and dotfiles in the
+ *   site are not served.
+ *   Evidence still records the file:// URL of each route.
  *
  * Plan file (optional; `--routes` is shorthand for one `default` state each):
  *   {
@@ -99,10 +106,11 @@
  * from the target repo, which typically already has Playwright installed).
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync, statSync } from "node:fs";
+import http from "node:http";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, normalize, resolve, sep } from "node:path";
+import { extname, isAbsolute, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const SCHEMA = "sge-design-evidence/v1";
@@ -240,6 +248,84 @@ export function resolveRouteUrl(baseUrl, path) {
   const full = resolve(fileURLToPath(base + target));
   if (full !== root && !full.startsWith(root + sep)) throw new Error(`route escapes the static site: ${path}`);
   return base + target + rest;
+}
+
+const MIME = {
+  ".html": "text/html", ".htm": "text/html", ".css": "text/css", ".js": "text/javascript", ".mjs": "text/javascript",
+  ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+  ".gif": "image/gif", ".webp": "image/webp", ".ico": "image/x-icon", ".woff": "font/woff", ".woff2": "font/woff2", ".txt": "text/plain",
+};
+
+/**
+ * Serve a static site directory on 127.0.0.1 (random port). Only regular files
+ * whose real path (symlinks resolved) is inside the root are served; anything
+ * else is 404, and so is any dotfile or dot-directory. A page on this http origin cannot load file: URLs, so captures
+ * of a static site stay confined to it (#3529). Resolves { origin, close }.
+ */
+export function serveStatic(rootDir) {
+  const root = realpathSync(resolve(rootDir));
+  const server = http.createServer((req, res) => {
+    let file = null;
+    try {
+      const p = decodeURIComponent(new URL(req.url, "http://x").pathname);
+      if (p.split(/[\\/]/).some((seg) => seg.startsWith("."))) throw new Error("dotfile"); // .env, .git/config
+      file = realpathSync(resolve(root, "." + p));
+      if (statSync(file).isDirectory()) file = realpathSync(join(file, "index.html"));
+      if (!file.startsWith(root + sep) || !statSync(file).isFile()) file = null;
+      // A symlink inside the site may resolve to a dotfile that is also inside it.
+      else if (file.slice(root.length + 1).split(sep).some((seg) => seg.startsWith("."))) file = null;
+    } catch {
+      file = null;
+    }
+    if (!file) {
+      res.writeHead(404, { "content-type": "text/plain" }).end("not found");
+      return;
+    }
+    res.writeHead(200, { "content-type": MIME[extname(file).toLowerCase()] || "application/octet-stream" }).end(readFileSync(file));
+  });
+  return new Promise((res, rej) => {
+    server.once("error", rej).listen(0, "127.0.0.1", () =>
+      res({ origin: `http://127.0.0.1:${server.address().port}`, close: () => new Promise((r) => server.close(() => r())) })
+    );
+  });
+}
+
+/**
+ * Besides its own origin, a static capture may only fetch https: from a public
+ * DNS name (CDN fonts, scripts). Plain http:, any IP literal (v4 or v6), and
+ * localhost / single-label / .local / .lan / .internal / .home.arpa names are
+ * aborted, so the page cannot screenshot another local or LAN service.
+ */
+export function publicFetchAllowed(url) {
+  const u = new URL(url);
+  const h = u.hostname.toLowerCase().replace(/\.+$/, ""); // "localhost." is localhost
+  if (u.protocol !== "https:" || h.startsWith("[") || /^[\d.]+$/.test(h) || !h.includes(".")) return false;
+  return !/(^|\.)(localhost|local|lan|internal|home\.arpa)$/.test(h);
+}
+
+/**
+ * Browser-context options for a capture. A static capture blocks service
+ * workers: context.route does not see requests a service worker makes, so one
+ * could otherwise reach a local service past confine().
+ */
+export function staticContextOptions(opts, site) {
+  return site ? { ...opts, serviceWorkers: "block" } : opts;
+}
+
+/** A static capture may reach its own site and the public web, never another local or LAN service. */
+async function confine(context, site) {
+  if (!site) return context;
+  await context.route("**", (r) => {
+    const u = new URL(r.request().url());
+    return u.origin === site.origin || publicFetchAllowed(u.href) ? r.continue() : r.abort("accessdenied");
+  });
+  return context;
+}
+
+/** Navigate to a route; a file:// base goes through `site` (serveStatic), keeping the file URL as the record. */
+function routeTarget(baseUrl, path, site) {
+  const fileUrl = resolveRouteUrl(baseUrl, path);
+  return { record: fileUrl, nav: site ? site.origin + fileUrl.slice(baseUrl.length) : fileUrl };
 }
 
 function safeDecode(s) {
@@ -581,13 +667,14 @@ async function cmdCapture(flags) {
 
   // --channel msedge / chrome uses an installed system browser instead of the
   // Playwright-downloaded chromium (handy when browser binaries are not installed).
+  const site = /^file:/i.test(baseUrl) ? await serveStatic(fileURLToPath(baseUrl)) : null;
   const browser = await pw.chromium.launch(typeof flags.channel === "string" ? { channel: flags.channel } : {});
   try {
     for (const route of plan.routes) {
       for (const state of route.states) {
         for (const [vi, vp] of plan.viewports.entries()) {
           const first = vi === 0;
-          const context = await browser.newContext({ viewport: vp });
+          const context = await confine(await browser.newContext(staticContextOptions({ viewport: vp }, site)), site);
           const page = await context.newPage();
           const errors = [];
           const warnings = [];
@@ -607,7 +694,8 @@ async function cmdCapture(flags) {
             }
           });
           try {
-            const resp = await page.goto(resolveRouteUrl(baseUrl, route.path), { waitUntil: "load", timeout: navTimeout });
+            const target = routeTarget(baseUrl, route.path, site);
+            const resp = await page.goto(target.nav, { waitUntil: "load", timeout: navTimeout });
             // networkidle never settles on dev servers with HMR/long-poll sockets;
             // best-effort wait, then continue.
             await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
@@ -619,8 +707,8 @@ async function cmdCapture(flags) {
               route: route.path,
               state: state.name,
               viewport: vp,
-              url: page.url(),
-              httpStatus: resp && !/^file:/i.test(baseUrl) ? resp.status() : null,
+              url: site ? target.record : page.url(),
+              httpStatus: resp && !site ? resp.status() : null,
               screenshot: rel,
             };
             if (flags["full-page"]) {
@@ -642,11 +730,11 @@ async function cmdCapture(flags) {
               await page.screenshot({ path: join(out, capture.focusScreenshot) });
               // Separate context with prefers-reduced-motion: reduce (R6/R7):
               // a fresh load, so no state from the Tab walk above leaks in.
-              const rmContext = await browser.newContext({ viewport: vp, reducedMotion: "reduce" });
+              const rmContext = await confine(await browser.newContext(staticContextOptions({ viewport: vp, reducedMotion: "reduce" }, site)), site);
               let runningReduced = null;
               try {
                 const rmPage = await rmContext.newPage();
-                await rmPage.goto(resolveRouteUrl(baseUrl, route.path), { waitUntil: "load" });
+                await rmPage.goto(target.nav, { waitUntil: "load" });
                 await runActions(rmPage, state.actions);
                 runningReduced = await rmPage.evaluate(COUNT_RUNNING_ANIMATIONS);
               } finally {
@@ -673,6 +761,7 @@ async function cmdCapture(flags) {
     // intermittently on Windows. The evidence is complete at this point.
     writeFileSync(join(out, "measurements.json"), JSON.stringify(manifest, null, 2) + "\n", "utf8");
     await Promise.race([browser.close().catch(() => {}), new Promise((r) => setTimeout(r, 10_000).unref())]);
+    await site?.close();
   }
 
   process.stdout.write(out + "\n");
@@ -694,16 +783,19 @@ async function cmdDiscover(flags) {
     process.exit(2);
   }
   const out = { schema: DISCOVERY_SCHEMA, baseUrl, viewport: plan.viewports[0], routes: [] };
+  const site = /^file:/i.test(baseUrl) ? await serveStatic(fileURLToPath(baseUrl)) : null;
   const browser = await pw.chromium.launch(typeof flags.channel === "string" ? { channel: flags.channel } : {});
   try {
-    const context = await browser.newContext({ viewport: plan.viewports[0] });
+    const context = await confine(await browser.newContext(staticContextOptions({ viewport: plan.viewports[0] }, site)), site);
     const page = await context.newPage();
     for (const route of plan.routes) {
-      const entry = { route: route.path, url: resolveRouteUrl(baseUrl, route.path), httpStatus: null, elements: [] };
+      const entry = { route: route.path, url: null, httpStatus: null, elements: [] };
       try {
-        const resp = await page.goto(entry.url, { waitUntil: "load", timeout: navTimeout });
+        const target = routeTarget(baseUrl, route.path, site);
+        entry.url = target.record;
+        const resp = await page.goto(target.nav, { waitUntil: "load", timeout: navTimeout });
         await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
-        if (resp && !/^file:/i.test(baseUrl)) entry.httpStatus = resp.status();
+        if (resp && !site) entry.httpStatus = resp.status();
         for (const raw of await page.evaluate(collectInteractive)) {
           const selector = suggestSelector(raw);
           const count = await page.locator(selector).count().catch(() => 0);
@@ -724,6 +816,7 @@ async function cmdDiscover(flags) {
     }
   } finally {
     await Promise.race([browser.close().catch(() => {}), new Promise((r) => setTimeout(r, 10_000).unref())]);
+    await site?.close();
   }
   const json = JSON.stringify(out, null, 2) + "\n";
   if (typeof flags.out === "string") writeFileSync(flags.out, json, "utf8");
