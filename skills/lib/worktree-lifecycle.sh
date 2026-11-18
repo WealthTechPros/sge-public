@@ -9,7 +9,8 @@
 #   wl_audit <worktree> <session-id>       # verdict block (see below)
 #   wl_recovery_preview <worktree>         # inspect a candidate, no changes
 #   wl_recover <worktree> <owner> <entry-hash> <head> <status-hash>
-#   bash worktree-lifecycle.sh <register|unregister|list|audit|recovery-preview|recover> <args...>
+#   wl_recover_many <registration-entry>... # one supervised confirmation
+#   bash worktree-lifecycle.sh <register|unregister|list|audit|recovery-preview|recover|recover-many> <args...>
 #
 # Registry: one file per owned worktree under <git-common-dir>/sge-worktrees/,
 # so every linked worktree of a repo shares ONE registry. Entries are written
@@ -79,6 +80,30 @@ _wl_status_hash() {
   (set -o pipefail; git -C "$1" status --porcelain=v1 -z --untracked-files=all | git hash-object --stdin)
 }
 
+_wl_archive_registration() (
+  local f="$1" dir="$2" key="$3" expected="$4" archive saved current
+  [ -t 0 ] && [ -t 1 ] || { echo "error:interactive-terminal-required" >&2; return 7; }
+  [ ! -L "$dir/recovered" ] || { echo "error:unsafe-archive" >&2; return 1; }
+  mkdir -p "$dir/recovered" || return 1
+  archive="$(mktemp -d "$dir/recovered/$key.XXXXXX")" || return 1
+  saved="$archive/entry"
+  if ! mv -- "$f" "$saved"; then
+    rmdir "$archive" 2>/dev/null || :
+    echo "error:archive-failed" >&2
+    return 1
+  fi
+  current="$(git hash-object "$saved" 2>/dev/null)" || current=''
+  if [ ! -f "$saved" ] || [ -L "$saved" ] || [ "$current" != "$expected" ]; then
+    if ln -T -- "$saved" "$f" 2>/dev/null; then
+      printf 'error:evidence-changed; changed claim restored and archived: %q\n' "$saved" >&2
+    else
+      printf 'error:evidence-changed; active path not overwritten; reconcile archive: %q\n' "$saved" >&2
+    fi
+    return 8
+  fi
+  printf 'recovered: %q\n' "$saved"
+)
+
 wl_register() (
   local wt="$1" sid="${2:-}" common dir f owner abs branch tmp lock
   _wl_valid_session "$sid" || { echo "error:bad-session-id" >&2; return 5; }
@@ -143,7 +168,7 @@ wl_recovery_preview() {
 
 wl_recover() (
   local wt="$1" owner="${2:-}" expected="${3:-}" head="${4:-}" status="${5:-}"
-  local common abs dir key f lock answer saved current
+  local common abs dir key f lock answer current
   _wl_valid_session "$owner" || { echo "error:bad-session-id" >&2; return 5; }
   _wl_is_linked "$wt" || { echo "error:not-a-linked-worktree" >&2; return 6; }
   common="$(_wl_common_dir "$wt")" || return 3
@@ -172,15 +197,92 @@ wl_recover() (
   [ "$current" = "$head" ] || { echo "error:evidence-changed" >&2; return 8; }
   current="$(_wl_status_hash "$wt")" || return 1
   [ "$current" = "$status" ] || { echo "error:evidence-changed" >&2; return 8; }
-  mkdir -p "$dir/recovered" || return 1
-  saved="$(mktemp "$dir/recovered/$key.XXXXXX")" || return 1
-  if ! cp "$f" "$saved" || ! cmp -s "$f" "$saved"; then
-    rm -f "$saved"
-    echo "error:archive-failed" >&2
-    return 1
-  fi
-  rm "$f" || { echo "error:release-failed" >&2; return 1; }
-  printf 'recovered: %s\n' "$saved"
+  _wl_archive_registration "$f" "$dir" "$key" "$expected"
+)
+
+wl_recover_many() (
+  local candidate wt abs common dir f owner hash head status branch seen answer
+  local lock current i rc skipped=0 failed=0
+  local -a paths=() owners=() hashes=() heads=() statuses=() branches=() entries=() commons=()
+  [ "$#" -gt 0 ] || { echo "error:registration-entries-required" >&2; return 2; }
+  [ -t 0 ] && [ -t 1 ] || { echo "error:interactive-terminal-required" >&2; return 7; }
+  exec 3<>/dev/tty || { echo "error:interactive-terminal-required" >&2; return 7; }
+
+  for candidate in "$@"; do
+    if [ ! -f "$candidate" ] || [ -L "$candidate" ]; then
+      printf 'skipped invalid entry: %q\n' "$candidate" >&3; skipped=$((skipped + 1)); continue
+    fi
+    wt="$(_wl_entry_field "$candidate" path)"
+    if [ -z "$wt" ] || ! _wl_is_linked "$wt"; then
+      printf 'skipped unavailable worktree: %q\n' "$wt" >&3; skipped=$((skipped + 1)); continue
+    fi
+    abs="$(_wl_abs "$wt")" || return 1
+    common="$(_wl_common_dir "$abs")" || return 3
+    dir="$common/sge-worktrees"
+    f="$dir/$(_wl_key "$abs").entry"
+    if [ "$(_wl_abs "$(dirname "$candidate")")" != "$(_wl_abs "$dir")" ] ||
+       [ "$(basename "$candidate")" != "$(basename "$f")" ] ||
+       [ ! -f "$f" ] || [ -L "$f" ] || [ "$(_wl_entry_field "$f" path)" != "$abs" ]; then
+      printf 'skipped mismatched entry: %q\n' "$candidate" >&3; skipped=$((skipped + 1)); continue
+    fi
+    for seen in "${paths[@]}"; do
+      [ "$seen" != "$abs" ] || { echo "error:duplicate-target" >&2; return 4; }
+    done
+    owner="$(_wl_entry_field "$f" session)"
+    _wl_valid_session "$owner" || { printf 'skipped invalid owner: %q\n' "$abs" >&3; skipped=$((skipped + 1)); continue; }
+    hash="$(git hash-object "$f")" || return 1
+    head="$(git -C "$abs" rev-parse --verify HEAD)" || return 1
+    status="$(_wl_status_hash "$abs")" || return 1
+    branch="$(git -C "$abs" symbolic-ref -q --short HEAD 2>/dev/null || echo '(detached)')"
+    paths+=("$abs"); owners+=("$owner"); hashes+=("$hash")
+    heads+=("$head"); statuses+=("$status"); branches+=("$branch"); entries+=("$f"); commons+=("$common")
+  done
+  [ "${#paths[@]}" -gt 0 ] || { echo "error:no-recoverable-entries" >&2; return 4; }
+
+  echo 'Review every registration and establish that all its writers have stopped.' >&3
+  echo 'Status hashes do not capture file contents; preserve the original worktrees.' >&3
+  for ((i=0; i<${#paths[@]}; i++)); do
+    printf 'path=%q owner=%q branch=%q entry=%s head=%s status=%s\n' \
+      "${paths[i]}" "${owners[i]}" "${branches[i]}" "${hashes[i]}" "${heads[i]}" "${statuses[i]}" >&3
+  done
+  printf 'Skipped: %s. Each entry is rechecked separately; partial recovery is possible.\n' "$skipped" >&3
+  printf 'Type RECOVER %s to proceed: ' "${#paths[@]}" >&3
+  IFS= read -r answer <&3 || return 7
+  [ "$answer" = "RECOVER ${#paths[@]}" ] || { echo "error:confirmation-refused" >&2; return 7; }
+
+  for ((i=0; i<${#paths[@]}; i++)); do
+    if (
+      wt="${paths[i]}"; owner="${owners[i]}"; f="${entries[i]}"
+      common="$(_wl_common_dir "$wt")" || exit 3
+      [ "$(_wl_abs "$common")" = "$(_wl_abs "${commons[i]}")" ] ||
+        { echo "error:evidence-changed" >&2; exit 8; }
+      dir="$common/sge-worktrees"; lock="$dir/$(_wl_key "$wt").lock"
+      _wl_lock "$lock" || exit $?
+      trap 'rmdir "$lock" 2>/dev/null || :' EXIT
+      _wl_is_linked "$wt" || { echo "error:not-a-linked-worktree" >&2; exit 6; }
+      [ -f "$f" ] && [ ! -L "$f" ] || { echo "error:registration-unavailable" >&2; exit 4; }
+      [ "$(_wl_entry_field "$f" session)" = "$owner" ] &&
+        [ "$(_wl_entry_field "$f" path)" = "$wt" ] || { echo "error:foreign-claim" >&2; exit 4; }
+      current="$(git hash-object "$f")" || exit 1
+      [ "$current" = "${hashes[i]}" ] || { echo "error:evidence-changed" >&2; exit 8; }
+      current="$(git -C "$wt" rev-parse --verify HEAD)" || exit 1
+      [ "$current" = "${heads[i]}" ] || { echo "error:evidence-changed" >&2; exit 8; }
+      current="$(_wl_status_hash "$wt")" || exit 1
+      [ "$current" = "${statuses[i]}" ] || { echo "error:evidence-changed" >&2; exit 8; }
+      current="$(git -C "$wt" symbolic-ref -q --short HEAD 2>/dev/null || echo '(detached)')"
+      [ "$current" = "${branches[i]}" ] || { echo "error:evidence-changed" >&2; exit 8; }
+      _wl_archive_registration "$f" "$dir" "$(_wl_key "$wt")" "${hashes[i]}" || exit $?
+      printf 'released: %q\n' "$wt"
+    ); then
+      :
+    else
+      rc=$?; failed=$((failed + 1))
+      printf 'not recovered; inspect errors: %q (exit %s)\n' "${paths[i]}" "$rc" >&2
+    fi
+  done
+  printf 'recovery summary: %s recovered, %s not recovered, %s skipped\n' \
+    "$(( ${#paths[@]} - failed ))" "$failed" "$skipped"
+  [ "$failed" -eq 0 ] && [ "$skipped" -eq 0 ]
 )
 
 wl_list() {
@@ -233,6 +335,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
     audit)      wl_audit "$@" ;;
     recovery-preview) wl_recovery_preview "$@" ;;
     recover)    wl_recover "$@" ;;
-    *) echo "usage: worktree-lifecycle.sh register|unregister|list|audit|recovery-preview|recover ..." >&2; exit 2 ;;
+    recover-many) wl_recover_many "$@" ;;
+    *) echo "usage: worktree-lifecycle.sh register|unregister|list|audit|recovery-preview|recover|recover-many ..." >&2; exit 2 ;;
   esac
 fi
