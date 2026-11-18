@@ -383,12 +383,13 @@ runs.jsonl is untouched by this feature. Snapshot fields (`kind` is `cycle`,
 
 | Field | Type | Meaning |
 |---|---|---|
-| `state` | string | always `running` — written only by a completing cycle, so a fresh snapshot after a restart IS the live state |
+| `state` | string | `running` — written by a completing cycle, so a fresh snapshot after a restart IS the live state; `paused` while a global pause holds (sge#3610) |
 | `eligible` | int | candidates this cycle considered for dispatch |
 | `dispatched` | int | changes actually dispatched this cycle |
 | `held` | int | open PRs this cycle's poll saw under `needs-human`/`hold`/`do-not-merge`/`blocked` |
 | `needs_human_prs` | list | those PRs as `owner/repo#N` — **verified open + still labelled by this same cycle's poll**, rebuilt every cycle, never accumulated; capped at 40 entries (`held` keeps the full count) |
 | `idle_reason` | string or null | why nothing was dispatched (e.g. `idle: 0 eligible, 3 held (needs-human)`), also logged beside the dispatch line; null on a dispatching cycle |
+| `global_pause` | object or null | the active global pause as `{reason, evidence, until}` (sge#3610); null when none. While paused the snapshot's `idle_reason` is `global pause until <until>: <reason> (evidence: ...)` and the held lists are carried over from the last polled snapshot |
 
 A feed that surfaces `needs_human_prs` or `state` should read this snapshot
 (checking `ts` freshness against the poll interval) instead of accumulating
