@@ -57,6 +57,8 @@ Targets the repo in the current directory (or the dirs in `$ARGUMENTS`). From a 
 /sge:tidy-worktrees --inbox            # read-only: one suggested action per item (inbox.sh)
 ```
 
+**GitHub Copilot, or any host without subagents or `AskUserQuestion`:** follow the numbered [linear procedure](references/copilot-procedure.md) instead of Phases 1-5. It uses the same scripts (`audit.sh`, `assess.sh`, `execute.sh`), assesses items inline one at a time and asks with numbered lists. It works on GitHub, Azure DevOps (`SGE_AZDO_TOKEN`) and Forgejo.
+
 Recovery, restore and limits: [`docs/worktree-lifecycle.md`](../../docs/worktree-lifecycle.md). Cortex: at start `search_nodes` for the repo; at every terminal path `create_entities` for a qualifying pattern/convention/gotcha, skipping silently if sge-memory is absent ([detail](../lib/cortex-review-lane.md)).
 
 ## Phase 0 — Sync
@@ -75,7 +77,7 @@ fi
 
 `hpr_open_pr_heads` routes by host: `gh` on GitHub, the Forgejo adapter, or `azdo-adapter.sh list-prs` on Azure DevOps (needs `SGE_AZDO_TOKEN`, a read-only Code PAT). It fails closed on an unknown host, a failed call, a malformed payload or possible truncation; an empty result with exit 0 is a confirmed zero. On Azure DevOps squash-merges use `hpr_completed_pr_heads <branch>` (fail-closed too).
 
-Then run the **engine**: `bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/tidy-worktrees/audit.sh" --summary [repo dirs…]` (drop `--summary` for the JSON, or add `--json-out <file>`). It classifies local worktrees, branches, stashes **and** `origin/*` branches into A-D with PR state, ahead/behind, age, last author and supersession, and prints the delete plan as literal per-branch commands. Fields and rules: [`references/audit-engine.md`](references/audit-engine.md). Host without bash or jq: follow [`references/safety-audit-checks.md`](references/safety-audit-checks.md) by hand.
+Then run the **engine**: `bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/tidy-worktrees/audit.sh" --summary [repo dirs…]` (drop `--summary` for the JSON, or add `--json-out <file>`; `--multi <parent-dir>` audits every repo under a folder and adds combined totals). It classifies local worktrees, branches, stashes **and** `origin/*` branches into A-D with PR state, ahead/behind, age, last author and supersession, and prints the delete plan as literal per-branch commands. Fields and rules: [`references/audit-engine.md`](references/audit-engine.md). Host without bash or jq: follow [`references/safety-audit-checks.md`](references/safety-audit-checks.md) by hand.
 
 ## Phase 2 — Protections (the engine applies these; re-check by hand if you override it)
 
@@ -97,7 +99,7 @@ A Git lock is a retention marker, not evidence of an active worker, so locked wo
 
 ## Phase 3 — Fan out, then decide
 
-1. **Assess B and C in parallel (read-only).** Launch one assessor agent per unmerged item, or per ~5 small ones, in a single message. Each returns net diff vs base, supersession, tests, acceptance-criteria coverage and an advisory disposition; the user decides in steps 2 and 3. Brief and return format: [`references/assessor-brief.md`](references/assessor-brief.md). Hosts without subagents (Copilot): run the same checks inline, one item at a time. Assessors are read-only reporters: they return findings to this session, and every user question, push, deletion or edit stays with this session behind the confirmations below.
+1. **Assess B and C in parallel (read-only).** Launch one assessor agent per unmerged item, or per ~5 small ones, in a single message. Each returns net diff vs base, supersession, tests, acceptance-criteria coverage and an advisory disposition; the user decides in steps 2 and 3. Brief and return format: [`references/assessor-brief.md`](references/assessor-brief.md). Hosts without subagents (Copilot): run `assess.sh <repo-dir> <ref>` inline, one item at a time ([procedure](references/copilot-procedure.md)). Assessors are read-only reporters: they return findings to this session, and every user question, push, deletion or edit stays with this session behind the confirmations below.
 2. **A and D: one plan.** Show every A item (path, branch, PR link, full tip SHA) and every D item (tip SHA, why superseded) in one plan: *remove all merged, choose a subset, or keep everything?* Revalidate each item immediately before removal (tip, files, stashes, claims, locks, recency); anything changed means re-audit. Remote branches need their own explicit confirmation of the literal commands.
 3. **B: one capped multi-select.** Offer **one** multi-select, "open draft PRs for these N", containing only items that individually pass: `rescue-guard.sh` supersession `live` **and** the linked issue still open. Draft PRs only, at most `SGE_TIDY_MAX_DRAFT_PRS` (default 10) per run, never auto-merge, never force-push. The rest of B: keep, or discard with SHA, asked per item. Policy: [`references/consolidation-intent.md`](references/consolidation-intent.md).
 4. **C: one named decision each** (continue, keep, or discard with files named). Unknown means keep.
@@ -118,15 +120,16 @@ A rescued worktree must then pass `assess` and `verify` ([`references/rescued-wo
 
 > **Label-mutation prohibition.** Never add or remove labels on PRs or issues (`pr-reviewing`, `pr-reviewed` belong to the review plane).
 
-On Windows run the [junction guard](references/windows-junction-guard.md) (detect, `cmd /c rmdir`, verify) before every `git worktree remove`. Then run the plan's **literal** commands; the git-policy-guard blocks variable-driven branch names in `git push origin --delete`:
+Run the approved plan with the **executor**, never with hand-written loops ([contract](references/executor.md)):
 
 ```bash
-git worktree remove '<path>' && git worktree prune
-git branch -d '<branch>'     # -D only for plan-confirmed squash-merged or explicit discards, tip SHA recorded
-git push origin --delete '<branch>'   # last; host-neutral (GitHub, Forgejo, Azure DevOps)
+S="${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/tidy-worktrees"
+bash "$S/execute.sh" --audit audit.json --select all --dry-run   # preview, or one --select '<kind>:<name>@<tip>' per approved item
+bash "$S/execute.sh" --audit audit.json --select all             # local A/D: recovery CSV first, then worktrees, then branches
+bash "$S/execute.sh" --audit audit.json --remote --select 'remote-branch:<name>@<tip>'   # remote: separate approval, literal per branch
 ```
 
-If git refuses a dirty tree, re-audit; do not force.
+It writes the recovery CSV (tip SHAs and restore commands) before touching anything. It re-checks each item immediately before acting (tip, tracked tree, lock, claim, current checkout, protected name) and runs the [junction guard](references/windows-junction-guard.md) before every `git worktree remove`. It never passes `--force`, and it runs `branch -D` only on a re-confirmed tip. Remote branches need `--remote` and a literal token. `git ls-remote` must still show the audited tip, and a fresh open-PR lookup must not list the branch. Every failed check is a `SKIP`: re-audit, do not force. The plan's literal commands (`git worktree remove '<path>'`, `git branch -d '<branch>'`, `git push origin --delete '<branch>'`) remain the manual fallback for a host without bash.
 
 ## Phase 5 — Report
 
@@ -134,7 +137,7 @@ Every item ends **already in main / PR opened / kept with a named blocker / disc
 
 ## Multi-repo
 
-Fan out the read-only audit (one agent per repo), merge the tables, then run Phases 3-4 **sequentially**, one repo at a time. Never interleave destructive steps across repos.
+`audit.sh --multi <parent-dir> --summary --json-out audit.json` audits every repo under a folder. It prints one combined summary (`ALL` totals, the combined delete-plan size, and every B/C/D item with its reason) and writes one JSON file that `execute.sh` takes as is. The executor then works one repo at a time and never interleaves destructive steps across repos. Assess B/C items with agents (one per repo or per ~5 items), or inline with `assess.sh` on Copilot.
 
 ## Key principles
 

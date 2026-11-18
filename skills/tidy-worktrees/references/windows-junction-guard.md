@@ -4,14 +4,20 @@ Moved verbatim from `SKILL.md` (issue #2917, 24 KB size budget).
 
 > ⚠️ **Windows data-loss hazard.** On Windows, repos whose worktrees are wired up by a junction-clone (NTFS directory junctions linking shared build artefacts such as `packages-shared/`, `api/backend-core/`, or `packages/core-*` into each worktree) will have `git worktree remove` — and any recursive `rm -rf` — **follow the junctions and delete the real target files**. This has caused loss of 1000+ source files in a single sweep. Always run this guard before removing a worktree path on Windows.
 
+**Scripted: `execute.sh` runs this guard for you** through [`junction-guard.ps1`](../junction-guard.ps1), before every worktree removal ([executor](executor.md)). The manual steps below are the fallback.
+
+> **Do not enumerate with `Get-ChildItem -Recurse`.** In Windows PowerShell 5.1, `-Recurse` follows junctions into their targets. It would then list junctions *inside the target* and unlink them, which changes the target. `junction-guard.ps1` walks one level at a time and never descends into a reparse point. It removes each link with a non-recursive delete, which cannot remove files.
+
 **Step 4a — Detect junctions (Windows only).**
 
 On Windows (any of: `$WINDIR` set, `uname -s` starts with `MINGW`/`MSYS`/`CYGWIN`, or `[System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)` returns true):
 
 ```powershell
 # PowerShell — enumerate every directory junction inside the worktree path
-$junctions = Get-ChildItem -Path "<worktree-path>" -Recurse -Directory -ErrorAction SilentlyContinue |
-             Where-Object { $_.LinkType -eq 'Junction' }
+# One level at a time; never descend into a reparse point (see the warning above).
+$junctions = @(); $queue = [System.Collections.Generic.Queue[string]]::new(); $queue.Enqueue("<worktree-path>")
+while ($queue.Count) { foreach ($c in Get-ChildItem -LiteralPath $queue.Dequeue() -Force -Directory -ErrorAction Stop) {
+  if ($c.Attributes -band [IO.FileAttributes]::ReparsePoint) { $junctions += $c } else { $queue.Enqueue($c.FullName) } } }
 ```
 
 If `$junctions` is non-empty, **add a prominent notice to the deletion plan** before the user confirms:

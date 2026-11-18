@@ -78,10 +78,15 @@ done
 
 # --- removal order and the confirmation gate are written down and kept ---
 SK="$SKILL_DIR/SKILL.md"
-w="$(grep -n '^git worktree remove' "$SK" | head -1 | cut -d: -f1)"
-b="$(grep -n '^git branch -d' "$SK" | head -1 | cut -d: -f1)"
-r="$(grep -n '^git push origin --delete' "$SK" | head -1 | cut -d: -f1)"
-check "removal order: worktrees, then local branches, then remote" "$([ -n "$w" ] && [ "$w" -lt "$b" ] && [ "$b" -lt "$r" ] && echo ordered)" "ordered"
+# Removal now runs through execute.sh (#3621): its per-repo loop is the order, and
+# SKILL.md must show the local run (worktrees, then branches) before the remote run.
+EX="$SKILL_DIR/execute.sh"
+check "removal order: execute.sh runs worktrees, then local branches, then remote" \
+  "$(grep -cE '^[[:space:]]*for k in worktree branch remote-branch; do' "$EX")" "1"
+check "removal order: only one per-kind removal loop in execute.sh" "$(grep -cE '^[[:space:]]*for k in ' "$EX")" "1"
+l="$(grep -n 'execute\.sh.*--select all  *# local A/D: recovery CSV first, then worktrees, then branches' "$SK" | head -1 | cut -d: -f1)"
+r="$(grep -n 'execute\.sh.*--remote --select' "$SK" | head -1 | cut -d: -f1)"
+check "removal order: SKILL.md runs local removal before remote" "$([ -n "$l" ] && [ -n "$r" ] && [ "$l" -lt "$r" ] && echo ordered)" "ordered"
 check "junction guard is still required before removal" "$(grep -c 'Windows junction guard' "$SK" | awk '{print ($1>0)?"yes":"no"}')" "yes"
 check "--force still needs a confirmed plan" "$(grep -c 'one consolidated deletion plan\|single confirmation\|ask \*\*one\*\* confirmation' "$SK" | awk '{print ($1>0)?"yes":"no"}')" "yes"
 check "inbox is declared suggestions-only in the skill" "$(grep -c -- '--inbox' "$SK" | awk '{print ($1>0)?"yes":"no"}')" "yes"
