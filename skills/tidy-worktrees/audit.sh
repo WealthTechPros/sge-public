@@ -6,7 +6,9 @@
 # local-delete commands it prints are a PLAN for the main session to put in front
 # of the user.
 #
-#   audit.sh [--json-out <file>] [--summary] [--fetch] [<repo-dir> ...]
+#   audit.sh [--json-out <file>] [--summary] [--fetch] [--multi <parent-dir>] [<repo-dir> ...]
+#   --multi audits every repo directly under <parent-dir>; --summary then adds
+#   combined totals and the combined delete-plan size across all repos.
 #   source audit.sh; ta_audit_repo <repo-dir>      # JSON object for one repo
 #
 # Buckets (the skill's Objective):
@@ -311,29 +313,41 @@ ta_audit_repo() {
   )
 }
 
-ta_summary() { # JSON array of reports on stdin -> short human text
-  jq -r '.[] |
+ta_summary() { # JSON array of reports on stdin -> short human text (combined totals for >1 repo)
+  jq -r '(.[] |
     "repo: \(.repo)  base: \(.base)  host: \(.host)  open-PR set known: \(.open_pr_set_known)",
     (if .refused then "  REFUSED: open-PR set unknown, nothing is delete-eligible" else empty end),
     "  total \(.counts.total)  A merged \(.counts.A)  B unmerged-valuable \(.counts.B)  C part-complete/keep \(.counts.C)  D superseded/empty \(.counts.D)",
     (.counts_by_kind | to_entries[] | "    \(.key): A=\(.value.A) B=\(.value.B) C=\(.value.C) D=\(.value.D)"),
-    (.items[] | select(.bucket == "B" or .bucket == "D" or (.bucket == "C" and (.sub_verdict | startswith("NEEDS-DECISION")))) |
-       "  [\(.bucket)] \(.kind) \(.name)  \(.sub_verdict)  tip=\(.tip[0:12])  ahead=\(.ahead) behind=\(.behind) age=\(.age_days)d")'
+    (.items[] | select(.bucket != "A") |
+       "  [\(.bucket)] \(.kind) \(.name)  \(.sub_verdict)  reason=\(.reason)  tip=\(.tip[0:12])  ahead=\(.ahead) behind=\(.behind) age=\(.age_days)d")),
+    (if length > 1 then
+       (map(.counts) | reduce .[] as $c ({A: 0, B: 0, C: 0, D: 0, total: 0}; with_entries(.value += $c[.key]))) as $t
+       | ([.[] | .delete_plan // {} | (.merged_A, .discard_D) | .local[]?] | length) as $l
+       | ([.[] | .delete_plan // {} | (.merged_A, .discard_D) | .remote[]?] | length) as $r
+       | "ALL \(length) repos: total \($t.total)  A merged \($t.A)  B unmerged-valuable \($t.B)  C part-complete/keep \($t.C)  D superseded/empty \($t.D)  refused \(map(select(.refused)) | length)",
+         "ALL delete plan: local \($l) item(s), remote \($r) branch(es) (A and D; run with execute.sh)"
+     else empty end)'
   echo "(read-only audit: nothing deleted, pushed or opened; commands in delete_plan are a plan for the user to confirm)"
 }
 
 ta_main() {
-  local out="" summary=0 fetch=0 repos=() rc=0 reports="" r one
+  local out="" summary=0 fetch=0 repos=() rc=0 reports="" r one multi=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --json-out) shift; out="${1:-}"; [ -n "$out" ] || { echo "usage: --json-out <file>" >&2; return 2; } ;;
       --summary) summary=1 ;;
       --fetch) fetch=1 ;;
-      -*) echo "usage: audit.sh [--json-out <file>] [--summary] [--fetch] [<repo-dir> ...]" >&2; return 2 ;;
+      --multi) # every git repo directly under <parent-dir> (a .git directory, so linked worktrees are skipped)
+        shift; [ -d "${1:-}" ] || { echo "usage: --multi <parent-dir>" >&2; return 2; }; multi=1
+        for r in "${1%/}"/*/; do [ -d "$r.git" ] && repos+=("${r%/}"); done ;;
+      -*) echo "usage: audit.sh [--json-out <file>] [--summary] [--fetch] [--multi <parent-dir>] [<repo-dir> ...]" >&2; return 2 ;;
       *) repos+=("$1") ;;
     esac
     shift
   done
+  # --multi that finds nothing is an error, never a fallback to another scope
+  [ "$multi" -eq 0 ] || [ "${#repos[@]}" -gt 0 ] || { echo "error: --multi found no git repositories" >&2; return 3; }
   if [ "${#repos[@]}" -eq 0 ] && [ -n "${SGE_INBOX_REPOS:-}" ]; then
     local IFS=':'; read -r -a repos <<<"$SGE_INBOX_REPOS"; unset IFS
   fi
