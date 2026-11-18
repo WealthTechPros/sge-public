@@ -116,8 +116,10 @@ bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/commit/scan
 The repo follows the SGE change protocol if **any** of these hold:
 
 ```bash
-# a) A commit-msg hook is installed (respect core.hooksPath; fall back to .git/hooks)
-HOOKS="$(git config core.hooksPath || true)"; HOOKS="${HOOKS:-.git/hooks}"
+# a) A commit-msg hook is installed. `git rev-parse --git-path hooks` resolves the
+#    configured hooks dir (else .git/hooks) without naming the setting, which
+#    PR Warden's fix guard refuses (sge#3534).
+HOOKS="$(git rev-parse --git-path hooks)"
 test -f "$HOOKS/commit-msg"
 ```
 
