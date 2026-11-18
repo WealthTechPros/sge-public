@@ -121,6 +121,34 @@ identity; do not automate the confirmation. A terminated operation can leave its
 lock directory behind; do not remove it by age or automatically. Establish
 who owns it and reconcile it explicitly. No recovery action is unattended.
 
+### Recover several reviewed registrations
+
+After establishing that **every selected owner and writer has stopped**, pass
+the exact registration entries to `recover-many`. For example, on Windows in
+Git Bash this selects entries from immediate checkouts under `C:\git`:
+
+```bash
+bash skills/lib/worktree-lifecycle.sh recover-many /c/git/*/.git/sge-worktrees/*.entry
+```
+
+The command displays each available worktree, owner, branch and fingerprints,
+plus skipped entries, and requests one interactive `RECOVER <count>`
+confirmation. Review the complete selection before confirming. Unavailable or
+invalid entries are skipped; duplicate targets refuse the entire selection.
+Each confirmed entry is independently rechecked under its own registry lock
+and archived before release. A changed or busy entry is not reported as
+recovered. If a replacement is detected during archival, restoration uses
+`ln -T` without overwriting the active path. If restoration fails (including
+on platforms without `ln -T`), reconcile the reported archive manually before
+proceeding. The command reports partial results and exits nonzero if any entry
+was skipped or not recovered; it is not an all-or-nothing transaction.
+
+This is neither automatic liveness detection nor a bulk Git unlock. Confirm
+that old clients and unmanaged writers are stopped, and inspect preservation
+coverage before choosing entries. The command does not change worktrees,
+branches, files, Git retention locks or assign new owners. It is an interactive
+operator action, not permission to automate the confirmation.
+
 ## Recovery
 
 List what exists, newest first:
