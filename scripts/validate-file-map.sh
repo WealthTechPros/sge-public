@@ -82,7 +82,7 @@ load_tracked() {
 # Does a concrete path exist in the tracked tree? (exact whole-line match)
 concrete_exists() {
   load_tracked
-  printf '%s\n' "$TRACKED" | awk -v p="$1" '$0==p{f=1} END{exit !f}'
+  awk -v p="$1" '$0==p{f=1} END{exit !f}' <<<"$TRACKED"
 }
 
 # How many tracked files does a glob match? Translate the glob to an anchored
@@ -144,7 +144,7 @@ cmd_owns() {
   line="$(cat)"
   # Take the value after the first `Owns:` (case-insensitive); if the input is
   # already a bare comma list, use it whole.
-  owns="$(printf '%s\n' "$line" | grep -iE '^[[:space:]]*Owns:' | head -1 | sed -E 's/^[[:space:]]*[Oo]wns:[[:space:]]*//')"
+  owns="$(grep -iE '^[[:space:]]*Owns:' <<<"$line" | head -1 | sed -E 's/^[[:space:]]*[Oo]wns:[[:space:]]*//')"
   [ -n "$owns" ] || owns="$line"
 
   local -a paths=()

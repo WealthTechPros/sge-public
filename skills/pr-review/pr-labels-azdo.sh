@@ -100,7 +100,7 @@ _prl_azdo_main() {
   _prl_azdo_labels() { # -> one label per line, or non-zero
     bash "$aa" get-pr "$origin" "$pr" | jq -r '.labels[].name' | tr -d '\r'
   }
-  _prl_azdo_has() { printf '%s\n' "$1" | grep -qxF -- "$2"; }
+  _prl_azdo_has() { grep -qxF -- "$2" <<<"$1"; }
   _prl_azdo_status() {
     local l rv=false rd=false
     l="$(_prl_azdo_labels)" || { _prl_azdo_err "could not read labels for PR #$pr"; return 1; }

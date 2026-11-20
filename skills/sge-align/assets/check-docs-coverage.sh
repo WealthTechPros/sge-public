@@ -127,7 +127,7 @@ model_present=false
 while IFS= read -r c; do
   [ -z "$c" ] && continue
   tot_caps=$((tot_caps+1))
-  if printf '%s\n' "$cited_sorted" | grep -qxF "$c"; then
+  if grep -qxF "$c" <<<"$cited_sorted"; then
     doc_caps=$((doc_caps+1))
   else
     cap_findings="${cap_findings}{\"artefact\":\"$(json_esc "$c")\",\"severity\":\"medium\",\"check\":\"docs-coverage-capability\",\"finding\":\"capability declared in model but cited by no current-documented spec\"},"

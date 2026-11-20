@@ -39,7 +39,7 @@ mkwt() {
   [ "$owner" = none ] || wl_register "$p" "$owner" >/dev/null
   git -C "$R" worktree lock --reason "retain for review of $n" "$p"
 }
-for n in stale claimed foreign:s2 unrecorded:none openpr dirty stashed movedtip nopr junc ignored; do
+for n in stale claimed:s2 foreign:s2 unrecorded:none openpr dirty stashed movedtip nopr junc ignored; do
   mkwt "${n%%:*}" "$( [ "$n" = "${n#*:}" ] && echo s1 || echo "${n#*:}" )"
 done
 printf 'other-agent %s\n' "$(date +%s)" >"$(WTP claimed)/.sge-wt-claim"
@@ -47,8 +47,8 @@ echo wip >"$(WTP dirty)/wip.txt"
 ( cd "$(WTP stashed)" && echo q >q.txt && git add q.txt && git stash -q )   # "WIP on feat/stashed", tree clean again
 ( cd "$(WTP ignored)" && printf 'node_modules/\n*.tmp\n' >.gitignore && git add .gitignore && git commit -q -m ign && mkdir node_modules && echo x >node_modules/dep.js \
   && for i in $(seq 1 25); do : >"f$i.tmp"; done )   # 26 ignored entries: more than any display cap
-[ "$HOSTILE" -eq 0 ] || { mkwt hostile s1; NITEMS=12; CANDS="feat/hostile,feat/ignored,feat/junc,feat/stale"; }
-[ "$HOSTILE" -eq 1 ] || { NITEMS=11; CANDS="feat/ignored,feat/junc,feat/stale"; }
+[ "$HOSTILE" -eq 0 ] || { mkwt hostile s1; NITEMS=12; CANDS="feat/foreign,feat/hostile,feat/ignored,feat/junc,feat/stale,feat/unrecorded"; }
+[ "$HOSTILE" -eq 1 ] || { NITEMS=11; CANDS="feat/foreign,feat/ignored,feat/junc,feat/stale,feat/unrecorded"; }
 git -C "$R" worktree add -q -b feat/unlocked "$(WTP unlocked)" main   # never locked: never listed
 
 # ---- stub host ----
@@ -91,16 +91,18 @@ check "stale retention lock + merged PR + exact head -> candidate" "$(cr stale)"
 check "lock reason surfaced as data" "$(it stale .lock_reason)" "retain for review of stale"
 check "lock age and owner session surfaced" "$(it stale '(.lock_age_days|tostring) + ":" + .owner_session')" "0:s1"
 check "completed PR reference recorded" "$(it stale '.pr_state + "#" + .pr_number')" "merged#1"
-check "fresh claim -> protected KEEP" "$(cr claimed)" "protected:live-claim"
-check "foreign owner -> protected KEEP" "$(cr foreign)" "protected:foreign-owner"
-check "unrecorded owner -> unknown (fails closed, surfaced)" "$(cr unrecorded)" "unknown:owner-unrecorded"
+check "fresh claim protects a worktree registered to another session" "$(cr claimed)" "protected:live-claim"
+check "another session's registration does not veto an otherwise eligible candidate" "$(cr foreign)" "candidate:inactive-clean-merged-pr-exact-head"
+check "missing registration does not veto an otherwise eligible candidate" "$(cr unrecorded)" "candidate:inactive-clean-merged-pr-exact-head"
+check "decision still discloses the recorded owner or its absence" \
+  "$(printf '%s' "$REPORT" | jq -r '[.decision.candidates[] | select(.branch=="feat/foreign" or .branch=="feat/unrecorded") | .owner_session] | [.[0], (.[1] | tostring)] | join(":")')" "s2:null"
 check "open PR -> protected" "$(cr openpr)" "protected:active-pr"
 check "dirty tracked tree -> protected" "$(cr dirty)" "protected:uncommitted-changes"
 check "attributed stash -> protected" "$(cr stashed)" "protected:attributed-stash"
 check "merged PR head differs from tip -> protected" "$(cr movedtip)" "protected:tip-differs-from-merged-pr-head"
 check "clean but no PR -> protected (clean does not mean merged)" "$(cr nopr)" "protected:no-completed-pr"
 check "ignored files listed separately: EVERY path, none truncated" "$(it ignored '(.ignored_count|tostring) + ":" + (.ignored_paths|length|tostring) + ":" + ((.ignored_paths|index("node_modules/")) != null | tostring)')" "26:26:true"
-check "candidates = stale, junc, ignored, hostile" "$(printf '%s' "$REPORT" | jq -r '[.decision.candidates[].branch] | sort | join(",")' | tr -d '\r')" "$CANDS"
+check "candidate set matches without filtering by ownership" "$(printf '%s' "$REPORT" | jq -r '[.decision.candidates[].branch] | sort | join(",")' | tr -d '\r')" "$CANDS"
 check "decision offers keep / release / remove" "$(printf '%s' "$REPORT" | jq '.decision.options | length')" "3"
 check "approval token is path@full-tip" "$(printf '%s' "$REPORT" | jq -r '.decision.candidates[] | select(.branch=="feat/stale") | .approval' | tr -d '\r')" "$(it stale .path)@$(tipof stale)"
 check "ignored-file disclosure in the decision" "$(printf '%s' "$REPORT" | jq -r '.decision.candidates[] | select(.branch=="feat/ignored") | .ignored_files.paths|length' | tr -d '\r')" "26"
@@ -131,7 +133,7 @@ RN="$( SGE_WT_RECENCY_GUARD_MIN=ten; export SGE_WT_RECENCY_GUARD_MIN; audit )"
 check "non-numeric recency guard -> unknown (guard is not silently disabled)" "$(printf '%s' "$RN" | jq -r '[.items[] | select(.branch=="feat/stale")][0] | .class + ":" + .reason' | tr -d '\r')" "unknown:age-unreadable"
 check "junction probe unavailable -> unknown, not candidate" "$(printf '%s' "$RJ" | jq -r '[.items[] | select(.branch=="feat/stale")][0] | .class + ":" + .reason' | tr -d '\r')" "unknown:junction-probe-failed"
 RS="$(SID=s9 && cd "$R" && la_audit "$R" s9)"
-check "another session sees every worktree as foreign (never a candidate)" "$(printf '%s' "$RS" | jq '[.items[] | select(.class=="candidate")] | length')" "0"
+check "another requesting session sees the same candidate set" "$(printf '%s' "$RS" | jq -r '[.decision.candidates[].branch] | sort | join(",")' | tr -d '\r')" "$CANDS"
 RR="$(SGE_WT_RECENCY_GUARD_MIN=600 audit)"
 check "recently created -> protected" "$(printf '%s' "$RR" | jq -r '[.items[] | select(.branch=="feat/stale")][0] | .class + ":" + .reason' | tr -d '\r')" "protected:recently-created"
 
@@ -167,8 +169,6 @@ OUT="$(APPLY remove no "$STALE_P@abc")"
 check "malformed approval stops" "$(printf '%s' "$OUT" | jq -r '.[0].status + ":" + .[0].reason')" "stopped:approval-not-path-at-full-tip-sha"
 OUT="$(APPLY remove no "$(it claimed .path)@$(tipof claimed)")"
 check "protected item cannot be forced through approval" "$(printf '%s' "$OUT" | jq -r '.[0].status + ":" + .[0].reason')" "stopped:revalidation-protected:live-claim"
-OUT="$(APPLY release no "$(it unrecorded .path)@$(tipof unrecorded)")"
-check "unknown ownership cannot be approved" "$(printf '%s' "$OUT" | jq -r '.[0].status + ":" + .[0].reason')" "stopped:revalidation-unknown:owner-unrecorded"
 check "stopped items left everything as found" "$(snap)" "$before"
 # changed tip after the audit: the user approved the old tip
 ( cd "$(WTP stale)" && echo more >>stale.txt && git commit -qam more )
@@ -226,6 +226,15 @@ check "post-unlink junction probe failure fails closed: no remove, lock restored
 JUNC_LIST="$TMP/junction-link"
 OUT="$(APPLY remove no "$J_P@$J_T")"
 check "junctions are unlinked (links only) before removal" "$(printf '%s' "$OUT" | jq -r '.[0].status'):$([ -d "$J_P" ] && echo dir || echo gone)" "removed:gone"
+
+OUT="$(APPLY release no "$(it foreign .path)@$(tipof foreign)")"
+check "approved release preserves the other session's registration and worktree" \
+  "$(printf '%s' "$OUT" | jq -r '.[0].status'):$([ -d "$(WTP foreign)" ] && echo dir):$(wl_list "$R" | awk -F '\t' '$3=="feat/foreign"{print $1}')" "released:dir:s2"
+UNREG_T="$(tipof unrecorded)"
+OUT="$(APPLY remove no "$(it unrecorded .path)@$UNREG_T")"
+check "approved unregistered removal keeps the recovery SHA and removes the worktree and branch" \
+  "$(printf '%s' "$OUT" | jq -r '.[0].status + ":" + .[0].recovery_sha'):$([ -d "$(WTP unrecorded)" ] || echo gone):$(git -C "$R" show-ref --verify --quiet refs/heads/feat/unrecorded || echo nobranch)" \
+  "removed:$UNREG_T:gone:nobranch"
 
 # ---- hostile approval token is data end to end ----
 if [ "$HOSTILE" -eq 1 ]; then

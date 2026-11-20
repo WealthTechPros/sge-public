@@ -487,11 +487,11 @@ parse_claim_metadata() {
   local body meta
   body=$(printf '%s' "${1:-}" | jq -r '.body // empty' 2>/dev/null) || return 0
   # awk: extract lines between the opening fence and the next closing fence.
-  meta=$(printf '%s\n' "$body" | awk "
+  meta=$(awk "
     /^\`\`\`${CLAIM_COMMENT_FENCE}/{f=1;next}
     f && /^\`\`\`/{exit}
     f{print}
-  ") || true
+  " <<<"$body") || true
   printf '%s' "${meta:-}"
 }
 
@@ -996,7 +996,7 @@ remove_label() {
 # signature (403 + "rate limit", "API rate limit exceeded", secondary rate
 # limit, or HTTP 429). Pure string match, no network call.
 is_rate_limit_error() {
-  printf '%s' "${1:-}" | grep -qiE '(^|[^0-9])403([^0-9]|$).*rate limit|rate limit.*(^|[^0-9])403([^0-9]|$)|api rate limit exceeded|secondary rate limit|(^|[^0-9])429([^0-9]|$)'
+  grep -qiE '(^|[^0-9])403([^0-9]|$).*rate limit|rate limit.*(^|[^0-9])403([^0-9]|$)|api rate limit exceeded|secondary rate limit|(^|[^0-9])429([^0-9]|$)' <<<"${1:-}"
 }
 
 # rate_limit_status -- print "<remaining> <limit> <reset>" for the REST core
@@ -1295,7 +1295,7 @@ assert_required_checks_green() {
   # By this point await_head_convergence has already exercised gh successfully,
   # so auth/network are proven working and an empty-with-that-notice really is
   # "nothing required", not a transient failure.
-  if [[ -z "${raw//[[:space:]]/}" ]] && printf '%s' "$err" | grep -qiE 'no (required )?checks'; then
+  if [[ -z "${raw//[[:space:]]/}" ]] && grep -qiE 'no (required )?checks' <<<"$err"; then
     echo "PR #$PR: no required checks reported — required-check guard is a no-op (issue #885)" >&2
     return 0
   fi
@@ -1756,8 +1756,28 @@ case "$CMD" in
           # doesn't match the shadow-laundering shape", which correctly
           # falls through to a normal pass (fails closed either way; this
           # only fixes the diagnosability, not a security gap).
-          _PASS_LAST_SHA=$(printf '%s' "$_PASS_LAST" | grep -Eio '^[[:space:]]*(commit|sha|head)[[:space:]]*:[[:space:]]*[0-9a-f]+' | head -1 | grep -Eio '[0-9a-f]+$') || _PASS_LAST_SHA=""
-          _PASS_LAST_MODE=$(printf '%s' "$_PASS_LAST" | grep -Eio '^[[:space:]]*mode[[:space:]]*:.*' | head -1) || _PASS_LAST_MODE=""
+          # Extracted in-shell (sge#3642 review): no pipe to SIGPIPE under
+          # pipefail and no here-string temp file whose failure would read as
+          # "not a shadow verdict" and fall through to a normal pass. Same
+          # first-match, case-insensitive semantics as the grep -Eio form.
+          _PASS_LAST_SHA="" _PASS_LAST_MODE=""
+          _pl_nc_restore=0 _pl_f_restore=0
+          shopt -q nocasematch || { shopt -s nocasematch; _pl_nc_restore=1; }
+          case $- in *f*) ;; *) set -f; _pl_f_restore=1 ;; esac
+          _pl_ifs="$IFS"; IFS=$'\n'
+          # shellcheck disable=SC2206  # split on newlines only, globbing off
+          _pl_lines=($_PASS_LAST)
+          IFS="$_pl_ifs"
+          if [[ "$_pl_f_restore" = 1 ]]; then set +f; fi
+          for _pl_line in ${_pl_lines[@]+"${_pl_lines[@]}"}; do
+            if [[ -z "$_PASS_LAST_SHA" && $_pl_line =~ ^[[:space:]]*(commit|sha|head)[[:space:]]*:[[:space:]]*([0-9a-f]+) ]]; then
+              _PASS_LAST_SHA="${BASH_REMATCH[2]}"
+            fi
+            if [[ -z "$_PASS_LAST_MODE" && $_pl_line =~ ^[[:space:]]*mode[[:space:]]*:.* ]]; then
+              _PASS_LAST_MODE="${BASH_REMATCH[0]}"
+            fi
+          done
+          if [[ "$_pl_nc_restore" = 1 ]]; then shopt -u nocasematch; fi
           _PASS_LAST_SHA_NORM=$(printf '%s' "$_PASS_LAST_SHA" | tr '[:upper:]' '[:lower:]')
           _PASS_HEAD_NORM=$(printf '%s' "$_PASS_HEAD" | tr '[:upper:]' '[:lower:]')
           if [[ -n "$_PASS_LAST_SHA_NORM" && ${#_PASS_LAST_SHA_NORM} -ge 7 \
@@ -2567,7 +2587,7 @@ case "$CMD" in
     PRESENT_LABELS="$(gl_current_labels "$PR")" || PRESENT_LABELS=""
     ON_PR=()
     for _gl in "${GL_VERDICT_LABELS[@]}"; do
-      if printf '%s\n' "$PRESENT_LABELS" | grep -qxF "$_gl"; then
+      if grep -qxF "$_gl" <<<"$PRESENT_LABELS"; then
         ON_PR+=("$_gl")
       fi
     done
@@ -2593,8 +2613,7 @@ case "$CMD" in
     # the two writers fight (five add/remove rounds on sge#3418). It is a block,
     # never a grant, so keeping it is fail-closed; Warden removes it itself.
     WARDEN_OWNS_CR=false
-    if printf '%s
-' "${ON_PR[@]}" | grep -qxF "changes-requested" && [[ -n "$REPO_FULL" ]]; then
+    if grep -qxF "changes-requested" < <(printf '%s\n' "${ON_PR[@]}") && [[ -n "$REPO_FULL" ]]; then
       _bodies="$(gh api "repos/$REPO_FULL/issues/$PR/comments" --paginate --jq '.[].body' 2>/dev/null)" || _bodies=""
       [[ "$_bodies" == *'<!-- sge-warden-status -->'* ]] && WARDEN_OWNS_CR=true
     fi

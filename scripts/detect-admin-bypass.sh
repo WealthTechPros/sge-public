@@ -176,7 +176,7 @@ examine_pr() {
   local ctx state
   while IFS= read -r ctx; do
     [ -z "$ctx" ] && continue
-    state=$(printf '%s\n' "$conclusions" | awk -F'\t' -v c="$ctx" '$1==c{print $2; exit}')
+    state=$(awk -F'\t' -v c="$ctx" '$1==c{print $2; exit}' <<<"$conclusions")
     # GitHub branch protection treats "success", "neutral" and "skipped"
     # (e.g. a path-filtered job that legitimately didn't run) as satisfying
     # a required check — only failure/cancelled/timed_out/action_required/

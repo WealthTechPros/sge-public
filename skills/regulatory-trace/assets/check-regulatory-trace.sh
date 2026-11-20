@@ -122,7 +122,7 @@ while IFS= read -r f; do
   cap="$(grep -aoE 'capability:[[:space:]]*CAP-[A-Za-z0-9-]+' "$path" 2>/dev/null | head -1 | sed 's/.*CAP-/CAP-/' || true)"
   has_block="$(grep -aqE '^[[:space:]]*regulatory:' "$path" && echo yes || echo no)"
   # coverage gap: regulated capability but no regulatory block
-  if printf '%s\n' "$regulated_caps" | grep -qx "${cap:-__none__}"; then
+  if grep -qx "${cap:-__none__}" <<<"$regulated_caps"; then
     if [ "$has_block" = no ]; then
       add_finding "$f" high "C12-coverage" "spec under regulated capability ${cap} has no regulatory mapping"
     else
@@ -144,7 +144,7 @@ while IFS= read -r f; do
     while IFS= read -r cid; do
       [ -z "$cid" ] && continue
       case "$cid" in CAP-*|SPEC-*|SGE-*|AI-*) continue;; esac   # not obligation ids
-      if ! printf '%s\n' "$valid_ids" | grep -qx "$cid" && ! printf '%s\n' "$retired_ids" | grep -qx "$cid"; then
+      if ! grep -qx "$cid" <<<"$valid_ids" && ! grep -qx "$cid" <<<"$retired_ids"; then
         add_finding "$f" medium "C12-unknown-id" "mapping cites id ${cid} absent from the catalogue"
       fi
     done <<< "$cited"

@@ -324,8 +324,8 @@ while read -r pid ppid etimes kind args; do
   [ -n "${pid:-}" ] || continue
   case " $SELF_TREE " in *" $pid "*) continue ;; esac                  # self / ancestor
   [ "$kind" = none ] || continue                 # copilot lane owns copilot shapes
-  printf '%s' "$args" | grep -qiE "$PROTECT_RE" && continue             # never-kill
-  printf '%s' "$args" | grep -qiE "$ZOMBIE_NAME_RE" || continue         # 1. reapable name
+  grep -qiE "$PROTECT_RE" <<<"$args" && continue             # never-kill
+  grep -qiE "$ZOMBIE_NAME_RE" <<<"$args" || continue         # 1. reapable name
   if [ "$ppid" -ne 1 ] && kill -0 "$ppid" 2>/dev/null; then continue; fi # 2. orphaned
   in_kept_copilot_tree "$pid" && continue                               # inside a kept copilot session tree
   [ "$etimes" -ge $(( GRACE_MIN * 60 )) ] || continue                   # 3. aged

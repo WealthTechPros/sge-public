@@ -543,7 +543,7 @@ ck_list() {
     case "$id" in
       .tmp.*) printf 'interrupted:%s\n' "$id" ;;
       *)
-        printf '%s' "$id" | grep -Eq "$_CK_ID_RE" || continue
+        grep -Eq "$_CK_ID_RE" <<<"$id" || continue
         f="$d/manifest"
         [ -f "$f" ] || continue
         printf 'checkpoint:%s status=%s created=%s worktree=%s\n' "$id" "$(_ck_field "$f" status)" "$(_ck_san "$(_ck_field "$f" created)")" "$(_ck_san "$(_ck_field "$f" worktree)")"
@@ -568,7 +568,7 @@ _ck_safe_rel() { # relative, no traversal, no .git (any case / NTFS alias), no A
 ck_restore() {
   local src="${1:-}" id="${2:-}" dest="${3:-}" allow="${4:-}"
   [ -n "$src" ] && [ -n "$id" ] && [ -n "$dest" ] || { _ck_err usage; return 2; }
-  printf '%s' "$id" | grep -Eq "$_CK_ID_RE" || { _ck_err bad-id; return 2; }
+  grep -Eq "$_CK_ID_RE" <<<"$id" || { _ck_err bad-id; return 2; }
   case "$dest" in -*) _ck_err bad-dest; return 6 ;; esac
   [ -z "$allow" ] || [ "$allow" = --allow-partial ] || { _ck_err usage; return 2; }
   local rc
@@ -595,7 +595,7 @@ ck_restore() {
   want_cnt="$(_ck_field "$m" untracked_count)"
   while IFS=$'\t' read -r n h x; do
     # Fields come from the store: strictly validate before any use as a path.
-    if ! { printf '%s' "$n" | grep -Eq '^[0-9]+$' && printf '%s' "$h" | grep -Eq '^[0-9a-f]{40,64}$' && { [ "$x" = x ] || [ "$x" = - ]; }; }; then
+    if ! { grep -Eq '^[0-9]+$' <<<"$n" && grep -Eq '^[0-9a-f]{40,64}$' <<<"$h" && { [ "$x" = x ] || [ "$x" = - ]; }; }; then
       _ck_err integrity-untracked-index; return 8
     fi
     { [ -f "$cdir/untracked/$n" ] && [ ! -L "$cdir/untracked/$n" ] && [ "$(_ck_hash_file "$cdir/untracked/$n")" = "$h" ]; } || { _ck_err integrity-untracked; return 8; }
@@ -667,12 +667,12 @@ ck_prune() {
   local rc d
   _ck_locate "$src"; rc=$?
   [ "$rc" = 0 ] || { _ck_err store-unsafe-or-not-a-git-worktree; return "$rc"; }
-  if printf '%s' "$id" | grep -Eq "$_CK_ID_RE"; then
+  if grep -Eq "$_CK_ID_RE" <<<"$id"; then
     d="$_CK_KEYDIR/$id"
     [ -d "$d" ] && [ ! -L "$d" ] || { _ck_err checkpoint-not-found; return 8; }
     rm -rf -- "$d" || return 8
     git -C "$src" update-ref -d "refs/sge/checkpoints/$id" 2>/dev/null || true
-  elif printf '%s' "$id" | grep -Eq '^\.tmp\.[A-Za-z0-9]{6}$'; then
+  elif grep -Eq '^\.tmp\.[A-Za-z0-9]{6}$' <<<"$id"; then
     d="$_CK_KEYDIR/$id"
     [ -d "$d" ] && [ ! -L "$d" ] || { _ck_err checkpoint-not-found; return 8; }
     rm -rf -- "$d" || return 8

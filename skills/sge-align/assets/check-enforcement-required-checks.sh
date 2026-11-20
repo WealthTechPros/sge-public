@@ -95,8 +95,8 @@ fi
 PROFILE="$(printf '%s\n' "$PROFILE_OUT" | awk -F '\t' '$1 == "enforcement" { print $2 }')"
 
 live_exception() { # <gate> -> "<reason> (<approver>, until <date>)" or nothing
-  printf '%s\n' "$PROFILE_OUT" | awk -F '\t' -v g="$1" -v t="$TODAY" \
-    '$1 == "exception" && NF == 5 && $5 ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/ && $2 == g && $5 >= t { print $3 " (" $4 ", until " $5 ")"; exit }'
+  awk -F '\t' -v g="$1" -v t="$TODAY" \
+    '$1 == "exception" && NF == 5 && $5 ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/ && $2 == g && $5 >= t { print $3 " (" $4 ", until " $5 ")"; exit }' <<<"$PROFILE_OUT"
 }
 
 # ---- credentials ----------------------------------------------------------------
@@ -167,14 +167,14 @@ gh_read() { # <endpoint> <jq> [extra gh api flag, e.g. --paginate]
   local res rc
   res="$( { "$GH" api "$1" --jq "$2" ${3:+"$3"} 2>&1 1>&3 3>&- | sed "s/^/$GH_TAG/"; } 3>&1 )"; rc=$?
   GH_OUT="$(printf '%s\n' "$res" | grep -v "^$GH_TAG")"
-  GH_ERR="$(printf '%s\n' "$res" | sed -n "s/^$GH_TAG//p" | head -1)"
+  GH_ERR="$(sed -n "s/^$GH_TAG//p" <<<"$res" | head -1)"
   return "$rc"
 }
 if [ -z "${CRED_REFUSED:-}" ]; then
   if gh_read "repos/$REPO/branches/$BRANCH/protection/required_status_checks" \
         '(.contexts // [])[], ((.checks // [])[] | .context)'; then
     prot_state=ok; REQUIRED="$REQUIRED"$'\n'"$GH_OUT"
-  elif printf '%s' "$GH_ERR" | grep -qE 'Branch not protected|Required status checks not enabled'; then
+  elif grep -qE 'Branch not protected|Required status checks not enabled' <<<"$GH_ERR"; then
     # These 404s are GitHub ANSWERING: the branch has no classic protection,
     # or protection with no required checks. Classic requires nothing, which
     # is a read, not an unreadable source (sge#2877). A bare "Not Found" can
@@ -200,7 +200,7 @@ sources_json="{\"protection\":\"$prot_state\",\"rulesets\":\"$rules_state\",\"re
 gates_json=""; findings_json=""; n_not=0; n_unknown=0
 for i in "${!CHECKS[@]}"; do
   c="${CHECKS[$i]}"; g="${GATES[$i]}"
-  if printf '%s\n' "$REQUIRED" | grep -qxF -- "$c"; then
+  if grep -qxF -- "$c" <<<"$REQUIRED"; then
     st=required; ev="required status check on $BRANCH"
   elif [ "$prot_state" = ok ] && [ "$rules_state" = ok ]; then
     st=not-required; ev="$c is not a required status check on $BRANCH (classic protection and rulesets both read)"

@@ -774,8 +774,7 @@ _fa_main() {
         # and 'bug' never spuriously matches 'bug-report' (exact-equality, not
         # substring). The name is passed via -v to keep it out of the program
         # text entirely. Gitea emits no embedded quotes in label names.
-        label_found="$(printf '%s' "$label_json" \
-          | sed 's/},{/}\n{/g' \
+        label_found="$(sed 's/},{/}\n{/g' <<<"$label_json" \
           | awk -v want="$label_name" '
               {
                 if (match($0, /"name":"[^"]*"/)) {

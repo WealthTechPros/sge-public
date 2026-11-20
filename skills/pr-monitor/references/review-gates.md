@@ -47,7 +47,7 @@ Before merging a lane PR, make sure it will **auto-close the issue it implements
 ```bash
 N=<issue-number>            # the issue this PR implements (from title/body/branch)
 BODY=$(gh pr view "$pr" --json body --jq .body)
-if ! printf '%s' "$BODY" | grep -qiE "(clos(e|es|ed)|fix(es|ed)?|resolv(e|es|ed))[[:space:]]+#$N([^0-9]|$)"; then
+if ! grep -qiE "(clos(e|es|ed)|fix(es|ed)?|resolv(e|es|ed))[[:space:]]+#$N([^0-9]|$)" <<<"$BODY"; then
   gh pr edit "$pr" --body "$(printf '%s\n\nFixes #%s' "$BODY" "$N")"
 fi
 ```

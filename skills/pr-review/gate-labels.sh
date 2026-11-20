@@ -353,7 +353,7 @@ gl_verdict_rows() {
   all=$(printf '%s\n%s\n' "$rows" "$more" | tr -d '\r' | grep -v '^[[:space:]]*$')
   # Every row is `<ts><TAB><sha><TAB><verdict>`: anything else is garbage from a broken
   # fetch, which must read as unreadable (fail closed), never as "no verdict".
-  if [[ -n "$all" ]] && ! printf '%s\n' "$all" | awk -F'\t' 'NF != 3 { bad = 1 } END { exit bad }'; then
+  if [[ -n "$all" ]] && ! awk -F'\t' 'NF != 3 { bad = 1 } END { exit bad }' <<<"$all"; then
     return 3
   fi
   [[ -z "$all" ]] || printf '%s\n' "$all" | LC_ALL=C sort -s -t $'\t' -k1,1
@@ -440,7 +440,7 @@ gl_main() {
         head=$(gh pr view "$pr" --json headRefOid --jq .headRefOid 2>/dev/null) || head=""
       fi
       labels=$(gl_current_labels "$pr") || { echo "PR #$pr: $label unreadable (labels API) -- treated as absent" >&2; return 1; }
-      if ! printf '%s\n' "$labels" | grep -qxF "$label"; then
+      if ! grep -qxF "$label" <<<"$labels"; then
         echo "PR #$pr: $label absent"
         return 1
       fi

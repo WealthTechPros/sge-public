@@ -93,7 +93,7 @@ if [ "$rc" = 0 ] && [[ "$probe" == probe-ok* ]]; then
   say "bash used by hooks: $(kind_of "$pb"), chosen by hooks/run-hook.cmd (the running bash, else the first working one; WSL stubs are skipped)"
   say "launcher: hooks/run-hook.cmd runs"
 else
-  problem "hooks/run-hook.cmd could not run a hook (exit $rc), so every hook fails closed. Fix: install Git for Windows (or bash on Linux/macOS) and $FIX_PATH. Launcher said: $(printf '%s' "$probe" | tr -d '\r' | grep -m1 '^SGE hook launcher:' | sed -E 's#([A-Za-z]:)?[/\]+(Users|home)[/\]+[^ /\\"]*#<home>#g' | head -c 300)"
+  problem "hooks/run-hook.cmd could not run a hook (exit $rc), so every hook fails closed. Fix: install Git for Windows (or bash on Linux/macOS) and $FIX_PATH. Launcher said: $(tr -d '\r' <<<"$probe" | grep -m1 '^SGE hook launcher:' | sed -E 's#([A-Za-z]:)?[/\]+(Users|home)[/\]+[^ /\\"]*#<home>#g' | head -c 300)"
 fi
 
 # each hook command line: run it the way the client does (its command shell, CLAUDE_PLUGIN_ROOT set),
@@ -108,7 +108,7 @@ while IFS= read -r cmd; do
   n=$((n+1)); name="$(printf '%s' "$cmd" | grep -oE '[A-Za-z0-9_.-]+\.sh' | tail -1)"
   err="$(cd "$TMP" && printf '%s' "$PAYLOAD" | env CLAUDE_PLUGIN_ROOT="$ROOT" HOME="$TMP" SGE_SESSION_DIR="$TMP/sess" SGE_REMOTE_VERSION= SGE_DIGEST_PATH= $TO "$BASH" -c "$cmd" 2>&1 >/dev/null)"; hrc=$?
   if [ "$hrc" = 0 ]; then say "hook ${name:-?}: runs (exit 0)"
-  else failed=$((failed+1)); problem "hook ${name:-?} exited $hrc when run as the client runs it. Output: $(printf '%s' "$err" | grep -m1 . | scrub). Fix: $FIX_PATH, or /plugin update sge if the script is missing."; fi
+  else failed=$((failed+1)); problem "hook ${name:-?} exited $hrc when run as the client runs it. Output: $(grep -m1 . <<<"$err" | scrub). Fix: $FIX_PATH, or /plugin update sge if the script is missing."; fi
 done < <(sed -n 's/^[[:space:]]*"command":[[:space:]]*"\(.*\)",\{0,1\}[[:space:]]*$/\1/p' "$ROOT/hooks/hooks.json" 2>/dev/null | sed 's/\\"/"/g' | sort -u)
 rm -rf "$TMP" 2>/dev/null
 [ "$n" -gt 0 ] || problem "no hook commands found in hooks/hooks.json"

@@ -186,7 +186,7 @@ is_blocked() {  # true if any dependency is open OR indeterminate
   local out rc
   out="$("$IR" dependencies "$1" 2>/dev/null)"; rc=$?
   [ "$rc" -eq 0 ] || return 0
-  printf '%s\n' "$out" | grep -qE "$(printf '\t(open|unknown)$')"
+  grep -qE "$(printf '\t(open|unknown)$')" <<<"$out"
 }
 
 FILTERED=""

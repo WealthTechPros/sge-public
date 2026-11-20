@@ -222,7 +222,7 @@ _iw_main() {
         _created="$(JIRA_ADAPTER_ALLOW_WRITE=1 bash "$_JA" create-item "$project" "$title" "$body")" || exit 1
         command -v jq >/dev/null 2>&1 || { _iw_err "jq not found — required to read the created item's key from the Jira response"; exit 1; }
         _ref="$(printf '%s' "$_created" | jq -er '.key' 2>/dev/null)" || {
-          _iw_err "create: Jira response carried no .key — the item may or may not exist; response: $(printf '%s' "$_created" | head -c 300)"; exit 1; }
+          _iw_err "create: Jira response carried no .key — the item may or may not exist; response: $(head -c 300 <<<"$_created")"; exit 1; }
       else
         _iw_github_host_only || exit 1
         _created="$(gh issue create --title "$title" --body "$body")" || exit 1

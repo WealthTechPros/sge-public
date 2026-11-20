@@ -175,7 +175,7 @@ if [ -n "$REGISTRY_HISTORY" ]; then
       for prior_ref in $(printf '%s\n' "$PRIOR_COMMITS" | tac); do
         prior_content="$(git -C "$ROOT" show "${prior_ref}:${REGISTRY_REL}" 2>/dev/null || true)"
         [ -n "$prior_content" ] || continue
-        prior_status="$(printf '%s\n' "$prior_content" | awk -v qd="$id" '
+        prior_status="$(awk -v qd="$id" '
           $0 ~ "^### "qd"([^0-9]|$)" { infield=1; next }
           infield && /^###[[:space:]]/ { infield=0 }
           infield && /^##[[:space:]]/ && !/^###/ { infield=0 }
@@ -183,9 +183,9 @@ if [ -n "$REGISTRY_HISTORY" ]; then
             sub(/^.*\*\*Status:\*\*[[:space:]]*/, ""); sub(/[[:space:]]*$/, "");
             print; exit
           }
-        ')"
+        ' <<<"$prior_content")"
         [ "$prior_status" = "Closed" ] || continue
-        prior_decision="$(printf '%s\n' "$prior_content" | awk -v qd="$id" '
+        prior_decision="$(awk -v qd="$id" '
           $0 ~ "^### "qd"([^0-9]|$)" { infield=1; next }
           infield && /^###[[:space:]]/ { infield=0 }
           infield && /^##[[:space:]]/ && !/^###/ { infield=0 }
@@ -194,7 +194,7 @@ if [ -n "$REGISTRY_HISTORY" ]; then
             print;
             exit
           }
-        ')"
+        ' <<<"$prior_content")"
         break
       done
       if [ -n "$prior_decision" ] && [ "$prior_decision" != "$decision" ]; then

@@ -71,7 +71,7 @@ _prl_fj_vd_read_pr() {
   _VD_LABELS="$(printf '%s' "$pj" | jq -r '.labels[].name' | tr -d '\r')" || return 1
 }
 
-_prl_fj_vd_has_label() { printf '%s\n' "$_VD_LABELS" | grep -qxF -- "$1"; }
+_prl_fj_vd_has_label() { grep -qxF -- "$1" <<<"$_VD_LABELS"; }
 
 # _prl_fj_vd_pin_matches <pin> <full-head> -> 0 when the pin names the head.
 # Same rule as the GitHub path: >= 7 hex chars, prefix match, case-insensitive.

@@ -224,6 +224,29 @@ dp_verdict_blocks_clean_for() {
                  and $ses != "" and .session == $ses and .session != $notses))' >/dev/null 2>&1
 }
 
+# _dp_any_line <ERE> <text> [nocase] -- 0 when any line of <text> matches <ERE>.
+# Matches in-shell with [[ =~ ]]: no pipe (SIGPIPE under a caller's pipefail,
+# sge#3642) and no here-string (a temp file that cannot be created reads as a
+# non-match), so a refusal check built on it cannot fail open. Empty lines are
+# skipped; none of the callers' patterns can match an empty line.
+_dp_any_line() {
+  local re="$1" l rc=1 restore_f=0 restore_nc=0 IFS=$'\n'
+  local -a lines
+  case $- in *f*) ;; *) set -f; restore_f=1 ;; esac
+  # shellcheck disable=SC2206  # word-split on newlines only, globbing off
+  lines=($2)
+  [ "$restore_f" = 1 ] && set +f
+  if [ "${3:-}" = nocase ] && ! shopt -q nocasematch; then shopt -s nocasematch; restore_nc=1; fi
+  for l in ${lines[@]+"${lines[@]}"}; do
+    # Strip a trailing CR: Windows jq emits CRLF, and `^...$` must still match
+    # `blocked<CR>` the way grep did (adversarial review of #3645).
+    l="${l%$'\r'}"
+    if [[ $l =~ $re ]]; then rc=0; break; fi
+  done
+  [ "$restore_nc" = 1 ] && shopt -u nocasematch
+  return "$rc"
+}
+
 # dp_hold_release_eligible <owner/repo> <pr> [session] -- print the hold-release order id
 # when a `hold` on this PR may be released by policy (a self-fixed security
 # MAJOR re-reviewed independently); nothing otherwise. Every check fails
@@ -243,10 +266,13 @@ dp_hold_release_eligible() {
     >/dev/null 2>&1 || { _dp_no "hold-release order exclusions missing/empty/malformed"; return 0; }
   view="$(gh pr view "$pr" --repo "$repo" --json labels,body 2>/dev/null)" || { _dp_no "pr view failed"; return 0; }
   labels="$(printf '%s' "$view" | jq -r '.labels[].name' 2>/dev/null)" || { _dp_no "labels unreadable"; return 0; }
-  printf '%s\n' "$labels" | grep -qx 'hold' || { _dp_no "no hold label"; return 0; }
-  if printf '%s\n' "$labels" | grep -qE "$DP_HUMAN_ONLY_LABELS_RE"; then _dp_no "human-only label present"; return 0; fi
+  grep -qx 'hold' <<<"$labels" || { _dp_no "no hold label"; return 0; }
+  # The two refusal checks below match in-shell (no pipe, no here-string), so
+  # they cannot fail open: a pipe could SIGPIPE under pipefail (sge#3642) and
+  # a here-string whose temp file cannot be created reads as "no match".
+  if _dp_any_line "$DP_HUMAN_ONLY_LABELS_RE" "$labels"; then _dp_no "human-only label present"; return 0; fi
   body="$(printf '%s' "$view" | jq -r '.body // ""' 2>/dev/null)"
-  if printf '%s' "$body" | grep -qiE '(^|[[:space:]]|[!>])HOLD:'; then _dp_no "HOLD: body marker"; return 0; fi
+  if _dp_any_line '(^|[[:space:]]|[!>])HOLD:' "$body" nocase; then _dp_no "HOLD: body marker"; return 0; fi
   marker="$(dp_latest_hold_marker "$repo" "$pr")" || marker=""
   [ -n "$marker" ] || { _dp_no "no hold marker (human-applied hold)"; return 0; }
   [ "$(printf '%s' "$marker" | jq -r '.reason // ""')" = "self-fixed-security-major" ] || { _dp_no "marker is not self-fixed-security-major"; return 0; }

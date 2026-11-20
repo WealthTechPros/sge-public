@@ -145,7 +145,7 @@ extract_accepted_rule() {
   local body="$1" a
   while IFS= read -r a; do
     [[ -n "$a" ]] || continue
-    if printf '%s' "$body" | grep -qE "(^|[^A-Za-z0-9])${a}([^A-Za-z0-9]|\$)"; then
+    if grep -qE "(^|[^A-Za-z0-9])${a}([^A-Za-z0-9]|\$)" <<<"$body"; then
       printf '%s\n' "$a"; return 0
     fi
   done <<< "$ACCEPTED_RULES"

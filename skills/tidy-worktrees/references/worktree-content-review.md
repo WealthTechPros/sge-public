@@ -28,8 +28,8 @@ read-only and keep `--force` limited to its documented A/D scope.
    Show each proposed removal's path, full recovery SHA and verified merge
    evidence. Identify any ignored local material that would be lost and get
    explicit consent for that scope; if its disposition is unknown, keep it.
-   Recheck after approval. Keep locks, other owners' work and dirty trees
-   protected, and keep local and remote removal approvals separate.
+   Recheck after approval. Keep active writers and dirty trees protected,
+   route locks through Phase 2b, and keep local and remote removal approvals separate.
 
 ## Reduce the retained checkout set
 
@@ -51,7 +51,7 @@ before auditing that target again; a changed tip or file set needs fresh review.
   publication or a verified checkpoint covering every file to preserve;
   then re-audit. Partial recovery is not grounds for removal.
 - **Unknown or protected:** run the lock audit and identify the exact missing
-  owner, host, or recovery evidence. A lock is not evidence of activity;
+  activity, host, or recovery evidence. A lock is not evidence of activity;
   an expired claim or absent session entry is not authority to unlock or
   remove. Report protected items and retain them until the required handoff.
 
