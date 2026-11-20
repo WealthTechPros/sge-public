@@ -3841,5 +3841,26 @@
   "verdict": "pass",
   "head": "not-a-sha-at-all",
   "for_head_rc": 3
+ },
+ {
+  "name": "sge#3580: the CodeRabbit lane's head-bound gate verdict comment reads as a pass for its head",
+  "reviews": [],
+  "comments": [
+   {
+    "body": "<!-- sge-review-verdict -->\nPR Warden: the CodeRabbit gate passed at `86b71074ef9e`. CodeRabbit approved this head, no CodeRabbit thread is unresolved and the required checks are green. This comment binds `pr-reviewed` to this exact commit for the repo's merge workflow; a new commit needs a new one.\n\n```sge-verdict\nverdict: pass\ncommit: 86b71074ef9ee8ecefa041527cafc4354b3b3647\nmode: coderabbit-gate\n```\n",
+    "created_at": "2026-11-20T10:00:00Z",
+    "user": {
+     "login": "wtp-sge[bot]"
+    },
+    "author_association": "NONE"
+   }
+  ],
+  "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "verdict": "pass",
+  "head": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+  "for_head": {
+   "sha": "86b71074ef9ee8ecefa041527cafc4354b3b3647",
+   "verdict": "pass"
+  }
  }
 ]
