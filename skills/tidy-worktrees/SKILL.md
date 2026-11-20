@@ -99,6 +99,10 @@ A Git lock is a retention marker, not evidence of an active worker, so locked wo
 
 ## Phase 3 — Fan out, then decide
 
+Before asking for a disposition, follow the [file-level review](references/worktree-content-review.md) on GitHub and Azure DevOps.
+Use its recommendations to distinguish publication-ready work, work that needs reconciliation, and cleanup candidates.
+An audit bucket alone is not consent to discard local files.
+
 1. **Assess B and C in parallel (read-only).** Launch one assessor agent per unmerged item, or per ~5 small ones, in a single message. Each returns net diff vs base, supersession, tests, acceptance-criteria coverage and an advisory disposition; the user decides in steps 2 and 3. Brief and return format: [`references/assessor-brief.md`](references/assessor-brief.md). Hosts without subagents (Copilot): run `assess.sh <repo-dir> <ref>` inline, one item at a time ([procedure](references/copilot-procedure.md)). Assessors are read-only reporters: they return findings to this session, and every user question, push, deletion or edit stays with this session behind the confirmations below.
 2. **A and D: one plan.** Show every A item (path, branch, PR link, full tip SHA) and every D item (tip SHA, why superseded) in one plan: *remove all merged, choose a subset, or keep everything?* Revalidate each item immediately before removal (tip, files, stashes, claims, locks, recency); anything changed means re-audit. Remote branches need their own explicit confirmation of the literal commands.
 3. **B: one capped multi-select.** Offer **one** multi-select, "open draft PRs for these N", containing only items that individually pass: `rescue-guard.sh` supersession `live` **and** the linked issue still open. Draft PRs only, at most `SGE_TIDY_MAX_DRAFT_PRS` (default 10) per run, never auto-merge, never force-push. The rest of B: keep, or discard with SHA, asked per item. Policy: [`references/consolidation-intent.md`](references/consolidation-intent.md).
