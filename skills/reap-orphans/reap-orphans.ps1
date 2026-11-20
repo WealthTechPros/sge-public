@@ -25,6 +25,10 @@
 # printed. Only the single Copilot PID is stopped (never its tree). Windows has
 # no TERM/KILL pair, so there is one re-validation, directly before the stop.
 #
+# LIVE SESSIONS WHOSE LAUNCHER EXITED (#3597). An orphaned Claude Desktop app root
+# or headless claude sub-agent is a running session, not debris: it is kept with its
+# tree and reported as "orphaned sub-agent of a live session" (see the block below).
+#
 # Usage: pwsh -File reap-orphans.ps1 [-Heavy [-NoWSL]] [-DryRun] [-HogMB <MB>]
 #
 # Test seams (fixtures only; never needed in real use):
@@ -59,6 +63,9 @@ $SessionDir = if ($env:SGE_COPILOT_SESSION_DIR) { $env:SGE_COPILOT_SESSION_DIR }
               elseif ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'sge\copilot-sessions' }
               else { Join-Path ([Environment]::GetFolderPath('UserProfile')) '.local/state/sge/copilot-sessions' }
 $SelfPid = if ($env:SGE_REAP_SELF_PID) { [int]$env:SGE_REAP_SELF_PID } else { [int]$PID }
+# Grace window for generic orphans (#3597), the same GRACE_MIN knob as the POSIX reaper:
+# on Windows a live session's tool shells routinely outlive their launcher, so a young orphan is kept.
+$GraceSec = (ConvertTo-Seconds $env:GRACE_MIN 30) * 60
 
 # Process snapshot keyed by INT pid (UInt32/Int32 mismatch silently breaks lookups).
 function Get-ProcTable([int]$Phase) {
@@ -84,6 +91,9 @@ function Get-ProcTable([int]$Phase) {
       Identity        = $ident
       Owner           = if ($FixtureMode) { [string]$r.Owner } else { $null }
       WorkingSetSize  = [int64]$r.WorkingSetSize
+      # Fixture rows without AgeSec count as past every grace window.
+      AgeSec          = if ($FixtureMode) { if ($null -ne $r.AgeSec) { [int64]$r.AgeSec } else { [int64]::MaxValue } }
+                        elseif ($r.CreationDate) { [int64]([DateTime]::Now - $r.CreationDate).TotalSeconds } else { [int64]::MaxValue }
     }
   }
   return $t
@@ -287,12 +297,95 @@ function Test-GenericTarget($proc) {
   return $true
 }
 
+# Live Claude sessions whose launcher exited (#3597). A dead parent is not proof of
+# debris when the orphan tree holds a running Claude session: the Claude Desktop app
+# root (a claude.exe with Electron --type= helper children, which hosts Claude Code
+# background sessions) or a headless sub-agent (claude -p/--print/stream-json, native
+# or node-hosted). When the generic rule below would reach such a session (every
+# process from the orphaned root down to it is a generic target), the session, its
+# whole tree and its ancestors up to that root are protected and reported apart
+# from true orphans.
+# Win32_Process.CommandLine keeps argument quoting verbatim (Windows strips it
+# before Claude reads argv). Classify on argument tokens split the way the C
+# runtime does (CommandLineToArgvW rules), never on a substring of the whole
+# line: a quoted "--print" is still the --print option, but a prompt argument
+# such as "Explain --print" or "Explain --type=renderer" is one token that
+# names no option, so it neither makes an interactive session headless nor
+# turns a headless session into an Electron helper.
+function Split-CommandLine([string]$cl) {
+  $tokens = New-Object System.Collections.Generic.List[string]
+  $sb = New-Object System.Text.StringBuilder
+  $inQ = $false; $have = $false; $i = 0; $n = $cl.Length
+  while ($i -lt $n) {
+    $ch = $cl[$i]
+    if ($ch -eq [char]92) {   # backslash
+      $bs = 0; while ($i -lt $n -and $cl[$i] -eq [char]92) { $bs++; $i++ }
+      if ($i -lt $n -and $cl[$i] -eq '"') {
+        [void]$sb.Append([char]92, [int][math]::Floor($bs / 2)); $have = $true
+        if ($bs % 2 -eq 1) { [void]$sb.Append('"'); $i++ }
+      } else { [void]$sb.Append([char]92, $bs); $have = $true }
+      continue
+    }
+    if ($ch -eq '"') {
+      if ($inQ -and ($i + 1) -lt $n -and $cl[$i + 1] -eq '"') { [void]$sb.Append('"'); $i += 2; continue }
+      $inQ = -not $inQ; $have = $true; $i++; continue
+    }
+    if (-not $inQ -and ($ch -eq ' ' -or $ch -eq "`t")) {
+      if ($have) { $tokens.Add($sb.ToString()); [void]$sb.Clear(); $have = $false }
+      $i++; continue
+    }
+    [void]$sb.Append($ch); $have = $true; $i++
+  }
+  if ($have) { $tokens.Add($sb.ToString()) }
+  return ,$tokens
+}
+function Test-ArgToken([string]$cl, [string]$pattern) {
+  foreach ($t in (Split-CommandLine $cl)) { if ($t -match $pattern) { return $true } }
+  return $false
+}
+$cliRe = '^(-p|--print|--output-format|--input-format|--sdk-url)(=.*)?$'
+$helperRe = '^--type='
+$helperParents = New-Object System.Collections.Generic.HashSet[int]
+foreach ($proc in $alive.Values) {
+  if ($proc.Name -eq 'claude.exe' -and (Test-ArgToken ([string]$proc.CommandLine) $helperRe)) { [void]$helperParents.Add([int]$proc.ParentProcessId) }
+}
+function Get-LiveSessionKind($proc) {
+  $cl = [string]$proc.CommandLine
+  if (Test-ArgToken $cl $helperRe) { return '' }
+  $isCli = ($proc.Name -eq 'claude.exe') -or ($proc.Name -eq 'node.exe' -and $cl -match '@anthropic-ai[\\/]+claude-code')
+  if (-not $isCli) { return '' }
+  if ($proc.Name -eq 'claude.exe' -and $helperParents.Contains([int]$proc.ProcessId)) { return 'desktop-app' }
+  if (Test-ArgToken $cl $cliRe) { return 'headless sub-agent' }
+  return ''
+}
+$liveSub = New-Object System.Collections.Generic.List[object]
+foreach ($proc in @($alive.Values | Sort-Object ProcessId)) {
+  $id = [int]$proc.ProcessId
+  if ($protect.Contains($id)) { continue }
+  $kind = Get-LiveSessionKind $proc
+  if (-not $kind) { continue }
+  $chain = @($id); $cursor = $proc; $endangered = Test-GenericTarget $proc
+  while ($endangered -and $alive.ContainsKey([int]$cursor.ParentProcessId) -and $chain.Count -lt 256) {
+    $cursor = $alive[[int]$cursor.ParentProcessId]; $chain += [int]$cursor.ProcessId
+    if ($protect.Contains([int]$cursor.ProcessId) -or -not (Test-GenericTarget $cursor)) { $endangered = $false }
+  }
+  if (-not $endangered -or $alive.ContainsKey([int]$cursor.ParentProcessId)) { continue }
+  $before = $protect.Count
+  foreach ($c in $chain) { [void]$protect.Add($c) }
+  Add-Descendants $protect
+  $label = if ([int]$cursor.ProcessId -eq $id) { $kind } else { "$kind PID $id" }
+  $liveSub.Add(@($cursor, $label, ($protect.Count - $before)))
+}
+
 # Root orphans: target-named procs whose parent PID is gone
 $kill = New-Object System.Collections.Generic.HashSet[int]
+$young = New-Object System.Collections.Generic.HashSet[int]
 foreach ($proc in $alive.Values) {
   if (-not (Test-GenericTarget $proc)) { continue }
   if ($protect.Contains([int]$proc.ProcessId)) { continue }
-  if (-not $alive.ContainsKey([int]$proc.ParentProcessId)) { [void]$kill.Add([int]$proc.ProcessId) }
+  if ($alive.ContainsKey([int]$proc.ParentProcessId)) { continue }
+  if ($proc.AgeSec -lt $GraceSec) { [void]$young.Add([int]$proc.ProcessId); continue }   # may be a live session's tool shell
+  [void]$kill.Add([int]$proc.ProcessId)
 }
 # Expand to dead trees: any target proc whose parent is already in the kill set
 $changed = $true
@@ -316,6 +409,12 @@ if ($FixtureMode) {
   Write-Output "=== reap-orphans  (RAM used ${usedPct}%, ${bFree} GB free, pagefile ${bPage} MB) ==="
 }
 Write-Output "Protected session tree: $($protect.Count) procs (current session is safe)"
+foreach ($ls in $liveSub) {
+  $root = $ls[0]
+  Write-Output ("  {0,-10} {1,-11} PID {2,-7} parent {3} (dead) [orphaned sub-agent of a live session: {4}, {5} procs protected]" -f 'KEEP', $root.Name, $root.ProcessId, $root.ParentProcessId, $ls[1], $ls[2])
+}
+if ($young.Count -gt 0) { Write-Output "Young orphans kept (under the $([int]($GraceSec / 60))-min grace window, may be live tool shells): $($young.Count)" }
+if ($liveSub.Count -gt 0) { Write-Output "Orphaned sub-agents of live sessions kept: $($liveSub.Count) (not debris; stop them yourself if they are stale)" }
 if (-not $script:StoreOk -and ($cpLive + $cpKept + $cpServer + $cpRelated + $cpReap.Count) -gt 0) {
   Write-Output "Copilot lifecycle records unusable: $($script:StoreWhy)"
   Write-Output "Copilot cleanup coverage: incomplete; unknown sessions stay report-only."
