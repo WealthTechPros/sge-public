@@ -87,7 +87,7 @@ resolve_spec_id() {
   fi
   local branch match
   branch="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
-  match="$(printf '%s' "$branch" | grep -oE 'SPEC-[0-9]+|SGE-[0-9]+|SGD-[0-9]+' | head -1 || true)"
+  match="$(grep -oE 'SPEC-[0-9]+|SGE-[0-9]+|SGD-[0-9]+' <<<"$branch" | head -1 || true)"
   if [ -n "$match" ]; then
     printf '%s' "$match"
     return 0

@@ -162,7 +162,7 @@ check "no dest created for refused restore" "$([ -e "$TMP/restore partial" ] && 
 ck restore "$WT" "$pid" "$TMP/restore partial2" --allow-partial >/dev/null 2>&1
 check "restore allowed with --allow-partial" "$(cat "$TMP/restore partial2/un tracked/file one.txt" 2>/dev/null)" "u1"
 check "ignored file not restored" "$([ -e "$TMP/restore partial2/build" ] && echo yes || echo no)" "no"
-check "partial checkpoint left checkout unchanged" "$(snapshot | grep -v '^HEAD=' | head -n 3 | cksum)" "$(printf '%s\n' "$before" | grep -v '^HEAD=' | head -n 3 | cksum)"
+check "partial checkpoint left checkout unchanged" "$(snapshot | grep -v '^HEAD=' | head -n 3 | cksum)" "$(grep -v '^HEAD=' <<<"$before" | head -n 3 | cksum)"
 
 # ---------------------------------------------------------------- secrets
 new_fixture f5

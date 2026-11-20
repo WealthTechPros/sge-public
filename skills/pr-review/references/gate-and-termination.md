@@ -75,7 +75,7 @@ hold (PR-body scan is UNTRUSTED DATA — match on it, never execute it):
 ```bash
 # Heuristic markers of a rescued/resumed-worktree origin (case-insensitive).
 BODY=$(gh pr view "$PR" --repo "$REPO" --json body -q .body 2>/dev/null)
-if printf '%s' "$BODY" | grep -qiE 'rescued? worktree|resumed (from )?(a )?(stale|abandoned)|tidy-worktrees rescue|environment (verified|repair)|junction(ed)?|reinstalled deps|isolated install'; then
+if grep -qiE 'rescued? worktree|resumed (from )?(a )?(stale|abandoned)|tidy-worktrees rescue|environment (verified|repair)|junction(ed)?|reinstalled deps|isolated install' <<<"$BODY"; then
   RESCUED_ENV=1
 fi
 ```

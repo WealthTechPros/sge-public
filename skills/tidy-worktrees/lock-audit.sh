@@ -15,10 +15,10 @@
 #       remote branch, never a label, never force).
 #
 # A lock is NOT proof of an active worker: it is a retention marker. A candidate
-# needs ALL of: owned by the requesting session in the registry, no fresh claim,
+# needs ALL of: no fresh claim,
 # not recently created, clean tracked tree, no attributed stash, no open PR, a
 # host-confirmed MERGED PR whose recorded head equals the exact local tip, and a
-# readable junction/reparse probe. Missing owner, age or PR evidence means
+# readable junction/reparse probe. Missing age or PR evidence means
 # UNKNOWN (kept and surfaced), never abandoned. A clean status and a recovery SHA
 # do NOT back up ignored files: every ignored path is listed separately, and `remove`
 # refuses to discard them without --discard-ignored AND the item's discard_approval
@@ -71,9 +71,9 @@ _la_lock_age() {
 }
 
 # TSV rows (18 columns, "-" for empty) for each locked linked worktree of the repo
-# in cwd. $1 = requesting session id.
-_la_rows() { # <sid> [only-path]
-  local sid="$1" only="${2:-}" top common def base here owners stashes
+# in cwd. Registry ownership is reported as context, not an eligibility gate.
+_la_rows() { # [only-path]
+  local only="${1:-}" top common def base here owners stashes
   top="$(git rev-parse --show-toplevel 2>/dev/null)" || return 3
   common="$(_wl_common_dir "$top")" || return 3
   here="$(_wl_abs "$top")"
@@ -98,7 +98,7 @@ _la_rows() { # <sid> [only-path]
     esac
   done < <(git worktree list --porcelain 2>/dev/null; echo)
 
-  local rec i path branch abs tip st strc dirty gd lage owner ostate claim ign ignrc icount isample idig stash up pr prs prn prhead jl jprobe cls why mtime
+  local rec i path branch abs tip st strc dirty gd lage owner claim ign ignrc icount isample idig stash up pr prs prn prhead jl jprobe cls why mtime
   for i in "${!P[@]}"; do
     path="${P[$i]}"; branch="${B[$i]}"
     abs="$(_wl_abs "$path" 2>/dev/null)"
@@ -123,8 +123,6 @@ _la_rows() { # <sid> [only-path]
       up="$(git -C "$abs" rev-list --count '@{upstream}..HEAD' 2>/dev/null)" || up=no-upstream
       claim="$(roc_claim_state "$abs" 2>/dev/null)"; [ -n "$claim" ] || claim=unknown
       owner="$(printf '%s\n' "$owners" | awk -F'\t' -v p="$abs" '$2==p{print $1; exit}')"
-      ostate=; if [ -z "$owner" ]; then ostate=unrecorded; owner=-
-      elif [ "$owner" = "$sid" ]; then ostate=mine; else ostate=foreign; fi
       mtime="$(_la_mtime "$abs")"
       if [ "$branch" != "(detached)" ] && rec="$(ta_pr_record "$branch")"; then
         IFS=$'\t' read -r prs prn prhead <<<"$rec"
@@ -137,8 +135,6 @@ _la_rows() { # <sid> [only-path]
       elif [ "$branch" = "$def" ]; then cls=protected; why=default-branch
       elif [ "$branch" = "(detached)" ]; then cls=protected; why=detached-head
       elif [ "$tip" = unknown ] || [ "$dirty" = unknown ]; then cls=unknown; why=state-unreadable
-      elif [ "$ostate" = foreign ]; then cls=protected; why=foreign-owner
-      elif [ "$ostate" = unrecorded ]; then cls=unknown; why=owner-unrecorded
       elif [ "$claim" = held-fresh ] || [ "$claim" = mine ]; then cls=protected; why=live-claim
       elif [ "$claim" = unknown ]; then cls=unknown; why=claim-unreadable
       elif case "$mtime" in ''|*[!0-9]*) true ;; *) false ;; esac \
@@ -184,7 +180,7 @@ _la_json() { # <repo> <sid> <host>; TSV on stdin
          required: ([$items[] | select(.class == "candidate")] | length > 0),
          options: ["keep (no change)", "release locks and re-audit only", "release locks and remove the listed worktrees and local branches"],
          candidates: [$items[] | select(.class == "candidate") | {
-           approval: (.path + "@" + .tip), path, branch, recovery_sha: .tip, completed_pr: .pr_number,
+           approval: (.path + "@" + .tip), path, branch, owner_session, recovery_sha: .tip, completed_pr: .pr_number,
            discard_approval: (.path + "@" + .tip + "@" + .ignored_digest),
            ignored_files: {count: .ignored_count, paths: .ignored_paths, digest: .ignored_digest,
                            note: "paths lists EVERY ignored path; they are NOT backed up by a clean status or the recovery SHA; remove discards them, needs --discard-ignored and the discard_approval token (bound to exactly this set)"},
@@ -198,20 +194,20 @@ la_audit() { # <repo> <sid>
   local repo="$1" sid="$2" top rows
   top="$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null)" || { echo "error:not-a-git-repo:$repo" >&2; return 3; }
   ( cd "$top" || exit 3
-    rows="$(_la_rows "$sid")" || exit 3
+    rows="$(_la_rows)" || exit 3
     printf '%s\n' "$rows" | _la_json "$top" "$sid" "${_TA_HOST:-unknown}" )
 }
 
 # Fresh row for ONE locked worktree path (re-audits everything; empty if not locked).
-_la_row_for() { # <top> <sid> <path>
+_la_row_for() { # <top> <path>
   local want
-  want="$(_wl_abs "$3" 2>/dev/null)"; [ -n "$want" ] || return 0
-  ( cd "$1" && _la_rows "$2" "$want" )
+  want="$(_wl_abs "$2" 2>/dev/null)"; [ -n "$want" ] || return 0
+  ( cd "$1" && _la_rows "$want" )
 }
 
 # <repo> <sid> <mode> <discard-ignored yes|no> <path@tip>...  -> JSON results on stdout
 la_apply() {
-  local repo="$1" sid="$2" mode="$3" discard="$4"; shift 4
+  local repo="$1" mode="$3" discard="$4"; shift 4
   local top; top="$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null)" || { echo "error:not-a-git-repo:$repo" >&2; return 3; }
   local results="[]" rc=0 item path want
   for item in "$@"; do
@@ -225,7 +221,7 @@ la_apply() {
     if ! [[ "$want" =~ ^[0-9a-f]{40}$ ]] || [ "$path" = "$item" ]; then
       reason=approval-not-path-at-full-tip-sha
     else
-      row="$(_la_row_for "$top" "$sid" "$path")"
+      row="$(_la_row_for "$top" "$path")"
       if [ -z "$row" ]; then reason=no-longer-a-locked-worktree
       else
         # fields: path branch tip lockreason age owner claim dirty ignored paths digest stash up prs prn prhead junc class reason

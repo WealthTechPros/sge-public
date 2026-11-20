@@ -120,9 +120,9 @@ if [ "$override_set" -eq 1 ]; then
   [ "$override" = "${override//[^A-Za-z0-9._:\/-]/}" ] \
     || die 4 "invalid-override: an override must be a single model id for $role"
   [ -n "$ids" ] || die 3 "no-catalog: cannot verify override '$override'"
-  printf '%s\n' "$eligible" | grep -Fxq -- "$override" \
+  grep -Fxq -- "$override" <<<"$eligible" \
     || die 4 "invalid-override: '$override' is not a listed $req-class model for $role"
-  printf '%s\n' "$ids" | grep -Fxq -- "$override" \
+  grep -Fxq -- "$override" <<<"$ids" \
     || die 4 "invalid-override: '$override' is not in the harness catalog"
   printf '%s\n' "$override"; exit 0
 fi
@@ -134,6 +134,6 @@ fi
 
 while IFS= read -r m; do
   [ -n "$m" ] || continue
-  if printf '%s\n' "$ids" | grep -Fxq -- "$m"; then printf '%s\n' "$m"; exit 0; fi
+  if grep -Fxq -- "$m" <<<"$ids"; then printf '%s\n' "$m"; exit 0; fi
 done <<< "$eligible"
 die 5 "no-eligible-model: catalog offers no $req-class model for $role"

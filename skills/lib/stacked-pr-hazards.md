@@ -40,7 +40,7 @@ STACKED_ON=$(printf '%s' "$OPEN_PRS" | \
 - Detect multi-level stacks (A → B → C) by repeating the check on `STACKED_ON` itself. Use a
   visited-set (`VISITED="$PR"`) to guard against cycles before the cycle-detection in AC4 runs:
   ```bash
-  while [ -n "$STACKED_ON" ] && ! echo "$VISITED" | grep -qw "$STACKED_ON"; do
+  while [ -n "$STACKED_ON" ] && ! grep -qw "$STACKED_ON" <<<"$VISITED"; do
     VISITED="$VISITED $STACKED_ON"; STACKED_ON=$(check_for_parent "$STACKED_ON")
   done
   ```

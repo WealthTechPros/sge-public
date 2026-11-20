@@ -91,7 +91,7 @@ _prl_fjh_labels() {
   printf '%s' "$out" | tr -d '\r'
 }
 
-_prl_fjh_has() { printf '%s\n' "$1" | grep -qxF -- "$2"; }
+_prl_fjh_has() { grep -qxF -- "$2" <<<"$1"; }
 
 # _prl_fjh_ensure_label <name> <color> <description>
 _prl_fjh_ensure_label() {

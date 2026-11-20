@@ -526,13 +526,13 @@ pr_ready_for_merge() {
   # documented remedy was to append `Fixes #N` — reintroducing the defect.
   # No cross-repo prefix: a reference to an issue in ANOTHER repo is not a
   # link to this PR's own tracked issue and must not satisfy this gate.
-  if ! printf '%s' "$body" | grep -iqE '(clos(e|es|ed)|fix(es|ed)?|resolv(e|es|ed)|(^|[^[:alnum:]])part[[:space:]]+of)[[:space:]]+#[0-9]+'; then
+  if ! grep -iqE '(clos(e|es|ed)|fix(es|ed)?|resolv(e|es|ed)|(^|[^[:alnum:]])part[[:space:]]+of)[[:space:]]+#[0-9]+' <<<"$body"; then
     echo "GATE_FAIL:not_linked"; return 1
   fi
 
   # Gate 2 â€” merge-gate label present
   labels=$(sge_gh_pr view "$pr" --json labels --jq '[.labels[].name] | join(",")' 2>/dev/null)
-  if ! printf '%s' "$labels" | grep -q "$MERGE_GATE_LABEL"; then
+  if ! grep -q "$MERGE_GATE_LABEL" <<<"$labels"; then
     echo "GATE_FAIL:not_reviewed"; return 1
   fi
 
@@ -999,24 +999,24 @@ is_blast_radius_pr() {
   # Cache the file list â€” one API call, not four.
   local files
   files=$(sge_gh_pr diff "$pr" --name-only 2>/dev/null)
-  printf '%s' "$files" | grep -qE \
-    'package\.json$|pnpm-lock\.yaml$|package-lock\.json$|yarn\.lock$|\.npmrc$|^patches/|pyproject\.toml$|poetry\.lock$|uv\.lock$|requirements[^/]*\.txt$|(^|/)requirements/[^/]+\.txt$|(^|/)setup\.(py|cfg)$|(^|/)Pipfile(\.lock)?$' \
+  grep -qE \
+    'package\.json$|pnpm-lock\.yaml$|package-lock\.json$|yarn\.lock$|\.npmrc$|^patches/|pyproject\.toml$|poetry\.lock$|uv\.lock$|requirements[^/]*\.txt$|(^|/)requirements/[^/]+\.txt$|(^|/)setup\.(py|cfg)$|(^|/)Pipfile(\.lock)?$' <<<"$files" \
     && { echo "lockfile"; return 0; }
-  printf '%s' "$files" | grep -qE \
-    'tsconfig[^/]*\.json$|vite\.config\.[^/]+$|vitest\.config\.[^/]+$' \
+  grep -qE \
+    'tsconfig[^/]*\.json$|vite\.config\.[^/]+$|vitest\.config\.[^/]+$' <<<"$files" \
     && { echo "shared-config"; return 0; }
-  printf '%s' "$files" | grep -qE \
-    '^\.github/workflows/[^/]+\.ya?ml$' \
+  grep -qE \
+    '^\.github/workflows/[^/]+\.ya?ml$' <<<"$files" \
     && { echo "ci-workflow"; return 0; }
-  printf '%s' "$files" | grep -qE \
-    '\.prisma$|(^|/)migrations/|(^|/)alembic/|(^|/)alembic\.ini$|codegen\.[^/]+$' \
+  grep -qE \
+    '\.prisma$|(^|/)migrations/|(^|/)alembic/|(^|/)alembic\.ini$|codegen\.[^/]+$' <<<"$files" \
     && { echo "codegen-schema"; return 0; }
-  printf '%s' "$files" | grep -qE \
-    '(^|/)Dockerfile|docker-compose[^/]*\.ya?ml$' \
+  grep -qE \
+    '(^|/)Dockerfile|docker-compose[^/]*\.ya?ml$' <<<"$files" \
     && { echo "container"; return 0; }
   local author
   author=$(sge_gh_pr view "$pr" --json author --jq '.author.login' 2>/dev/null)
-  echo "$author" | grep -qE '\[bot\]$|^dependabot|/dependabot|^renovate' \
+  grep -qE '\[bot\]$|^dependabot|/dependabot|^renovate' <<<"$author" \
     && { echo "bot-author"; return 0; }
   return 1
 }
@@ -1156,8 +1156,8 @@ stale_review_check() { # $1=pr
   IFS=$'\x1f' read -r head draft labels <<< "$meta"
   if [ -z "$head" ]; then echo "skip:pr-unreadable"; return 1; fi
   claimed=false; hold=false
-  printf '%s' ",$labels," | grep -qE ",(${CLAIM_LABELS_RE})," && claimed=true
-  printf '%s' ",$labels," | grep -q ',hold,' && hold=true
+  grep -qE ",(${CLAIM_LABELS_RE})," <<<",$labels," && claimed=true
+  grep -q ',hold,' <<<",$labels," && hold=true
   cov=$(review_coverage_state "$pr"); covered="${cov%% *}"; scope="${cov#* }"
   # Only spend the checks + ledger reads when a re-review is actually in play.
   if [ "$covered" = "false" ]; then
