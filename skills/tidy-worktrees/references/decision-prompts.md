@@ -1,6 +1,6 @@
 # Decision prompts
 
-Ask only after the audit and assessments are in. Recommendation first. In Claude Code use `AskUserQuestion` with **at most 4 questions per call**; make as many calls as needed. Without it (GitHub Copilot on Azure DevOps) print the same options as a numbered list and read the reply (`1`, `1,3`, `none`); treat no reply or anything unclear as keep.
+Ask only after the audit and assessments are in. Recommendation first. Use the exposed structured question tool (such as `AskUserQuestion`) with **at most 4 questions per call**; make as many calls as needed. Without it, regardless of client or repository host, print the same options as a numbered list and read the reply (`1`, `1,3`, `none`); treat no reply or anything unclear as keep. Record exact approval scope and evidence in the [continuing ledger](sweep-layouts.md#scope-and-continuing-execution-ledger); unchanged approvals need not be asked again, but changed evidence invalidates them.
 
 ## 1. Merged and superseded: one plan (always first)
 
