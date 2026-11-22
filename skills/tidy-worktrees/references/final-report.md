@@ -16,3 +16,7 @@ Rules:
 - End with `Outstanding decisions: none` or the list. **Never say the tidy is done while any decision is outstanding**; say what is waiting and on whom.
 - If the open-PR set was unknown, say "audit only, nothing removed".
 - Quote bucket counts before and after, so a reader sees the repo converge.
+- For each bounded fleet packet, report removed, remotely preserved, blocked
+  and remaining, with elapsed time and evidence dates. A frozen queue count is
+  not a fresh registry count; assessment and local checkpoints are not remote
+  preservation. Name the next cleanup target and separate recovery gaps.
