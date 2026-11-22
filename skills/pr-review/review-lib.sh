@@ -2130,8 +2130,10 @@ rl_app_installation_token() {
   command -v curl >/dev/null 2>&1 || { echo "rl_app_installation_token: curl not found -- cannot exchange JWT for a token" >&2; return 1; }
   jwt=$(rl_app_jwt) || return 1
   api="${GITHUB_API_URL:-https://api.github.com}"
-  resp=$(curl -sS -X POST \
-    -H "Authorization: Bearer ${jwt}" \
+  # The JWT goes to curl on stdin (-H @-), never in argv: /proc/<pid>/cmdline is
+  # readable by every local user, a review agent included (sge#3668).
+  resp=$(printf 'Authorization: Bearer %s\n' "$jwt" | curl -sS -X POST \
+    -H @- \
     -H "Accept: application/vnd.github+json" \
     -H "X-GitHub-Api-Version: 2022-11-28" \
     "${api}/app/installations/${inst}/access_tokens" 2>/dev/null) || {
