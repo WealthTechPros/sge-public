@@ -7,7 +7,7 @@
 # of this check were folded into this one script in #2915).
 #
 # Usage:
-#   linked-prs.sh <N> [--state open|merged|closed|all] [--repo owner/repo]
+#   linked-prs.sh <N> [--state open|merged|closed|all] [--repo owner/repo] [--complete]
 #
 # A PR counts as linked when:
 #   - via=body   its body says `Part of #N`, `Closes #N`, `Fixes #N` or
@@ -29,18 +29,25 @@
 # Exit: 0 = at least one linked PR · 1 = none · 2 = bad arguments or a gh
 # failure. Treat 2 as "unknown" and fail closed (never as "not in flight").
 #
+# --complete: also exit 2 when a search reaches its --limit (100 body hits per
+# keyword, 200 open PRs for the branch scan), because a capped result may omit
+# a matching PR. A result exactly at the limit fails closed even when nothing
+# is missing. resume-or-create.sh decide-ref passes it (SPEC-143): there a
+# missed PR would turn "reconcile" into "create".
+#
 # Test seam: SGE_LINKED_PRS_GH names the gh binary (skills/tests/linked-prs.test.sh).
 set -uo pipefail
 
 GH="${SGE_LINKED_PRS_GH:-gh}"
-N="" STATE="open" REPO_ARGS=()
+N="" STATE="open" REPO_ARGS=() COMPLETE=0
 
-usage() { echo "usage: linked-prs.sh <N> [--state open|merged|closed|all] [--repo owner/repo]" >&2; exit 2; }
+usage() { echo "usage: linked-prs.sh <N> [--state open|merged|closed|all] [--repo owner/repo] [--complete]" >&2; exit 2; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --state) [ $# -ge 2 ] || usage; STATE="$2"; shift 2 ;;
     --repo)  [ $# -ge 2 ] || usage; REPO_ARGS=(--repo "$2"); shift 2 ;;
+    --complete) COMPLETE=1; shift ;;
     -h|--help) usage ;;
     -*) echo "linked-prs.sh: unknown flag $1" >&2; usage ;;
     *) [ -z "$N" ] || usage; N="$1"; shift ;;
@@ -54,6 +61,12 @@ command -v jq >/dev/null 2>&1 || { echo "linked-prs.sh: jq is required" >&2; exi
 FIELDS="number,title,headRefName,url,state,isDraft,body"
 HITS="[]"
 
+capped() { # capped <json-array> <limit> — exit 2 under --complete when the result hit the limit
+  [ "$COMPLETE" -eq 1 ] || return 0
+  jq -e --argjson l "$2" 'length < $l' <<<"$1" >/dev/null 2>&1 \
+    || { echo "linked-prs.sh: a search reached its --limit $2; the result may be incomplete" >&2; exit 2; }
+}
+
 add() { # add <via> <json-array>
   HITS="$(jq -c --arg via "$1" --argjson new "$2" '. + [$new[] | . + {via: $via}]' <<<"$HITS")" || exit 2
 }
@@ -63,6 +76,7 @@ add() { # add <via> <json-array>
 for kw in "Part of" "Closes" "Fixes" "Resolves"; do
   out="$("$GH" pr list ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} --state "$STATE" --limit 100 \
     --search "in:body \"$kw #$N\"" --json "$FIELDS")" || { echo "linked-prs.sh: gh pr list failed" >&2; exit 2; }
+  capped "$out" 100
   real="$(jq -c --arg n "$N" '[.[] | select((.body // "") |
     test("(Part[[:space:]]+of|Closes|Fixes|Resolves)[[:space:]]*#" + $n + "([^0-9]|$)"; "i"))]' <<<"$out")" \
     || { echo "linked-prs.sh: unreadable gh output" >&2; exit 2; }
@@ -74,6 +88,7 @@ done
 if [ "$STATE" = "open" ] || [ "$STATE" = "all" ]; then
   out="$("$GH" pr list ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} --state open --limit 200 --json "$FIELDS")" \
     || { echo "linked-prs.sh: gh pr list failed" >&2; exit 2; }
+  capped "$out" 200
   real="$(jq -c --arg n "$N" '[.[] | select((.headRefName // "") |
     test("(^|/)(issue-|sge-)?0*" + $n + "(-|_|$)"))]' <<<"$out")" \
     || { echo "linked-prs.sh: unreadable gh output" >&2; exit 2; }

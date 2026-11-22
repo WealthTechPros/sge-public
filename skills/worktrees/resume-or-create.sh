@@ -69,6 +69,11 @@
 #   10 — verdict:backoff (another live agent owns it)
 #   3  — <repo-root> is not a git repository
 #
+# decide-ref <ref> [repo-root] and associate <worktree> <ref> (SPEC-143, #3614)
+# resolve a host-qualified task reference instead of an issue number; see the
+# SPEC-143 section below. decide-ref adds verdict:reconcile (exit 11) and exits
+# 2 on an invalid reference.
+#
 # UNTRUSTED DATA: worktree paths and branch names come from `git worktree list`
 # / `git branch` — they are only ever passed to git as operands and to the
 # filesystem as paths, never eval'd, so a hostile branch name cannot execute.
@@ -108,10 +113,16 @@ roc_find_worktree() {
 # form, plus a spec-lane branch that names the issue. The issue number must be
 # a whole segment (bounded by a non-digit or end) so `issue-1` != `issue-12`.
 roc_find_branch() {
+  roc_find_branches "$1" "$2" | head -n1
+}
+
+# roc_find_branches <issue> <repo-root> — every local branch roc_find_branch
+# would accept, one per line. decide-ref uses it so two issue-<N> branches are
+# reconciled, never resumed as one (SPEC-143).
+roc_find_branches() {
   local issue="$1" root="$2"
   git -C "$root" for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null \
-    | grep -E "^(feat|feature|fix|chore)/(sge-[0-9]+-.*)?issue-${issue}([^0-9]|$)" \
-    | head -n1
+    | grep -E "^(feat|feature|fix|chore)/(sge-[0-9]+-.*)?issue-${issue}([^0-9]|$)"
 }
 
 # roc_open_pr <branch> <repo-root>
@@ -226,18 +237,192 @@ roc_decide() {
   return "$rc"
 }
 
+# ── SPEC-143 (#3614): resume by host-qualified task identity ─────────────────
+# A task reference names the task on its host: github:issue/<N>, github:pr/<N>,
+# azdo:wi/<N> or azdo:pr/<N>. `associate` records one against a worktree's
+# branch (git config branch.<b>.sgeTask: shared by every worktree, one value per
+# branch, outside the working tree). `decide-ref` resolves a reference to its
+# exact branch and worktree from that record, an exact read-only host lookup
+# and, for issue/work-item references, the issue-<N> matchers above. Missing or
+# ambiguous evidence answers `reconcile` (exit 11), never `create`. It lists
+# candidate stashes and changes nothing. Test seams: SGE_ROC_GH,
+# SGE_ROC_LINKED_PRS, SGE_ROC_AZDO_ADAPTER.
+_ROC_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)"
+
+# roc_parse_ref <ref> -> ROC_HOST ROC_KIND ROC_NUM; 2 when it is not one.
+roc_parse_ref() {
+  case "$1" in
+    github:issue/*|github:pr/*|azdo:wi/*|azdo:pr/*) ;;
+    *) return 2 ;;
+  esac
+  ROC_HOST="${1%%:*}"; ROC_KIND="${1#*:}"; ROC_NUM="${ROC_KIND#*/}"; ROC_KIND="${ROC_KIND%%/*}"
+  case "$ROC_NUM" in ''|*[!0-9]*) return 2 ;; esac
+  [ "$ROC_NUM" -gt 0 ] 2>/dev/null || return 2
+}
+
+# roc_associate <worktree> <ref> — record <ref> against the worktree's branch.
+roc_associate() {
+  local wt="$1" ref="$2" b
+  roc_parse_ref "$ref" || { echo "error:invalid-task-ref" >&2; return 2; }
+  b="$(git -C "$wt" symbolic-ref -q --short HEAD 2>/dev/null)" \
+    || { echo "error:worktree-has-no-branch" >&2; return 3; }
+  git -C "$wt" config "branch.$b.sgeTask" "$ref"
+}
+
+# roc_branch_worktree <branch> <repo-root> — the worktree that has it checked out.
+roc_branch_worktree() {
+  git -C "$2" worktree list --porcelain 2>/dev/null | awk -v want="branch refs/heads/$1" '
+    /^worktree / { path = substr($0, 10) }
+    $0 == want  { print path; exit }'
+}
+
+# roc_host_branches <repo-root> — branch names the host gives for the parsed
+# reference, one per line. Exit 1 = the lookup failed or is incomplete.
+roc_host_branches() {
+  local root="$1" gh="${SGE_ROC_GH:-gh}" origin out
+  local lp="${SGE_ROC_LINKED_PRS:-$_ROC_ROOT_DIR/scripts/linked-prs.sh}"
+  local az="${SGE_ROC_AZDO_ADAPTER:-$_ROC_ROOT_DIR/scripts/azdo-adapter.sh}"
+  command -v jq >/dev/null 2>&1 || return 1
+  case "$ROC_HOST:$ROC_KIND" in
+    github:pr)
+      # A fork PR's head branch (often `main`) names no branch of THIS repo, so
+      # only a same-repository PR yields a candidate; a fork or an unconfirmed
+      # source is unknown -> reconcile (CodeRabbit on #3653).
+      out="$(cd "$root" && "$gh" pr view "$ROC_NUM" --json headRefName,isCrossRepository 2>/dev/null)" || return 1
+      out="$(printf '%s' "$out" | jq -er 'if type == "object" and .isCrossRepository == false
+          and (.headRefName | type == "string" and length > 0) then .headRefName else error("fork or unknown source") end' 2>/dev/null)" || return 1
+      out="${out%$'\r'}"; [ -n "$out" ] || return 1; printf '%s\n' "$out" ;;
+    github:issue)
+      local rc=0
+      # --complete: a search that reached its --limit exits 2 (unknown), so a
+      # PR the cap left out can never turn reconcile into create.
+      out="$(cd "$root" && "$lp" "$ROC_NUM" --state all --complete 2>/dev/null)" || rc=$?
+      [ "$rc" -eq 0 ] || [ "$rc" -eq 1 ] || return 1
+      printf '%s' "${out:-[]}" | jq -er 'if type == "array" then .[] | .headRefName // error("no branch") else error("not an array") end' 2>/dev/null | tr -d '\r' \
+        || { [ "$rc" -eq 1 ] && return 0; return 1; } ;;
+    azdo:pr|azdo:wi)
+      origin="$(git -C "$root" remote get-url origin 2>/dev/null)" || return 1
+      if [ "$ROC_KIND" = pr ]; then
+        out="$(bash "$az" get-pr "$origin" "$ROC_NUM" 2>/dev/null)" || return 1
+        out="$(printf '%s' "$out" | jq -er '.headRefName | select(type == "string" and length > 0)' 2>/dev/null)" || return 1
+        printf '%s\n' "${out%$'\r'}"
+      else
+        # Pass the origin: the adapter then looks the item up in the origin's
+        # org (a different SGE_AZDO_ORG is refused) and keeps only PRs of this
+        # repository, so a same-named branch from another repo is not offered.
+        out="$(bash "$az" item-linked-prs "$ROC_NUM" "$origin" 2>/dev/null)" || return 1
+        # Every linked PR must name its source branch; one that does not is
+        # incomplete evidence, not "no branch".
+        printf '%s' "$out" | jq -r 'if type == "array" then .[] | .headRefName
+            | if type == "string" and length > 0 then . else error("no branch") end
+          else error("not an array") end' 2>/dev/null | tr -d '\r'
+      fi ;;
+    *) return 1 ;;
+  esac
+}
+
+# roc_decide_ref <ref> [repo-root] — see the header of this section.
+roc_decide_ref() {
+  local ref="$1" root="${2:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+  roc_parse_ref "$ref" || { echo "error:invalid-task-ref (want github:issue/N, github:pr/N, azdo:wi/N or azdo:pr/N)" >&2; return 2; }
+  git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "error:not-a-git-repository" >&2; return 3; }
+  local lookup=ok b wt hosted cands="" nl=$'\n' n=0 verdict note claim=free rc=0 one_b="" one_wt="" st task conflict=""
+  # 1. Recorded associations.
+  local recorded
+  recorded="$(git -C "$root" config --get-regexp '^branch\..*\.sgetask$' 2>/dev/null \
+    | awk -v r="$ref" '$2 == r { k = $1; sub(/^branch\./, "", k); sub(/\.sgetask$/, "", k); print k }')"
+  # 2. Exact host lookup.
+  hosted="$(roc_host_branches "$root")" || lookup=unknown
+  # 3. The issue-<N> matchers (issue and work-item references).
+  local legacy="" lwt=""
+  if [ "$ROC_KIND" = issue ] || [ "$ROC_KIND" = wi ]; then
+    legacy="$(roc_find_branches "$ROC_NUM" "$root")"
+    # Every issue-<N> worktree, one by one: two of them must reconcile.
+    while IFS= read -r lwt; do
+      [ -n "$lwt" ] || continue
+      legacy="$legacy$nl$(git -C "$lwt" symbolic-ref -q --short HEAD 2>/dev/null)"
+    done <<EOF
+$(roc_find_worktree "$ROC_NUM" "$root" issue)
+EOF
+  fi
+  # Local branches only, de-duplicated.
+  while IFS= read -r b; do
+    [ -n "$b" ] || continue
+    git -C "$root" show-ref --verify --quiet "refs/heads/$b" || continue
+    case "$nl$cands$nl" in *"$nl$b$nl"*) continue ;; esac
+    cands="$cands$b$nl"; n=$((n + 1))
+    # A candidate already recorded for a DIFFERENT task (e.g. fix/issue-42
+    # recorded as github:issue/42 while resolving azdo:wi/42) is conflicting
+    # evidence: reconcile, never resume it as this task.
+    task="$(git -C "$root" config --get "branch.$b.sgeTask" 2>/dev/null)"
+    if [ -n "$task" ] && [ "$task" != "$ref" ]; then conflict="$conflict $b=$task"; fi
+  done <<EOF
+$recorded
+$hosted
+$legacy
+EOF
+  echo "ref:$ref"
+  echo "lookup:$lookup"
+  while IFS= read -r b; do
+    [ -n "$b" ] || continue
+    wt="$(roc_branch_worktree "$b" "$root")"
+    if [ -z "$wt" ]; then st=no-worktree
+    elif [ -z "$(git -C "$wt" status --porcelain 2>/dev/null)" ]; then st=clean
+    else st=dirty; fi
+    printf 'candidate:%s\t%s\t%s\t%s\n' "${wt:--}" "$b" "$(git -C "$root" rev-parse -q --verify "refs/heads/$b")" "$st"
+    one_b="$b"; one_wt="$wt"
+  done <<EOF
+$cands
+EOF
+  # Stashes made on a candidate branch: listed, never applied.
+  git -C "$root" stash list --format='%gd%x09%gs' 2>/dev/null | while IFS="$(printf '\t')" read -r sref subj; do
+    subj="${subj#WIP on }"; subj="${subj#On }"; b="${subj%%:*}"
+    case "$nl$cands" in *"$nl$b$nl"*) printf 'stash:%s\t%s\n' "$sref" "$b" ;; esac
+  done
+  if [ "$lookup" = unknown ]; then
+    verdict=reconcile; rc=11; one_b=""; one_wt=""
+    note="the host lookup for $ref failed or was incomplete; reconcile the candidates by hand (no prior work is NOT established)"
+  elif [ "$n" -gt 1 ]; then
+    verdict=reconcile; rc=11; one_b=""; one_wt=""
+    note="$n branches resolve to $ref; reconcile them by hand before continuing"
+  elif [ -n "$conflict" ]; then
+    verdict=reconcile; rc=11; one_b=""; one_wt=""
+    note="a matching branch is recorded for another task (${conflict# }); reconcile by hand before continuing"
+  elif [ "$n" -eq 1 ] && [ -n "$one_wt" ]; then
+    claim="$(roc_claim_state "$one_wt")"
+    if [ "$claim" = held-fresh ]; then
+      verdict=backoff; rc=10; note="worktree $one_wt is claimed by a live agent; do not steal — report and stop"
+    else
+      verdict=resume; note="reuse existing worktree; run rescue-guard.sh assess before trusting verification (claim:${claim})"
+    fi
+  elif [ "$n" -eq 1 ]; then
+    verdict=resume; note="branch '$one_b' holds the work but has no worktree — add a worktree for it (do not create a new branch)"
+  else
+    verdict=create; note="no branch or worktree resolves to $ref; create fresh"
+  fi
+  echo "verdict:$verdict"
+  echo "worktree:${one_wt:--}"
+  echo "branch:${one_b:--}"
+  echo "open_pr:-"
+  echo "claim:$claim"
+  echo "note:$note"
+  return "$rc"
+}
+
 # CLI dispatch — only when executed directly, never when sourced.
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
   cmd="${1:-}"
   case "$cmd" in
     decide)  shift; roc_decide "$@" ;;
+    decide-ref) shift; roc_decide_ref "$@" ;;
+    associate)  shift; roc_associate "$@" ;;
     claim)   shift; roc_claim "$@" ;;
     release) shift; roc_release "$@" ;;
     find-worktree) shift; roc_find_worktree "$@" ;;
     find-branch)   shift; roc_find_branch "$@" ;;
     claim-state)   shift; roc_claim_state "$@" ;;
     *)
-      echo "usage: resume-or-create.sh {decide|claim|release|find-worktree|find-branch|claim-state} <args>" >&2
+      echo "usage: resume-or-create.sh {decide|decide-ref|associate|claim|release|find-worktree|find-branch|claim-state} <args>" >&2
       exit 3
       ;;
   esac

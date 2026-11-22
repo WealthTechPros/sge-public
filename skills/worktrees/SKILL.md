@@ -132,6 +132,29 @@ In every case, if `roc_open_pr` names an **open PR**, push to that branch rather
 than opening a duplicate. `roc_open_pr` is `unknown` when `gh` can't be reached —
 treat that as "check manually", never as "no PR".
 
+**Task branches with other names (SPEC-143, #3614).** `decide <N>` only sees the
+`issue-<N>` naming. When the task has a host reference — `github:issue/<N>`,
+`github:pr/<N>`, `azdo:wi/<N>` or `azdo:pr/<N>` — use `decide-ref <ref> [repo-root]`
+instead (same parse loop, same verdicts) and record the reference once you have a
+worktree, so a successor finds it whatever the branch is called:
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/worktrees/resume-or-create.sh" associate "$WT" azdo:wi/4985
+```
+
+`decide-ref` resolves the reference from that record (`git config
+branch.<b>.sgeTask`), an exact read-only host lookup and the `issue-<N>` matchers.
+The host lookup is a read against GitHub (`gh`, via `scripts/linked-prs.sh`) or,
+for `azdo:` references, Azure DevOps (`dev.azure.com`, via
+`scripts/azdo-adapter.sh`, in the org of this repo's `origin` and limited to its
+PRs).
+It adds one more verdict, **`reconcile`** (exit 11): several branches match, or the
+host lookup failed or was incomplete (`lookup:unknown`). Never create a fresh lane
+then; compare the `candidate:` lines (worktree, branch, head, status) and ask. A
+`resume` with `worktree:-` means one branch holds the work with no worktree: add a
+worktree for that branch. `stash:` lines list stashes made on a candidate branch;
+they are never applied for you.
+
 On resume/create, lease the worktree so a concurrent sibling backs off:
 `bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/worktrees/resume-or-create.sh" claim "$WT"`
 (the lease is `.sge-wt-claim` at the worktree root — refresh periodically for

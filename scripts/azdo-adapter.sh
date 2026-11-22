@@ -109,7 +109,10 @@
 #       -10), the token identity's own included. A payload without a numeric vote
 #       per reviewer is an error, never "no votes".
 #   azdo-adapter.sh pr-work-items <origin-url> <pr>                    (read)
-#   azdo-adapter.sh item-linked-prs <work-item-id>                     (read)
+#   azdo-adapter.sh item-linked-prs <work-item-id> [<origin-url>]      (read)
+#       With <origin-url>: the origin's org (a different SGE_AZDO_ORG is
+#       refused), only that repository's PRs, and a PR without repository
+#       identity is an error (SPEC-143).
 #
 #   Boards comment read (backs issue-read.sh comments, SPEC-128):
 #   azdo-adapter.sh item-comments <work-item-id>   all comments, JSON array
@@ -1690,18 +1693,43 @@ _aa_create_pr() { # <origin> <source> <target> <title> <body-file> [--draft] [<w
     || { _aa_err "create-pr: unrecognised response — the PR may or may not exist"; return 1; }
 }
 
-# Linked PR artefacts of a work item (intake rule 9): [{id, status, closedDate}].
-_aa_item_linked_prs() { # <id>
-  local raw ids id out='[]' pr
+# Linked PR artefacts of a work item (intake rule 9): [{id, status, closedDate,
+# headRefName}]. headRefName (the source branch) lets resume-or-create.sh
+# decide-ref find a predecessor's branch (SPEC-143, #3614). With <origin> the
+# org comes from the origin (_aa_org_matches refuses a different SGE_AZDO_ORG)
+# and a PR from another repository or project is left out, so a same-named
+# branch elsewhere in the org is never offered as this repository's work. A
+# linked PR without repository identity is then an error, never dropped.
+_aa_item_linked_prs() { # <id> [<origin>]
+  local raw ids id out='[]' pr repo="" project=""
   _aa_require_work_item_id "$1" || return 1
+  if [ -n "${2:-}" ]; then
+    _aa_parse_origin "$2" || return 1
+    _aa_org_matches "$_AA_R_ORG" || return 1
+    repo="$(_aa_lower "$_AA_R_REPO")"; project="$(_aa_lower "$_AA_R_PROJECT")"
+  fi
   raw="$(_aa_call "item-linked-prs" GET "/_apis/wit/workitems/$1?\$expand=relations&api-version=7.1")" || return 1
+  # A 2xx body that is not this work item (null, empty, another id, relations
+  # not a list) is an error, never "no linked PRs" (CodeRabbit on #3653).
+  printf '%s' "$raw" | jq -e --arg id "$1" \
+      'type == "object" and (.id == ($id | tonumber)) and ((.relations // []) | type == "array")' >/dev/null 2>&1 \
+    || { _aa_err "item-linked-prs: malformed work item $1"; return 1; }
   ids="$(printf '%s' "$raw" | jq -r '[.relations[]? | select(.rel == "ArtifactLink")
         | (.url // "") | ascii_downcase | select(startswith("vstfs:///git/pullrequestid/"))
         | capture("%2f(?<n>[0-9]+)$").n] | unique | .[]' 2>/dev/null | tr -d '\r')" \
     || { _aa_err "item-linked-prs: malformed work item $1"; return 1; }
   for id in $ids; do
     pr="$(_aa_call "item-linked-prs (PR $id)" GET "/_apis/git/pullrequests/$id?api-version=7.1")" || return 1
-    out="$(printf '%s' "$pr" | jq -c --argjson a "$out" '$a + [{id: .pullRequestId, status: (.status // ""), closedDate: (.closedDate // "")}]' 2>/dev/null)" \
+    if [ -n "$repo" ]; then
+      printf '%s' "$pr" | jq -e '(.repository.name | type == "string" and length > 0)
+          and (.repository.project.name | type == "string" and length > 0)' >/dev/null 2>&1 \
+        || { _aa_err "item-linked-prs: PR $id carries no repository identity"; return 1; }
+      printf '%s' "$pr" | jq -e --arg r "$repo" --arg p "$project" \
+          '(((.repository.name // "") | ascii_downcase) == $r or ((.repository.id // "") | ascii_downcase) == $r)
+           and (((.repository.project.name // "") | ascii_downcase) == $p or ((.repository.project.id // "") | ascii_downcase) == $p)' >/dev/null 2>&1 \
+        || continue
+    fi
+    out="$(printf '%s' "$pr" | jq -c --argjson a "$out" '$a + [{id: .pullRequestId, status: (.status // ""), closedDate: (.closedDate // ""), headRefName: ((.sourceRefName // "") | ltrimstr("refs/heads/")), repository: (.repository.name // ""), project: (.repository.project.name // "")}]' 2>/dev/null)" \
       || { _aa_err "item-linked-prs: malformed PR $id"; return 1; }
   done
   printf '%s\n' "$out"
@@ -1836,8 +1864,8 @@ _aa_main() {
       _aa_pr_work_items "$2" "$3" || exit 1
       ;;
     item-linked-prs)
-      [ -n "${2:-}" ] || _aa_usage 'item-linked-prs needs <work-item-id>'
-      _aa_item_linked_prs "$2" || exit 1
+      [ -n "${2:-}" ] || _aa_usage 'item-linked-prs needs <work-item-id> [<origin-url>]'
+      _aa_item_linked_prs "$2" "${3:-}" || exit 1
       ;;
     pr-add-label|pr-remove-label)
       _aa_require_write "$cmd" || exit 1
