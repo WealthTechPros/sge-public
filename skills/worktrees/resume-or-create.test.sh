@@ -129,6 +129,172 @@ check "pr-review purpose: held-fresh -> verdict backoff" \
   "$(echo "$out" | grep '^verdict:')" "verdict:backoff"
 check "pr-review purpose: backoff exit code 10" "$rc_pr_backoff" "10"
 
+# --- SPEC-143 (#3614): resume by host-qualified task identity ---------------
+# Stubbed host seams: gh, linked-prs.sh and azdo-adapter.sh read canned answers
+# from $STUB; "$STUB/fail" makes every lookup fail (auth, timeout, truncation).
+STUB="$TMP/stub"; mkdir -p "$STUB"
+cat > "$STUB/gh" <<'EOS'
+#!/usr/bin/env bash
+[ -e "$STUB/fail" ] && { echo "gh: not authenticated" >&2; exit 1; }
+# gh pr view <N> --json headRefName,isCrossRepository
+[ "$1 $2" = "pr view" ] && [ -f "$STUB/gh-pr-$3" ] && { cat "$STUB/gh-pr-$3"; exit 0; }
+echo "no pull requests found" >&2; exit 1
+EOS
+cat > "$STUB/linked-prs" <<'EOS'
+#!/usr/bin/env bash
+echo "$*" > "$STUB/linked-args"
+[ -e "$STUB/fail" ] && exit 2
+[ -f "$STUB/linked-$1" ] && { cat "$STUB/linked-$1"; exit 0; }
+echo '[]'; exit 1
+EOS
+cat > "$STUB/azdo" <<'EOS'
+#!/usr/bin/env bash
+[ -e "$STUB/fail" ] && { echo "azdo-adapter: error: 401" >&2; exit 1; }
+case "$1" in
+  get-pr) [ -f "$STUB/azpr-$3" ] && { cat "$STUB/azpr-$3"; exit 0; }; exit 1 ;;
+  item-linked-prs) echo "$*" > "$STUB/azdo-args"
+    [ -f "$STUB/wi-$2" ] && { cat "$STUB/wi-$2"; exit 0; }; echo '[]'; exit 0 ;;
+esac
+exit 1
+EOS
+chmod +x "$STUB/gh" "$STUB/linked-prs" "$STUB/azdo"
+export STUB SGE_ROC_GH="$STUB/gh" SGE_ROC_LINKED_PRS="$STUB/linked-prs" SGE_ROC_AZDO_ADAPTER="$STUB/azdo"
+git -C "$ROOT" remote add origin https://dev.azure.com/o/p/_git/r
+rm -f "$WT/.sge-wt-claim" "$RWT/.sge-wt-claim"
+field() { grep "^$2:" <<<"$1" | head -n1; }
+
+# @invalid ref -> exit 2
+bash "$HERE/resume-or-create.sh" decide-ref 'azdo:wi/1;rm' "$ROOT" >/dev/null 2>&1; check "invalid ref -> exit 2" "$?" "2"
+bash "$HERE/resume-or-create.sh" decide-ref 'github:wi/1' "$ROOT" >/dev/null 2>&1; check "github has no wi refs -> exit 2" "$?" "2"
+
+# @recorded-association: a guidance-* worktree associated with azdo:wi/812
+git -C "$ROOT" branch guidance-tone
+GWT="$TMP/repo-worktrees/guidance-tone"
+git -C "$ROOT" worktree add -q "$GWT" guidance-tone
+check "decide 812 alone still misses it (legacy path)" "$(field "$(roc_decide 812 "$ROOT" 2>/dev/null)" verdict)" "verdict:create"
+bash "$HERE/resume-or-create.sh" associate "$GWT" azdo:wi/812; check "associate exit 0" "$?" "0"
+check "association is recorded in git config" "$(git -C "$ROOT" config --get branch.guidance-tone.sgeTask)" "azdo:wi/812"
+out="$(roc_decide_ref azdo:wi/812 "$ROOT" 2>/dev/null)"; rc=$?
+check "recorded association -> resume" "$(field "$out" verdict)" "verdict:resume"
+check "recorded association -> exit 0" "$rc" "0"
+check "recorded association -> its branch" "$(field "$out" branch)" "branch:guidance-tone"
+check "recorded association -> its worktree" "$(tail2 "$(field "$out" worktree)")" "$(tail2 "$GWT")"
+check "recorded association -> lookup ok" "$(field "$out" lookup)" "lookup:ok"
+
+# @host-lookup: completed Azure Repos PR whose source branch has no number
+git -C "$ROOT" branch polish-copy
+echo '[{"id":77,"status":"completed","closedDate":"2026-11-01T00:00:00Z","headRefName":"polish-copy"}]' > "$STUB/wi-4985"
+out="$(roc_decide_ref azdo:wi/4985 "$ROOT" 2>/dev/null)"; rc=$?
+check "completed azdo PR -> not create" "$(field "$out" verdict)" "verdict:resume"
+check "completed azdo PR -> branch-only candidate" "$(field "$out" worktree)" "worktree:-"
+check "completed azdo PR -> its source branch" "$(field "$out" branch)" "branch:polish-copy"
+echo '{"number":78,"headRefName":"polish-copy","state":"MERGED"}' > "$STUB/azpr-78"
+check "azdo:pr ref -> its source branch" "$(field "$(roc_decide_ref azdo:pr/78 "$ROOT" 2>/dev/null)" branch)" "branch:polish-copy"
+# A work item whose linked PR has no source branch field is unknown evidence.
+echo '[{"id":79,"status":"completed","closedDate":""}]' > "$STUB/wi-5000"
+out="$(roc_decide_ref azdo:wi/5000 "$ROOT" 2>/dev/null)"; rc=$?
+check "linked PR without a source branch -> reconcile" "$(field "$out" verdict)" "verdict:reconcile"
+
+check "work-item lookup is bound to this repo's origin" "$(cat "$STUB/azdo-args")" "item-linked-prs 5000 https://dev.azure.com/o/p/_git/r"
+
+# @github-pr
+git -C "$ROOT" branch tidy-readme
+printf '{"headRefName":"tidy-readme","isCrossRepository":false}\n' > "$STUB/gh-pr-501"
+out="$(roc_decide_ref github:pr/501 "$ROOT" 2>/dev/null)"
+check "github:pr -> head branch candidate" "$(field "$out" branch)" "branch:tidy-readme"
+check "github:pr -> resume" "$(field "$out" verdict)" "verdict:resume"
+# A fork PR's head branch names no branch here (CodeRabbit on #3653): its
+# `tidy-readme` must not resume ours; a fork or unknown source reconciles.
+printf '{"headRefName":"tidy-readme","isCrossRepository":true}\n' > "$STUB/gh-pr-502"
+out="$(roc_decide_ref github:pr/502 "$ROOT" 2>/dev/null)"; rc=$?
+check "github:pr from a fork -> reconcile" "$(field "$out" verdict)" "verdict:reconcile"
+check "github:pr from a fork -> exit 11" "$rc" "11"
+printf '{"headRefName":"tidy-readme"}\n' > "$STUB/gh-pr-503"
+check "github:pr with an unconfirmed source -> reconcile" "$(field "$(roc_decide_ref github:pr/503 "$ROOT" 2>/dev/null)" verdict)" "verdict:reconcile"
+
+# @ambiguous: association on one branch, host lookup names another
+git -C "$ROOT" config branch.tidy-readme.sgeTask azdo:wi/4985
+out="$(roc_decide_ref azdo:wi/4985 "$ROOT" 2>/dev/null)"; rc=$?
+check "two candidates -> reconcile" "$(field "$out" verdict)" "verdict:reconcile"
+check "reconcile -> exit 11" "$rc" "11"
+check "reconcile lists both candidates" "$(echo "$out" | grep -c '^candidate:')" "2"
+check "candidate line carries head and status" \
+  "$(echo "$out" | grep '^candidate:' | grep -c "	polish-copy	$(git -C "$ROOT" rev-parse polish-copy)	no-worktree$")" "1"
+git -C "$ROOT" config --unset branch.tidy-readme.sgeTask
+
+# @lookup-unknown
+touch "$STUB/fail"
+out="$(roc_decide_ref azdo:wi/4985 "$ROOT" 2>/dev/null)"; rc=$?
+check "failed azdo lookup -> reconcile" "$(field "$out" verdict)" "verdict:reconcile"
+check "failed azdo lookup -> lookup unknown" "$(field "$out" lookup)" "lookup:unknown"
+check "failed lookup -> exit 11" "$rc" "11"
+check "failed github lookup, no candidate -> reconcile, never create" \
+  "$(field "$(roc_decide_ref github:issue/7777 "$ROOT" 2>/dev/null)" verdict)" "verdict:reconcile"
+rm -f "$STUB/fail"
+check "no candidate, complete lookup -> create" \
+  "$(field "$(roc_decide_ref github:issue/7777 "$ROOT" 2>/dev/null)" verdict)" "verdict:create"
+
+# @stashes: listed, never applied
+echo wip > "$GWT/wip.txt"; git -C "$GWT" add wip.txt; git -C "$GWT" stash -q
+git -C "$ROOT" stash list > "$TMP/stash-before"
+out="$(roc_decide_ref azdo:wi/812 "$ROOT" 2>/dev/null)"
+check "candidate stash is listed" "$(echo "$out" | grep -c '^stash:stash@{0}	guidance-tone$')" "1"
+git -C "$ROOT" stash list > "$TMP/stash-after"
+check "stash list unchanged" "$(cmp -s "$TMP/stash-before" "$TMP/stash-after" && echo same)" "same"
+check "stash not applied" "$([ -e "$GWT/wip.txt" ] && echo applied || echo kept)" "kept"
+
+# @compatible: issue-number path unchanged, and github:issue reaches it too
+out="$(roc_decide_ref github:issue/42 "$ROOT" 2>/dev/null)"
+check "github:issue/42 -> resume on issue-42" "$(field "$out" verdict)" "verdict:resume"
+check "github:issue/42 -> fix/issue-42" "$(field "$out" branch)" "branch:fix/issue-42"
+check "decide 42 unchanged" "$(field "$(roc_decide 42 "$ROOT" 2>/dev/null)" verdict)" "verdict:resume"
+printf '[{"number":9,"headRefName":"fix/issue-42"}]\n' > "$STUB/linked-42"
+check "linked PR on the same branch is one candidate" "$(field "$(roc_decide_ref github:issue/42 "$ROOT" 2>/dev/null)" verdict)" "verdict:resume"
+rm -f "$STUB/linked-42"
+check "issue lookup asks linked-prs for a complete answer" "$(cat "$STUB/linked-args")" "42 --state all --complete"
+
+# @legacy-ambiguous: two issue-<N> branches and a complete, empty host lookup
+git -C "$ROOT" branch fix/issue-55-a
+git -C "$ROOT" branch fix/issue-55-b
+out="$(roc_decide_ref github:issue/55 "$ROOT" 2>/dev/null)"; rc=$?
+check "two legacy issue-55 branches -> reconcile" "$(field "$out" verdict)" "verdict:reconcile"
+check "two legacy issue-55 branches -> both listed" "$(echo "$out" | grep -c '^candidate:')" "2"
+check "find-branch keeps its first-match answer" "$(roc_find_branch 55 "$ROOT")" "fix/issue-55-a"
+git -C "$ROOT" branch -q -D fix/issue-55-a fix/issue-55-b
+
+
+# @recorded-elsewhere: a legacy match recorded for another task is conflicting evidence
+git -C "$ROOT" branch fix/issue-61
+git -C "$ROOT" config branch.fix/issue-61.sgeTask github:issue/61
+out="$(roc_decide_ref azdo:wi/61 "$ROOT" 2>/dev/null)"; rc=$?
+check "legacy branch recorded for another task -> reconcile" "$(field "$out" verdict)" "verdict:reconcile"
+check "legacy branch recorded for another task -> exit 11" "$rc" "11"
+check "branch recorded for the same task still resumes" "$(field "$(roc_decide_ref github:issue/61 "$ROOT" 2>/dev/null)" verdict)" "verdict:resume"
+git -C "$ROOT" config --unset branch.fix/issue-61.sgeTask
+git -C "$ROOT" branch -q -D fix/issue-61
+
+# Two issue-<N> worktrees whose branches do not name the issue (CodeRabbit on
+# #3653): each one's branch is collected, so the result is reconcile, not create.
+git -C "$ROOT" branch alpha-63; git -C "$ROOT" branch beta-63
+git -C "$ROOT" worktree add -q "$TMP/wa/issue-63" alpha-63
+git -C "$ROOT" worktree add -q "$TMP/wb/issue-63" beta-63
+out="$(roc_decide_ref github:issue/63 "$ROOT" 2>/dev/null)"; rc=$?
+check "two issue-<N> worktrees -> reconcile" "$(field "$out" verdict)" "verdict:reconcile"
+git -C "$ROOT" worktree remove --force "$TMP/wb/issue-63"
+check "one issue-<N> worktree -> resume" "$(field "$(roc_decide_ref github:issue/63 "$ROOT" 2>/dev/null)" verdict)" "verdict:resume"
+git -C "$ROOT" worktree remove --force "$TMP/wa/issue-63"
+git -C "$ROOT" branch -q -D alpha-63 beta-63
+
+# @backoff carried over: a fresh foreign claim on the one candidate
+printf 'other-agent %s\n' "$(date +%s)" > "$GWT/.sge-wt-claim"
+roc_decide_ref azdo:wi/812 "$ROOT" >/dev/null 2>&1; check "claimed candidate -> exit 10" "$?" "10"
+rm -f "$GWT/.sge-wt-claim"
+
+# @no-mutation
+snap() { git -C "$ROOT" for-each-ref --format='%(refname) %(objectname)'; git -C "$ROOT" worktree list --porcelain; git -C "$ROOT" stash list; git -C "$GWT" status --porcelain; }
+before="$(snap)"; roc_decide_ref azdo:wi/812 "$ROOT" >/dev/null 2>&1; roc_decide_ref azdo:wi/4985 "$ROOT" >/dev/null 2>&1
+check "decide-ref changes nothing" "$(snap)" "$before"
+
 echo "----"
 if [ "$fail" -eq 0 ]; then echo "ALL PASS"; else echo "FAILURES"; fi
 exit "$fail"
