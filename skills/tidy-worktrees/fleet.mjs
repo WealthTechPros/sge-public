@@ -4,14 +4,11 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { pathKey as key, stateLocation as outputLocation } from '../lib/local-state.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const sha = /^[0-9a-f]{40}$/;
 const digest = value => createHash('sha256').update(value).digest('hex');
-const key = value => {
-  const result = path.resolve(value).replaceAll('\\', '/').replace(/\/$/, '');
-  return process.platform === 'win32' ? result.toLowerCase() : result;
-};
 const read = file => JSON.parse(fs.readFileSync(file, 'utf8'));
 const bash = () => process.env.SGE_BASH || (process.platform === 'win32'
   ? path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Git', 'bin', 'bash.exe') : 'bash');
@@ -22,27 +19,6 @@ function run(command, args, options = {}) {
   });
   if (result.error || result.status !== 0) throw new Error('command failed or timed out; retain target');
   return result.stdout;
-}
-
-function outputLocation(file) {
-  const requested = path.resolve(file);
-  let parent = path.dirname(requested);
-  while (!fs.existsSync(parent)) parent = path.dirname(parent);
-  const absolute = path.join(fs.realpathSync(parent), path.relative(parent, requested));
-  const parts = absolute.split(/[\\/]/);
-  if (parts.some(part => /^(onedrive|sharepoint|dropbox|google drive|icloud|box sync)/i.test(part))) {
-    throw new Error('state and reports must be outside synchronised folders');
-  }
-  for (const name of ['OneDrive', 'OneDriveCommercial', 'OneDriveConsumer']) {
-    if (process.env[name] && key(absolute).toLowerCase().startsWith(`${key(process.env[name]).toLowerCase()}/`)) {
-      throw new Error('state and reports must be outside synchronised folders');
-    }
-  }
-  parent = path.dirname(absolute);
-  while (!fs.existsSync(parent)) parent = path.dirname(parent);
-  const git = spawnSync('git', ['-C', parent, 'rev-parse', '--is-inside-work-tree'], { encoding: 'utf8' });
-  if (git.status === 0 && git.stdout.trim() === 'true') throw new Error('state must be outside versioned source');
-  return absolute;
 }
 
 export function importQueue(queue) {
@@ -73,7 +49,7 @@ export function importQueue(queue) {
 export function packet(state, lane = 'review', limit = 5) {
   if (!['review', 'cleanup', 'recovery', 'merge', 'retained'].includes(lane)) throw new Error('invalid lane');
   if (!Number.isInteger(limit) || limit < 1 || limit > 5) throw new Error('packet limit must be 1..5');
-  return state.items.filter(item => item.lane === lane)
+  return state.items.filter(item => item.lane === lane && !item.blocker)
     .sort((a, b) => (a.priority ?? 1000) - (b.priority ?? 1000)).slice(0, limit);
 }
 
@@ -130,7 +106,13 @@ function save(file, state, previous) {
 export function counts(state) {
   const result = {};
   for (const item of state.items) result[item.lane] = (result[item.lane] || 0) + 1;
-  return { snapshot: true, total: state.items.length, lanes: result };
+  const preserved = item => item.publication?.verified === true && item.publication.sourceSha === item.head;
+  return { snapshot: true, total: state.items.length, lanes: result,
+    blocked: state.items.filter(item => item.blocker).length,
+    removed: result.removed || 0,
+    remotelyPreserved: state.items.filter(item => item.lane !== 'removed' && preserved(item)).length,
+    remaining: state.items.length - (result.removed || 0),
+    classificationOnly: state.items.filter(item => item.reviewed && item.lane !== 'removed' && !preserved(item)).length };
 }
 
 export function planItem(item, report, names) {
@@ -156,7 +138,8 @@ export function planItem(item, report, names) {
 export function verifyApprovedIdentity(item, entry, report) {
   if (!item || !report || report.refused || !sha.test(entry.recoverySha || '') || !sha.test(entry.baseHead || '')
     || item.head !== entry.recoverySha || item.branch !== entry.branch
-    || item.baseHead !== entry.baseHead || report.base_tip !== entry.baseHead) {
+    || item.baseHead !== entry.baseHead || report.base_tip !== entry.baseHead
+    || key(item.root) !== key(entry.auditRepo) || key(report.repo) !== key(entry.auditRepo)) {
     throw new Error('approved target identity or base changed; fresh plan required; retain');
   }
 }
@@ -217,7 +200,7 @@ export async function main(args) {
   const options = {};
   while (args.length) {
     const name = args.shift();
-    if (!['--state', '--queue', '--lane', '--limit', '--out', '--path', '--reason', '--status', '--evidence', '--recovery', '--plan', '--fingerprint', '--priority'].includes(name)
+    if (!['--state', '--queue', '--lane', '--limit', '--out', '--path', '--reason', '--status', '--evidence', '--recovery', '--plan', '--fingerprint', '--priority', '--blocker', '--approval'].includes(name)
       || !args.length || options[name] !== undefined) throw new Error('invalid arguments');
     options[name] = args.shift();
   }
@@ -234,13 +217,30 @@ export async function main(args) {
   const state = JSON.parse(previous);
   if (state.version !== 1 || !Array.isArray(state.items)) throw new Error('unknown ledger version');
   const limit = Number(options['--limit'] || 5);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 5) throw new Error('packet limit must be 1..5');
   const lane = options['--lane'] || 'review';
   if (command === 'status') return counts(state);
+  if (command === 'blocked') return state.items.filter(item => item.blocker).slice(0, limit);
   if (command === 'next') return packet(state, lane, limit);
+  if (command === 'preserved') {
+    const item = state.items.find(row => row.id === key(options['--path'] || '.'));
+    if (!item || !options['--evidence']) throw new Error('exact target and publication evidence required');
+    const branch = item.branch.replace(/^refs\/heads\//, '');
+    const remote = run('git', ['-C', item.root, 'ls-remote', '--exit-code', 'origin', `refs/heads/${branch}`]).trim();
+    if (remote !== `${item.head}\trefs/heads/${branch}`) throw new Error('remote source head differs; not preserved');
+    const evidence = path.resolve(options['--evidence']);
+    const content = fs.readFileSync(evidence);
+    item.publication = { verified: true, sourceSha: item.head, branch, asOf: new Date().toISOString(),
+      boundary: 'committed source only; dirty, ignored, stashes, buffers and acceptance remain separate' };
+    item.evidence.push({ file: evidence, sha256: digest(content), asOf: item.publication.asOf });
+    save(file, state, previous);
+    return item.publication;
+  }
   if (command === 'invalidate') {
     const item = state.items.find(row => row.id === key(options['--path'] || ''));
     if (!item || !options['--reason'] || item.lane === 'removed') throw new Error('exact target and invalidation reason required');
     item.lane = 'review';
+    delete item.blocker;
     item.invalidation = options['--reason'];
     save(file, state, previous);
     return item;
@@ -259,15 +259,27 @@ export async function main(args) {
     if (options['--status'] === 'removed') {
       verifyRemoval(item, evidence, options['--recovery']);
       item.recoveryFile = path.resolve(options['--recovery']);
+      delete item.blocker;
     }
     item.lane = options['--status'];
     item.reviewed = true;
     item.next = options['--reason'];
+    if (options['--blocker']) {
+      const blocker = read(options['--blocker']);
+      if (!['owner', 'preservation', 'permission', 'host-evidence', 'acceptance', 'approval'].includes(blocker.kind)
+        || !['owner', 'nextAction', 'unblockEvidence'].every(field => typeof blocker[field] === 'string' && blocker[field].trim())
+        || options['--status'] === 'removed') throw new Error('typed blocker needs owner, nextAction and unblockEvidence');
+      item.blocker = { ...blocker, asOf: new Date().toISOString() };
+    }
     item.evidence.push({ file: evidence, sha256: digest(fs.readFileSync(evidence)), asOf: new Date().toISOString() });
     save(file, state, previous);
     return item;
   }
-  if (!['audit', 'plan', 'verify-plan'].includes(command)) throw new Error('usage: init|status|next|audit|record|invalidate|plan|verify-plan --state <file>');
+  if (['approve', 'execute', 'reconcile'].includes(command)) {
+    const { manageExecution } = await import('./fleet-execution.mjs');
+    return manageExecution({ command, options, state, file, previous, save, run, verifyRemoval, main });
+  }
+  if (!['audit', 'plan', 'verify-plan'].includes(command)) throw new Error('usage: init|status|next|blocked|audit|record|invalidate|plan|verify-plan|approve|execute|reconcile --state <file>');
   if (command === 'plan' && (!options['--out'] || fs.existsSync(outputLocation(options['--out'])))) {
     throw new Error('plan needs a new --out file; never overwrite prior approval');
   }
@@ -286,6 +298,7 @@ export async function main(args) {
     ? state.items.filter(item => item.id === key(options['--path']))
     : packet(state, command === 'plan' ? 'cleanup' : lane, limit);
   if (command === 'verify-plan' && selected.length !== 1) throw new Error('exact ledger target required');
+  if (command === 'verify-plan' && selected[0].blocker) throw new Error('unresolved target blocker; explicit evidence invalidation required');
   const deadline = Date.now() + 600000;
   const reports = new Map();
   const store = path.dirname(outputLocation(path.join(`${file}.audits`, 'probe.json')));
@@ -318,7 +331,7 @@ export async function main(args) {
   if (command === 'audit') return { processed: completed, remaining: counts(state), mutations: 'remote-tracking fetch and local ledger only' };
   if (command === 'verify-plan') {
     const item = completed[0];
-    verifyApprovedIdentity(item, approvedEntry, reports.get(key(item.root))?.report);
+    verifyApprovedIdentity(item, approvedEntry, item && reports.get(key(item.root))?.report);
     const names = run('git', ['-C', item.path, 'ls-files', '--others', '--ignored', '--exclude-standard', '-z'])
       .split('\0').filter(Boolean);
     planItem(item, reports.get(key(item.root)).report, names);
@@ -326,6 +339,7 @@ export async function main(args) {
     if (digest(fs.readFileSync(options['--plan'])) !== options['--fingerprint']) throw new Error('reviewed plan changed during verification');
     return {
       verified: true, path: item.path, recoverySha: item.head, ignoredFilenameSha256: approvedEntry.ignoredFilenameSha256,
+      auditFile: item.auditFile,
       approval: 'still required; a matching fingerprint is not human consent',
       executorArguments: ['--audit', item.auditFile, '--select', `${reports.get(key(item.root)).report.repo}::worktree:${item.branch}@${item.head}`],
       execution: 'use the reviewed recovery-file path; coordinator executes this target immediately, serially',
