@@ -2,7 +2,7 @@
 description: Use when checking a SPEC-NNN is ready to implement, before any branch, plan or code for it exists.
 argument-hint: <SPEC-NNN or issue#>
 context: fork
-allowed-tools: Read, Grep, Glob, Agent, AskUserQuestion, Bash(ls:*), Bash(cat:*), Bash(git log:*), Bash(git show:*), Bash(git ls-files:*), Bash(gh issue view:*), Bash(gh issue list:*), Bash(gh issue comment:*), Bash(node ${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/resolve-context-scope.mjs:*), Bash(node ${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/resolve-context-depth.mjs:*)
+allowed-tools: Read, Grep, Glob, Agent, AskUserQuestion, Bash(ls:*), Bash(cat:*), Bash(git log:*), Bash(git show:*), Bash(git ls-files:*), Bash(gh issue view:*), Bash(gh issue list:*), Bash(gh issue comment:*), Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/sge-preflight/scripts/clarify-reports.sh:*), Bash(node ${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/resolve-context-scope.mjs:*), Bash(node ${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/scripts/resolve-context-depth.mjs:*)
 ---
 
 > Use when preparing to implement an SGE feature spec — before any branch, plan, or code for it exists — when asked to preflight or check build-readiness of a SPEC-NNN, or when /sge:sge-implement Phase 1 delegates its entry-criteria checks.
@@ -44,6 +44,18 @@ It is consumed two ways:
 
 `$ARGUMENTS` is the spec id (`SPEC-NNN`, or legacy `SGD-NNN`) or the GitHub
 issue number tracking it.
+
+**`--analyze` mode (#3536).** `/sge:sge-preflight --analyze <SPEC-NNN or issue#>
+[<plan file> | <child issue#>...]` runs once a plan or a decomposition exists and
+before any code. It maps every acceptance criterion and Gherkin scenario to a plan
+task or child issue. It flags uncovered criteria and untraced tasks. A Vision
+non-goal or ADR conflict is CRITICAL and blocks. It posts a severity-ranked report
+and edits nothing. It replaces Steps 1.5 to 3; procedure and return shape:
+[`references/analyze-mode.md`](references/analyze-mode.md). An analyze run exits
+there: standalone mode keeps the Step 4 recovery options for its own gating, but
+Step 5 does not run (analyze posts its own report) and Step 6 does not run either —
+return only the JSON shape in `references/analyze-mode.md` and do not append a
+`SkillRunRecord` to `memory/skill-runs.jsonl`.
 
 > **Target repo.** This checklist is only correct when the `gh issue
 > view`/`gh issue list`/`gh issue comment` calls below **and** the spec/
@@ -210,6 +222,19 @@ Finally, plan the files:
 - [ ] any shared types
 ```
 
+### 2D: Clarify pass (after 2A, #3535)
+
+Check the spec's requirements for ambiguity: vague adjectives, missing error and
+edge cases, unstated non-functional requirements, Gherkin without data, and actors
+not in the capability model. Standalone, ask at most 5 questions, highest impact
+first. Answers go into `clarifications[]` (sge-implement writes them into the
+spec's `## Clarifications` section), and unanswered ones become gating QDs.
+Dispatched, ask nothing: carry the answers an earlier standalone run recorded
+(the spec's `## Clarifications`, or every authorised preflight comment's
+`### Clarifications` block) into `clarifications[]`, and return the rest as QDs. The pass removes speculative scope and
+never adds requirements (SPEC-124). Procedure:
+[`references/clarify-pass.md`](references/clarify-pass.md).
+
 Hold this file plan — it is one of the two inputs (with the Step 3 complexity
 score) to the depth resolution performed at **Step 3.5**. Do **not** resolve
 the depth tier here: the complexity score does not exist yet, so the resolver
@@ -314,6 +339,9 @@ flag that in your final summary.)
 - Cascade citation (CAP-xx + success_measure_moved): ✅/❌
 - Open questions (QD-NN): [none / list with resolution status]
 
+### Clarifications
+[Step 2D: each question and its answer, or "none needed"; optional reviewer-owned requirements checklist, unticked]
+
 ### Complexity Score
 [N] — [small / medium / large-split] (canonical rubric: /sge:sge-implement Phase 2)
 
@@ -348,11 +376,15 @@ parses it):
   "specId": "SPEC-NNN",
   "dependencies": ["..."],
   "openQuestions": ["QD-NN ..."],
+  "clarifications": [{"question": "...", "answer": "...", "specSection": "..."}],
   "complexityScore": 0,
   "readyToBuild": true
 }
 ```
 
+- `clarifications[]` — Step 2D's answered questions, for sge-implement to write
+  into the spec (a dispatched run returns the answers it carried from earlier
+  reports). Empty only when there are no answers to return.
 - `dependencies[]` — one entry per declared dependency, each stating built /
   not built (e.g. `"SPEC-NNN (capability model): built"`).
 - `openQuestions[]` — every QD-NN found, with status; plus any
