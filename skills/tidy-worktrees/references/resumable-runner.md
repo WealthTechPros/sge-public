@@ -2,11 +2,12 @@
 
 `fleet.mjs` automates queue bookkeeping, bounded audit preparation and exact
 cleanup-plan assembly. The skill remains the coordinator for value assessment,
-code completion, owning checks, publication and approved execution. This is
+code completion, owning checks and publication. Approved execution is an explicit
+single-target command delegating to the existing executor. This is
 not an unattended coding service, automatic merge, deletion scheduler or
 installed lifecycle hook.
 
-Requires Node.js 22+ plus the existing audit's Git Bash, Git, jq and host
+Requires Node.js 22.13+ (built-in SQLite) plus the existing audit's Git Bash, Git, jq and host
 adapter dependencies. On Windows the runner selects Git for Windows' Bash,
 not a WSL shim; `SGE_BASH` may select an explicitly trusted alternative.
 
@@ -66,7 +67,24 @@ node "$S" invalidate --state /local/task/fleet.json --path /repo/worktree \
 `merge` means await actual authorised merge, not enable automatic merge.
 The next audit reclassifies the target; dirty work, changed tips, claims and
 locks still prevent ordinary cleanup. Phase 2b choices remain separate.
-No command automatically commits, pushes, opens a PR or removes anything.
+No command commits, pushes or opens a PR. `execute` removes only one explicitly
+approved, freshly revalidated target; it never chooses targets or grants consent.
+
+Use `record --blocker <local-json>` for an unresolved gate. The object requires
+`kind` (`owner`, `preservation`, `permission`, `host-evidence`, `acceptance` or
+`approval`), `owner`, `nextAction` and `unblockEvidence`. `blocked` lists those
+targets; `next` skips them until `invalidate --reason <new-evidence>` explicitly
+reopens the target. Legacy rows remain readable; migrate their blockers from
+existing evidence, not by guessing. Classification is not resolution.
+Instruction loading is not source coverage: an instruction-only collector
+result is partial with zero target reads, never an accepted assessment.
+
+`preserved --path <target> --evidence <receipt>` verifies the exact remote branch
+SHA with `ls-remote` and records committed-source preservation only. Dirty,
+ignored, stash and buffer coverage and full acceptance remain separate.
+`status` distinguishes removed, remotely preserved source, blocked, remaining
+and classified-only rows; preservation can overlap remaining work. These are
+ledger snapshots, not a physical census or acceptance counts.
 
 ## One exact cleanup approval
 
@@ -110,3 +128,39 @@ the absent folder/branch/native entry and the readable recovery object.
 It does not run removal or certify collateral preservation by itself.
 Report removed, remotely preserved, blocked and remaining separately; the
 runner's counts are the imported queue snapshot, not a fresh fleet inventory.
+
+## Durable approval and interruption recovery
+
+After actual human confirmation, write a local receipt with `fingerprint`,
+`confirmedBy`, `confirmedAt`, `noWritersToolsOrUnsavedWork: true`, exact `paths`,
+and `ignoredFiles: [{"path":"<worktree>","name":"<relative ignored filename>"}]`.
+An empty ignored list is explicit. Never generate an affirmative receipt from
+silence, an automated reviewer, a directory grant or general cleanup intent.
+This receipt records consent; it does not prove it or replace native tool
+confirmation, managed policy or the engineer's interactive approval.
+
+```bash
+node "$S" approve --state /local/task/fleet.json --plan /local/task/plan.json \
+  --fingerprint <reviewed-plan-sha256> --evidence /local/task/human-receipt.json \
+  --approval /local/task/approved.json
+node "$S" execute --state /local/task/fleet.json --plan /local/task/plan.json \
+  --fingerprint <reviewed-plan-sha256> --approval /local/task/approved.json --path /repo/worktree
+```
+
+Approval creation is exclusive. Execution rechecks source/base identity,
+ignored names, claims, files and empty collateral-prune preview, then journals
+intent/native refs/registry/stashes before calling the unchanged executor.
+SQLite serialises cooperating executor calls and releases its transaction
+after process failure. Output streams to an exclusive per-target receipt.
+Afterward exact DONE/recovery and native collateral comparisons must pass.
+Any change/denial stops that target; do not loop or switch tools. Separately
+approved unrelated targets can continue serially after permission allows.
+
+An existing operation journal forbids replay, even after interruption. Run
+`reconcile` with the same arguments instead of `execute`: it performs no
+deletion, checks existing DONE/full-SHA/native evidence and records a completed
+removal only when all checks pass. Partial or missing receipts remain blocked.
+It never settles a leftover branch, repairs a lock or fabricates DONE evidence.
+An unresolved ledger write lock also requires supervised reconciliation.
+Reusing unchanged approval never waives fresh checks; changed source/base or
+ignored files requires a new plan and applicable consent.

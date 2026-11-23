@@ -100,7 +100,7 @@ Reached only via `NO_SPEC_WARRANTED`, `NOT_ONBOARDED` or an accepted `NOT_SGE_SC
 
 **Check every criterion. If ANY fails, present options — never just stop.**
 
-Delegate the mechanical checks to `/sge:sge-preflight <issue-number>`. It reads the spec, checks dependencies against the DAG manifest, scans for acceptance criteria, open questions, and existing code to extend, **posts its report as an issue comment**, and returns `specId`, `dependencies`, `openQuestions`, `complexityScore` and `readyToBuild` ([shape](references/preflight-return.md)).
+Delegate the mechanical checks to `/sge:sge-preflight <issue-number>`. It reads the spec, checks dependencies against the DAG manifest, scans for acceptance criteria, open questions, and existing code to extend, **posts its report as an issue comment**, and returns `specId`, `dependencies`, `openQuestions`, `clarifications`, `complexityScore` and `readyToBuild` ([shape](references/preflight-return.md); write the clarifications into the spec first).
 
 On success, `export SGE_SPEC_ID=<specId>` before continuing — this lets the token-metering hook (#726) attribute usage to the right spec, and is what `/sge:cost-guard` / `/sge:roi-report` key off. Without it the meter falls back to a branch-name match, or "unattributed".
 
@@ -118,7 +118,7 @@ Five mandatory Gherkin rules: [`bdd-quality-rules.md`](references/bdd-quality-ru
 
 **Spec lane:** use `complexityScore` from the preflight report — do **not** recompute it.
 **No-spec lane:** score your 0B plan with the same rubric — (models×3) + (methods×1) + (routes×2) + (scenarios×1); **≤ 15** Small, **16–30** Medium (commit per vertical slice), **> 30** Large → **split into child issues before implementing.** [Rubric](references/child-splitting.md#complexity-rubric-moved-from-skillmd).
-**Medium, either lane:** write the plan from the [template](references/medium-plan-template.md).
+**Medium, either lane:** write the plan from the [template](references/medium-plan-template.md). **Spec lane, before coding:** `/sge:sge-preflight --analyze` checks the plan (or the children) covers every criterion; a CRITICAL finding stops Phase 3 ([details](references/preflight-return.md)).
 
 ### Splitting into child issues (score > 30)
 
