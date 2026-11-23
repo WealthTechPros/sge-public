@@ -65,7 +65,7 @@ execution ledger to rebuilding conversational packets. Azure DevOps history
 is bulk-paginated once per selected repository. Valuable work stays in the
 recovery lane for completion and owning checks; open PRs enter the merge lane
 and return to audit only after verified merge or another named invalidation.
-The coordinator still obtains exact approvals and runs the existing executor.
+The coordinator records exact approval and uses `execute` (one target) or `reconcile` after interruption.
 No background service, automatic merge/deletion or plugin installation is implied.
 With `--resume`, read `status` and the current contract first. Prioritise already
 selected valuable recovery slices; do not let another cleanup packet displace

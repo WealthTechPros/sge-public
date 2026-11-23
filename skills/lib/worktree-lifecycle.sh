@@ -9,14 +9,15 @@
 #   wl_audit <worktree> <session-id>       # verdict block (see below)
 #   wl_recovery_preview <worktree>         # inspect a candidate, no changes
 #   wl_recover <worktree> <owner> <entry-hash> <head> <status-hash>
-#   wl_recover_many <registration-entry>... # one supervised confirmation
+#   wl_recover_many <registration-entry>... # explicitly authorised selection
 #   bash worktree-lifecycle.sh <register|unregister|list|audit|recovery-preview|recover|recover-many> <args...>
 #
 # Registry: one file per owned worktree under <git-common-dir>/sge-worktrees/,
 # so every linked worktree of a repo shares ONE registry. Entries are written
 # atomically (temp file + mv -n). Only a linked worktree of THIS common dir can
 # be registered (the main checkout never can), and only the owning session may
-# unregister it. An explicit supervised recovery is a separate operator action.
+# unregister it. Explicitly authorised recovery is a separate operator action;
+# it does not add a second terminal confirmation to the caller's approval.
 #
 # Audit verdict (stdout, exactly two lines):
 #   verdict:KEEP|VALUABLE|candidate
@@ -32,7 +33,7 @@
 # as quoted arguments, never interpolated into eval/shell text.
 #
 # Exit codes: 0 ok, 3 not a git worktree, 4 foreign claim, 5 bad session id,
-#             6 not a linked worktree, 7 confirmation refused, 8 changed evidence,
+#             6 not a linked worktree, 8 changed evidence,
 #             9 registry busy.
 
 _WL_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -82,7 +83,6 @@ _wl_status_hash() {
 
 _wl_archive_registration() (
   local f="$1" dir="$2" key="$3" expected="$4" archive saved current
-  [ -t 0 ] && [ -t 1 ] || { echo "error:interactive-terminal-required" >&2; return 7; }
   [ ! -L "$dir/recovered" ] || { echo "error:unsafe-archive" >&2; return 1; }
   mkdir -p "$dir/recovered" || return 1
   archive="$(mktemp -d "$dir/recovered/$key.XXXXXX")" || return 1
@@ -168,7 +168,7 @@ wl_recovery_preview() {
 
 wl_recover() (
   local wt="$1" owner="${2:-}" expected="${3:-}" head="${4:-}" status="${5:-}"
-  local common abs dir key f lock answer current
+  local common abs dir key f lock current
   _wl_valid_session "$owner" || { echo "error:bad-session-id" >&2; return 5; }
   _wl_is_linked "$wt" || { echo "error:not-a-linked-worktree" >&2; return 6; }
   common="$(_wl_common_dir "$wt")" || return 3
@@ -176,14 +176,9 @@ wl_recover() (
   dir="$common/sge-worktrees"
   key="$(_wl_key "$abs")"
   f="$dir/$key.entry"
-  [ -t 0 ] && [ -t 1 ] || { echo "error:interactive-terminal-required" >&2; return 7; }
-  exec 3<>/dev/tty || { echo "error:interactive-terminal-required" >&2; return 7; }
   printf 'Recover registration for %s owned by %s.\nentry-hash: %s\nhead: %s\nstatus-hash: %s\n' \
-    "$abs" "$owner" "$expected" "$head" "$status" >&3
-  echo 'Confirm no writer is active and preserve the original worktree. This cannot be verified automatically.' >&3
-  printf 'Type RECOVER %s to proceed: ' "$owner" >&3
-  IFS= read -r answer <&3 || return 7
-  [ "$answer" = "RECOVER $owner" ] || { echo "error:confirmation-refused" >&2; return 7; }
+    "$abs" "$owner" "$expected" "$head" "$status" >&2
+  echo 'Caller must establish that writers stopped and preserve the original worktree; recovery archives registration only.' >&2
   lock="$dir/$key.lock"
   _wl_lock "$lock" || return $?
   trap 'rmdir "$lock" 2>/dev/null || :' EXIT
@@ -201,20 +196,17 @@ wl_recover() (
 )
 
 wl_recover_many() (
-  local candidate wt abs common dir f owner hash head status branch seen answer
+  local candidate wt abs common dir f owner hash head status branch seen
   local lock current i rc skipped=0 failed=0
   local -a paths=() owners=() hashes=() heads=() statuses=() branches=() entries=() commons=()
   [ "$#" -gt 0 ] || { echo "error:registration-entries-required" >&2; return 2; }
-  [ -t 0 ] && [ -t 1 ] || { echo "error:interactive-terminal-required" >&2; return 7; }
-  exec 3<>/dev/tty || { echo "error:interactive-terminal-required" >&2; return 7; }
-
   for candidate in "$@"; do
     if [ ! -f "$candidate" ] || [ -L "$candidate" ]; then
-      printf 'skipped invalid entry: %q\n' "$candidate" >&3; skipped=$((skipped + 1)); continue
+      printf 'skipped invalid entry: %q\n' "$candidate" >&2; skipped=$((skipped + 1)); continue
     fi
     wt="$(_wl_entry_field "$candidate" path)"
     if [ -z "$wt" ] || ! _wl_is_linked "$wt"; then
-      printf 'skipped unavailable worktree: %q\n' "$wt" >&3; skipped=$((skipped + 1)); continue
+      printf 'skipped unavailable worktree: %q\n' "$wt" >&2; skipped=$((skipped + 1)); continue
     fi
     abs="$(_wl_abs "$wt")" || return 1
     common="$(_wl_common_dir "$abs")" || return 3
@@ -223,13 +215,13 @@ wl_recover_many() (
     if [ "$(_wl_abs "$(dirname "$candidate")")" != "$(_wl_abs "$dir")" ] ||
        [ "$(basename "$candidate")" != "$(basename "$f")" ] ||
        [ ! -f "$f" ] || [ -L "$f" ] || [ "$(_wl_entry_field "$f" path)" != "$abs" ]; then
-      printf 'skipped mismatched entry: %q\n' "$candidate" >&3; skipped=$((skipped + 1)); continue
+      printf 'skipped mismatched entry: %q\n' "$candidate" >&2; skipped=$((skipped + 1)); continue
     fi
     for seen in "${paths[@]}"; do
       [ "$seen" != "$abs" ] || { echo "error:duplicate-target" >&2; return 4; }
     done
     owner="$(_wl_entry_field "$f" session)"
-    _wl_valid_session "$owner" || { printf 'skipped invalid owner: %q\n' "$abs" >&3; skipped=$((skipped + 1)); continue; }
+    _wl_valid_session "$owner" || { printf 'skipped invalid owner: %q\n' "$abs" >&2; skipped=$((skipped + 1)); continue; }
     hash="$(git hash-object "$f")" || return 1
     head="$(git -C "$abs" rev-parse --verify HEAD)" || return 1
     status="$(_wl_status_hash "$abs")" || return 1
@@ -239,16 +231,13 @@ wl_recover_many() (
   done
   [ "${#paths[@]}" -gt 0 ] || { echo "error:no-recoverable-entries" >&2; return 4; }
 
-  echo 'Review every registration and establish that all its writers have stopped.' >&3
-  echo 'Status hashes do not capture file contents; preserve the original worktrees.' >&3
+  echo 'Caller must authorise this exact selection and establish that all its writers stopped.' >&2
+  echo 'Status hashes do not capture file contents; preserve the original worktrees.' >&2
   for ((i=0; i<${#paths[@]}; i++)); do
     printf 'path=%q owner=%q branch=%q entry=%s head=%s status=%s\n' \
-      "${paths[i]}" "${owners[i]}" "${branches[i]}" "${hashes[i]}" "${heads[i]}" "${statuses[i]}" >&3
+      "${paths[i]}" "${owners[i]}" "${branches[i]}" "${hashes[i]}" "${heads[i]}" "${statuses[i]}" >&2
   done
-  printf 'Skipped: %s. Each entry is rechecked separately; partial recovery is possible.\n' "$skipped" >&3
-  printf 'Type RECOVER %s to proceed: ' "${#paths[@]}" >&3
-  IFS= read -r answer <&3 || return 7
-  [ "$answer" = "RECOVER ${#paths[@]}" ] || { echo "error:confirmation-refused" >&2; return 7; }
+  printf 'Skipped: %s. Each entry is rechecked separately; partial recovery is possible.\n' "$skipped" >&2
 
   for ((i=0; i<${#paths[@]}; i++)); do
     if (

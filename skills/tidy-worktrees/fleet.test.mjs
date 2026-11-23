@@ -4,7 +4,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { importQueue, packet, applyAudit, counts, planItem, verifyIgnored, verifyApprovedIdentity, verifyRemoval, main } from './fleet.mjs';
+import { createHash } from 'node:crypto';
+import { pathKey } from '../lib/local-state.mjs';
+import { importQueue, packet, applyAudit, counts, planItem, verifyIgnored, verifyRemoval, verifyApprovedIdentity, main } from './fleet.mjs';
+import { checkConsent, compareRemoval } from './fleet-execution.mjs';
 
 const head = 'a'.repeat(40);
 const base = 'b'.repeat(40);
@@ -172,5 +175,140 @@ test('no output intermediates in a synchronised folder, including a symlink to i
     fs.symlinkSync(target, `${state}.audits`, process.platform === 'win32' ? 'junction' : 'dir');
     await assert.rejects(main(['audit', '--state', state]), /synchronised/);
     assert.deepEqual(fs.readdirSync(target), []);
+  } finally { fs.rmSync(dir, { recursive: true }); }
+});
+
+test('typed blockers leave the runnable queue until an explicit evidence invalidation', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-blocker-'));
+  try {
+    const file = path.join(dir, 'state.json'), input = path.join(dir, 'queue.json');
+    const evidence = path.join(dir, 'evidence.txt'), blocker = path.join(dir, 'blocker.json');
+    fs.writeFileSync(input, JSON.stringify(queue([row('blocked'), row('ready')])));
+    fs.writeFileSync(evidence, 'fixture source observation');
+    fs.writeFileSync(blocker, JSON.stringify({ kind: 'owner', owner: 'operator',
+      nextAction: 'reconcile writer', unblockEvidence: 'exact handoff and unchanged native binding' }));
+    await main(['init', '--state', file, '--queue', input]);
+    await main(['record', '--state', file, '--path', row('blocked').path, '--status', 'recovery',
+      '--reason', 'writer unresolved', '--evidence', evidence, '--blocker', blocker]);
+    assert.equal((await main(['next', '--state', file, '--lane', 'recovery'])).length, 0);
+    assert.equal((await main(['blocked', '--state', file])).length, 1);
+    await assert.rejects(main(['blocked', '--state', file, '--limit', '6']), /1..5/);
+    assert.equal((await main(['status', '--state', file])).removed, 0);
+    await main(['invalidate', '--state', file, '--path', row('blocked').path, '--reason', 'dated owner handoff received']);
+    assert.equal((await main(['blocked', '--state', file])).length, 0);
+    assert.equal((await main(['next', '--state', file])).length, 2);
+  } finally { fs.rmSync(dir, { recursive: true }); }
+});
+
+test('approval binds a human-confirmed exact subset and separately named ignored files', () => {
+  const item = importQueue(queue([row('approved')])).items[0];
+  const plan = { items: [planItem(item, audit(item), ['cache/output'])] };
+  const fingerprint = 'f'.repeat(64);
+  const consent = { fingerprint, paths: [item.path], confirmedBy: 'fixture operator',
+    confirmedAt: '2026-11-23T00:00:00Z', noWritersToolsOrUnsavedWork: true,
+    ignoredFiles: [{ path: item.path, name: 'cache/output' }] };
+  assert.equal(checkConsent(plan, fingerprint, consent).length, 1);
+  assert.throws(() => checkConsent(plan, fingerprint, { ...consent, ignoredFiles: [] }), /ignored/);
+  assert.throws(() => checkConsent(plan, '0'.repeat(64), consent), /fingerprint/);
+  assert.throws(() => checkConsent(plan, fingerprint, { ...consent, noWritersToolsOrUnsavedWork: false }), /confirmation/);
+  const before = { registry: `worktree ${root}\nHEAD ${base}\n\nworktree ${item.path}\nHEAD ${head}\n\n`,
+    refs: `refs/heads/${item.branch.replace(/^refs\/heads\//, '')} ${head}\nrefs/heads/main ${base}\n`, stashes: '' };
+  const after = { registry: `worktree ${root}\nHEAD ${base}\n\n`, refs: `refs/heads/main ${base}\n`, stashes: '' };
+  compareRemoval(before, after, item);
+  assert.throws(() => compareRemoval(before, { ...after, stashes: 'new stash' }, item), /collateral/);
+});
+
+test('reviewed repository identity must match both ledger and fresh audit', () => {
+  const item = importQueue(queue([row('approved')])).items[0];
+  const report = audit(item);
+  applyAudit({ items: [item] }, [item], report, 'fixture', 'now');
+  const entry = planItem(item, report, []);
+  verifyApprovedIdentity(item, entry, report);
+  assert.throws(() => verifyApprovedIdentity({ ...item, root: path.join(root, 'other') }, entry, report), /fresh plan/);
+  assert.throws(() => verifyApprovedIdentity(item, entry, { ...report, repo: path.join(root, 'other') }), /fresh plan/);
+});
+
+test('fresh process reconciles an interrupted removal without invoking the executor again', async () => {
+  const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-interruption-')));
+  try {
+    const repo = path.join(dir, 'repo'), target = path.join(dir, 'target');
+    fs.mkdirSync(repo);
+    const git = args => {
+      const r = spawnSync('git', ['-C', repo, ...args], { encoding: 'utf8' });
+      assert.equal(r.status, 0, r.stderr); return r.stdout;
+    };
+    git(['init', '-q']);
+    git(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-q', '--allow-empty', '-m', 'fixture']);
+    const current = git(['rev-parse', 'HEAD']).trim();
+    git(['worktree', 'add', '-q', '-b', 'feat/done', target]);
+    const state = path.join(dir, 'state.json'), input = path.join(dir, 'queue.json');
+    fs.writeFileSync(input, JSON.stringify(queue([{ ...row('target'), root: repo, path: target,
+      branch: 'feat/done', recoverySha: current }])));
+    await main(['init', '--state', state, '--queue', input]);
+    const item = (await main(['next', '--state', state]))[0];
+    const report = { ...audit(item), repo, base_tip: current };
+    report.items[0].tip = current;
+    const planFile = path.join(dir, 'plan.json');
+    fs.writeFileSync(planFile, JSON.stringify({ items: [planItem(item, report, [])] }));
+    const hash = value => createHash('sha256').update(value).digest('hex');
+    const fingerprint = hash(fs.readFileSync(planFile));
+    const approval = path.join(dir, 'approved.json'), consent = path.join(dir, 'human.json');
+    fs.writeFileSync(consent, JSON.stringify({ fingerprint, paths: [target], ignoredFiles: [],
+      noWritersToolsOrUnsavedWork: true, confirmedBy: 'fixture operator', confirmedAt: '2026-11-23T00:00:00Z' }));
+    await main(['approve', '--state', state, '--plan', planFile, '--fingerprint', fingerprint, '--approval', approval, '--evidence', consent]);
+    const prefix = `${approval}.${hash(pathKey(target)).slice(0, 20)}`;
+    const original = fs.readFileSync(state, 'utf8');
+    const blockedState = JSON.parse(original);
+    blockedState.items[0].blocker = { kind: 'permission', owner: 'operator', nextAction: 'human-mediated repair', unblockEvidence: 'matched supported approval' };
+    fs.writeFileSync(state, JSON.stringify(blockedState));
+    await assert.rejects(main(['execute', '--state', state, '--plan', planFile, '--fingerprint', fingerprint,
+      '--approval', approval, '--path', target]), /unresolved target blocker/);
+    await assert.rejects(main(['verify-plan', '--state', state, '--plan', planFile, '--fingerprint', fingerprint,
+      '--path', target]), /unresolved target blocker/);
+    assert.equal(fs.existsSync(`${prefix}.operation.json`), false);
+    fs.writeFileSync(state, original);
+    const before = { registry: git(['worktree', 'list', '--porcelain']),
+      refs: git(['for-each-ref', '--format=%(refname) %(objectname)']), stashes: git(['stash', 'list', '--format=%H']) };
+    fs.writeFileSync(`${prefix}.operation.json`, JSON.stringify({ fingerprint, path: target, head: current, before }));
+    await assert.rejects(main(['execute', '--state', state, '--plan', planFile, '--fingerprint', fingerprint,
+      '--approval', approval, '--path', target]), /reconcile only/);
+    fs.writeFileSync(`${prefix}.recovery.csv`, `repo,kind,name,path,tip,bucket,reason,restore\n"${repo}",worktree,"feat/done","${target}","${current}",A,"merged","restore"\n`);
+    fs.writeFileSync(`${prefix}.execution.txt`, `DONE\trepo\tworktree\tfeat/done\t${current.slice(0, 12)}\tremoved\n`);
+    git(['worktree', 'remove', target]); git(['branch', '-D', 'feat/done']);
+    const result = spawnSync(process.execPath, [path.join(import.meta.dirname, 'fleet.mjs'), 'reconcile', '--state', state,
+      '--plan', planFile, '--fingerprint', fingerprint, '--approval', approval, '--path', target], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).mutationReplayed, false);
+    assert.equal((await main(['status', '--state', state])).lanes.removed, 1);
+    const again = await main(['reconcile', '--state', state, '--plan', planFile, '--fingerprint', fingerprint, '--approval', approval, '--path', target]);
+    assert.equal(again.reconciled, true);
+  } finally { fs.rmSync(dir, { recursive: true }); }
+});
+
+test('remote preservation requires the exact source SHA and does not claim dirty-file backup or acceptance', async () => {
+  const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-publication-')));
+  try {
+    const repo = path.join(dir, 'repo');
+    fs.mkdirSync(repo);
+    const git = args => {
+      const r = spawnSync('git', ['-C', repo, ...args], { encoding: 'utf8' });
+      assert.equal(r.status, 0, r.stderr); return r.stdout.trim();
+    };
+    git(['init', '-q']);
+    git(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-q', '--allow-empty', '-m', 'fixture']);
+    git(['branch', 'feat/preserved']);
+    git(['remote', 'add', 'origin', repo]);
+    const state = path.join(dir, 'state.json'), input = path.join(dir, 'queue.json'), evidence = path.join(dir, 'receipt.txt');
+    fs.writeFileSync(input, JSON.stringify(queue([{ ...row('source'), root: repo, branch: 'feat/preserved', recoverySha: git(['rev-parse', 'HEAD']) }])));
+    fs.writeFileSync(evidence, 'fixture source publication receipt');
+    await main(['init', '--state', state, '--queue', input]);
+    const item = (await main(['next', '--state', state]))[0];
+    const args = ['preserved', '--state', state, '--path', item.path, '--evidence', evidence];
+    assert.match((await main(args)).boundary, /committed source only/);
+    assert.equal((await main(['status', '--state', state])).remotelyPreserved, 1);
+    assert.equal((await main(['status', '--state', state])).remaining, 1);
+    git(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-q', '--allow-empty', '-m', 'newer']);
+    git(['branch', '-f', 'feat/preserved', 'HEAD']);
+    await assert.rejects(main(['preserved', '--state', state, '--path', item.path, '--evidence', evidence]), /differs/);
   } finally { fs.rmSync(dir, { recursive: true }); }
 });

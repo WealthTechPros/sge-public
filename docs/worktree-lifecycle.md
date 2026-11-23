@@ -88,7 +88,7 @@ Raw interactive `/clear` end-to-end integration remains unqualified.
 
 The normal unregister operation remains owner-only. If an owning session is
 gone, its registration does not expire and deletion of session history does not
-release it. This separate manual recovery is not a Git worktree unlock.
+release it. This separately authorised recovery is not a Git worktree unlock.
 
 First establish that the owner and all other writers are stopped, including old
 SGE clients and unmanaged writers; the registry cannot prove this. Inspect the
@@ -101,8 +101,8 @@ bash skills/lib/worktree-lifecycle.sh recovery-preview "<worktree>"
 ```
 
 The preview prints the owner, entry hash, HEAD and status hash. After reviewing
-these values, invoke the following with those exact values and type the
-displayed confirmation yourself in an interactive terminal:
+these values and obtaining authority for that exact recovery, invoke the
+following with those exact values:
 
 ```bash
 bash skills/lib/worktree-lifecycle.sh recover "<worktree>" "<owner>" "<entry-hash>" "<head>" "<status-hash>"
@@ -117,25 +117,26 @@ ignored files, editor buffers or stashes; it is not a backup or liveness proof.
 
 The per-path registry lock coordinates only this version of the helper. Older
 clients and unmanaged writers bypass it. A terminal is not proof of human
-identity; do not automate the confirmation. A terminated operation can leave its
+identity. Recovery no longer requires a second typed `RECOVER` confirmation or
+an interactive terminal; normal CLI/tool approval and managed policy still
+apply. An explicit command is not proof that writers have stopped. A terminated operation can leave its
 lock directory behind; do not remove it by age or automatically. Establish
-who owns it and reconcile it explicitly. No recovery action is unattended.
+who owns it and reconcile it explicitly. No hook or expiry automatically invokes recovery.
 
 ### Recover several reviewed registrations
 
 After establishing that **every selected owner and writer has stopped**, pass
-the exact registration entries to `recover-many`. For example, on Windows in
-Git Bash this selects entries from immediate checkouts under `C:\git`:
+the exact reviewed and authorised registration entries to `recover-many`:
 
 ```bash
-bash skills/lib/worktree-lifecycle.sh recover-many /c/git/*/.git/sge-worktrees/*.entry
+bash skills/lib/worktree-lifecycle.sh recover-many "<reviewed-entry-1>" "<reviewed-entry-2>"
 ```
 
 The command displays each available worktree, owner, branch and fingerprints,
-plus skipped entries, and requests one interactive `RECOVER <count>`
-confirmation. Review the complete selection before confirming. Unavailable or
+plus skipped entries, without requesting another terminal confirmation.
+Review and authorise the complete selection before invoking it. Unavailable or
 invalid entries are skipped; duplicate targets refuse the entire selection.
-Each confirmed entry is independently rechecked under its own registry lock
+Each selected entry is independently rechecked under its own registry lock
 and archived before release. A changed or busy entry is not reported as
 recovered. If a replacement is detected during archival, restoration uses
 `ln -T` without overwriting the active path. If restoration fails (including
@@ -146,8 +147,9 @@ was skipped or not recovered; it is not an all-or-nothing transaction.
 This is neither automatic liveness detection nor a bulk Git unlock. Confirm
 that old clients and unmanaged writers are stopped, and inspect preservation
 coverage before choosing entries. The command does not change worktrees,
-branches, files, Git retention locks or assign new owners. It is an interactive
-operator action, not permission to automate the confirmation.
+branches, files, Git retention locks or assign new owners. Removing the
+redundant prompt does not authorise recovery of unreviewed entries or bypass
+normal tool approval.
 
 ## Recovery
 
