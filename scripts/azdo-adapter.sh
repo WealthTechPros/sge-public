@@ -859,9 +859,24 @@ _AA_PR_COMPLETED_PAGE_JQ='
          else error("malformed completed pull request") end
   else error("malformed pull-request page") end'
 
-_aa_list_completed_prs() { # <origin-url> <branch>
+_AA_PR_COMPLETED_INDEX_JQ='
+  if type == "object" and (.value | type) == "array"
+     and all(.value[]; type == "object" and .status == "completed"
+       and (.pullRequestId | type == "number" and . > 0)
+       and (.sourceRefName | type == "string" and startswith("refs/heads/"))
+       and (.targetRefName | type == "string" and startswith("refs/heads/"))
+       and ((.lastMergeSourceCommit.commitId // "") | test("^[0-9a-f]{40}$"))
+       and (.closedDate | type == "string" and length > 0))
+  then [.value[] | {number: .pullRequestId,
+    headRefName: (.sourceRefName | ltrimstr("refs/heads/")),
+    baseRefName: (.targetRefName | ltrimstr("refs/heads/")),
+    headRefOid: .lastMergeSourceCommit.commitId, closedAt: .closedDate}]
+  else error("malformed completed pull-request index page") end'
+
+_aa_list_completed_prs() { # <origin-url> <branch> [index]
   command -v jq >/dev/null 2>&1 || { _aa_err "jq not found - required for list-completed-prs"; return 1; }
-  _aa_require_branch "${2:-}" || return 1
+  local mode="${3:-branch}"
+  [ "$mode" = index ] || _aa_require_branch "${2:-}" || return 1
   _aa_parse_origin "$1" || return 1
   if [ -n "${SGE_AZDO_ORG:-}" ]; then
     [ "$(_aa_lower "$SGE_AZDO_ORG")" = "$(_aa_lower "$_AA_R_ORG")" ] || {
@@ -873,18 +888,27 @@ _aa_list_completed_prs() { # <origin-url> <branch>
   local size="${SGE_AZDO_PR_PAGE_SIZE:-100}" pages="${SGE_AZDO_PR_MAX_PAGES:-10}"
   _aa_require_pos_int SGE_AZDO_PR_PAGE_SIZE "$size" 1000 || return 1
   _aa_require_pos_int SGE_AZDO_PR_MAX_PAGES "$pages" 100 || return 1
-  local ref="refs/heads/$2" route p raw page n total all='[]'
+  # Pages accumulate as newline-separated JSON and are merged through stdin, never
+  # argv: in index mode the set grows per page and native-Windows jq.exe cannot
+  # launch past a 32,767-character command line (sge#3673).
+  local ref="refs/heads/${2:-}" route p raw page n all='' filter="" parser="$_AA_PR_COMPLETED_PAGE_JQ"
+  if [ "$mode" = index ]; then parser="$_AA_PR_COMPLETED_INDEX_JQ"
+  else filter="&searchCriteria.sourceRefName=$(_aa_urlencode "$ref")"; fi
   route="/$(_aa_urlencode "$_AA_R_PROJECT")/_apis/git/repositories/$(_aa_urlencode "$_AA_R_REPO")/pullrequests"
   for (( p=0; p<pages; p++ )); do
-    raw="$(_aa_api_get "${route}?searchCriteria.status=completed&searchCriteria.sourceRefName=$(_aa_urlencode "$ref")&\$top=${size}&\$skip=$((p * size))&api-version=7.1")" \
+    raw="$(_aa_api_get "${route}?searchCriteria.status=completed${filter}&\$top=${size}&\$skip=$((p * size))&api-version=7.1")" \
       || { _aa_err "list-completed-prs: pull-request request failed (auth/API error) - completed-PR set unknown"; return 1; }
-    page="$(printf '%s' "$raw" | jq -c --arg ref "$ref" "$_AA_PR_COMPLETED_PAGE_JQ" 2>/dev/null)" \
+    page="$(printf '%s' "$raw" | jq -c --arg ref "$ref" "$parser" 2>/dev/null)" \
       || { _aa_err "list-completed-prs: malformed pull-request payload - completed-PR set unknown"; return 1; }
     # Page fullness is judged on the RAW page, not the post-filter rows.
     n="$(printf '%s' "$raw" | jq '.value | length' | tr -d '\r')" || return 1
-    all="$(jq -cn --argjson a "$all" --argjson b "$page" '$a + $b')" || return 1
+    # An empty 2xx body yields an empty page and count with jq exit 0; refuse it
+    # rather than silently dropping that page from the set.
+    [ -n "$page" ] && [[ "$n" =~ ^[0-9]+$ ]] \
+      || { _aa_err "list-completed-prs: empty or malformed page - completed-PR set unknown"; return 1; }
+    all+="$page"$'\n'
     if [ "$n" -lt "$size" ]; then
-      printf '%s\n' "$all"
+      printf '%s' "$all" | jq -cs 'add // []' || return 1
       return 0
     fi
   done
@@ -1816,6 +1840,10 @@ _aa_main() {
     list-completed-prs)
       [ -n "${2:-}" ] && [ -n "${3:-}" ] || _aa_usage 'list-completed-prs needs <origin-url> <branch>'
       _aa_list_completed_prs "$2" "$3" || exit 1
+      ;;
+    list-completed-pr-index)
+      [ -n "${2:-}" ] && [ "$#" -eq 2 ] || _aa_usage 'list-completed-pr-index needs <origin-url>'
+      _aa_list_completed_prs "$2" "" index || exit 1
       ;;
     repo-id)
       # Pure: the org/project/repo an Azure Repos origin names. No network.

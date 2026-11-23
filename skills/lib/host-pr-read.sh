@@ -463,6 +463,14 @@ hpr_open_pr_heads() {
 # hpr_completed_pr_heads <branch> - see the header block. The caller marks the
 # branch SAFE only when a line's head sha equals the local branch tip AND the
 # tree is clean; every non-zero exit leaves it VALUABLE.
+hpr_completed_pr_index() {
+  [ "$(hpr_host_kind)" = azdo ] || return 2
+  local origin
+  origin="$(_hpr_origin_url)" || return 1
+  [ -f "$_HPR_AZDO_ADAPTER" ] || return 1
+  _hpr_timed bash "$_HPR_AZDO_ADAPTER" list-completed-pr-index "$origin"
+}
+
 hpr_completed_pr_heads() {
   local branch="${1:-}"
   [ -n "$branch" ] || { _hpr_err "hpr_completed_pr_heads: <branch> required"; return 1; }

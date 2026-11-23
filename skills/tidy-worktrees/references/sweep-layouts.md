@@ -87,7 +87,7 @@ They never ask users, edit files, claim/unlock worktrees, stage, push, open PRs
 or delete. The coordinator reconciles once into **one confirmed executor plan**
 and is the only writer, using the existing [`execute.sh`](../execute.sh)
 contract. No simultaneous writers or interleaved destructive steps across
-repositories; no automatic follow-on batch.
+repositories; no follow-on batch outside the explicitly authorised queue.
 
 Unknown, dirty, open-PR, claimed or locked work stays untouched by collection
 and ordinary cleanup. The existing explicit checkpoint/content decisions and
@@ -96,6 +96,57 @@ writer's claim. Fanout and ledger reuse never weaken secret scanning,
 supersession, the linked-open-issue check, capped draft PRs, ignored-file consent
 or the Windows junction guard. Missing approval means keep and report the next
 action, not another full-fleet scan.
+
+### Fleet batch execution plan
+
+For an explicitly scaled all-local or age-bounded fleet request, make batching
+the execution route, not a tooling project or a sequence of single-tree chats:
+
+1. **Fix the scope once.** Record the requested cutoff and known common-directory
+   identities. Separate present in-scope worktrees, today's/out-of-scope trees
+   and unavailable registrations. A fresh count is metadata, not another source
+   audit. Reconcile that count with the existing queue; do not re-import over
+   completed decisions or infer that an unavailable path can be pruned.
+2. **Separate unfinished review from held work.** First-review targets need the
+   file-level content check. Previously assessed targets need only their named
+   protection, ownership, preservation or changed-evidence gap reconciled.
+   Keep recovery and open-PR work separate from ready cleanup; an old KEEP is
+   neither permanent inactivity nor permission to discard useful work.
+3. **Prepare disjoint packets.** Use up to five exposed read-only repository
+   lanes, with one repository per lane at a time. Balance queues by remaining
+   work while keeping each repository exclusive. Five trees per lane means at
+   most 25 targets per round, not a promised completion or deletion rate.
+   Retain the ten-minute cap, no nested delegation and partial-result rules.
+   Reuse valid source assessments and the selected repository's captured host
+   index; do not repeat the full audit when the next packet uses unchanged
+   evidence. A helper without supported reuse keeps its documented limitation.
+4. **Batch decisions, not authority.** Reconcile a round once into one exact
+   ready-candidate plan and a grouped exception list. Ask once for that bounded
+   plan with full recovery SHAs, paths and separately named ignored-file consent.
+   Preserve individual Phase 2b lock choices, writer confirmations and publication
+   scope. Reuse unchanged answered approvals; never request them again simply
+   because a round ended, or extend them to a new path or changed file set.
+5. **Keep one execution lane.** The coordinator alone runs the existing executor
+   serially after fresh per-target revalidation, junction and collateral-prune
+   checks. Pause collection in the repository being mutated. A changed or refused
+   target stays put; unrelated approved targets can continue. No age-only unlock,
+   claim deletion, force removal, remote deletion or automatic merge.
+6. **Finish valuable work separately.** Prioritise unpreserved/local-only work,
+   reuse the owned worktree and continuing task PR, reconcile newer main safeguards
+   and complete the owning checks. Partial recovery keeps the original.
+   Source activity or synthetic-only tests do not replace required runtime proof.
+   Publication and merge retain their own exact approval and acceptance gates.
+
+For an authorised multi-round queue, record the result and next targets before
+continuing within that same scope. Do not launch overlapping rounds, silently
+expand scope, rerun completed investigations or add unrelated tooling/cleanup
+detours. A blocked target does not stop unrelated review or approved cleanup.
+At each round report **actually removed / remotely preserved / blocked /
+remaining**, with elapsed time and evidence scope. Metadata-reviewed, fully
+assessed, pushed and removed are distinct counts. Close only when every in-scope
+target has an evidenced disposition; unresolved work remains named, not hidden
+inside a smaller worktree total. This is an agent procedure, not a new unattended
+service, installed cache or permission grant.
 
 ### Packet budgets and separate recovery queue
 

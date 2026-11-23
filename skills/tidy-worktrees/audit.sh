@@ -68,6 +68,14 @@ ta_pr_load() {
   _TA_OPEN_OK=1; _TA_OPEN=""
   _TA_OPEN="$(hpr_open_pr_heads 2>/dev/null)" || { _TA_OPEN_OK=0; _TA_OPEN=""; }
   _TA_ALL_OK=0; _TA_ALL_TRUNC=0; _TA_ALL=""
+  _TA_INDEX_MODE=0; _TA_INDEX_OK=0; _TA_INDEX='[]'
+  if [ "$_TA_HOST" = azdo ] && [ "$_TA_OPEN_OK" -eq 1 ] && [ "${SGE_TIDY_BULK_COMPLETED:-0}" = 1 ]; then
+    _TA_INDEX_MODE=1
+    if raw="$(hpr_completed_pr_index 2>/dev/null)" &&
+       _TA_INDEX="$(printf '%s' "$raw" | jq -ce --arg base "${1:-main}" '
+         if type == "array" then [.[] | select(.baseRefName == $base)]
+         else error("invalid index") end' 2>/dev/null)"; then _TA_INDEX_OK=1; fi
+  fi
   if [ "$_TA_HOST" = github ] && [ "$_TA_OPEN_OK" -eq 1 ]; then
     cap="${SGE_AUDIT_PR_LIMIT:-2000}"
     case "$cap" in ''|*[!0-9]*|0) cap=2000 ;; esac
@@ -99,6 +107,14 @@ ta_pr_record() {
       [ "$_TA_ALL_TRUNC" -eq 1 ] && return 1 # absence is not proof when the list may be truncated
       printf 'none\t-\t-\n'; return 0 ;;
     azdo)
+      if [ "${_TA_INDEX_MODE:-0}" -eq 1 ]; then
+        [ "$_TA_INDEX_OK" -eq 1 ] || return 1
+        line="$(printf '%s' "$_TA_INDEX" | jq -r --arg b "$b" '
+          [.[] | select(.headRefName == $b)] | sort_by(.closedAt) | last
+          | if . == null then "none\t-\t-"
+            else "merged\t\(.number)\t\(.headRefOid)" end' | tr -d '\r')" || return 1
+        printf '%s\n' "$line"; return 0
+      fi
       out="$(hpr_completed_pr_heads "$b" 2>/dev/null)"; rc=$?
       [ "$rc" -eq 0 ] || return 1
       if [ -n "$out" ]; then
@@ -266,12 +282,13 @@ ta_audit_repo() {
     cd "$top" || exit 3
     def="$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')"; [ -n "$def" ] || def=main
     base="origin/$def"
-    ta_pr_load
+    ta_pr_load "$def"
     rows="$(_ta_rows "$top")"
     local win=false
     case "$(uname -s 2>/dev/null)" in MINGW*|MSYS*|CYGWIN*) win=true ;; esac
     printf '%s\n' "$rows" | jq -R -s \
       --arg repo "$top" --arg def "$def" --arg base "$base" --arg host "${_TA_HOST:-unknown}" \
+      --arg base_tip "$(git rev-parse --verify --quiet "${base}^{commit}" 2>/dev/null)" \
       --argjson open_ok "$([ "${_TA_OPEN_OK:-0}" -eq 1 ] && echo true || echo false)" \
       --argjson win "$win" '
       def nz: if . == "-" then null else . end;
@@ -297,7 +314,7 @@ ta_audit_repo() {
             | {item: (.kind + ":" + .name), tip: .tip, pr_state: .pr_state, commands: .commands,
                needs_junction_guard: .needs_junction_guard}];
       {
-        repo: $repo, default_branch: $def, base: $base, host: $host,
+        repo: $repo, default_branch: $def, base: $base, base_tip: ($base_tip | nz), host: $host,
         open_pr_set_known: $open_ok, refused: ($open_ok | not),
         counts: ({A: 0, B: 0, C: 0, D: 0} + ($items | group_by(.bucket) | map({key: .[0].bucket, value: length}) | from_entries)
                  + {total: ($items | length)}),
@@ -354,7 +371,10 @@ ta_main() {
   [ "${#repos[@]}" -gt 0 ] || repos=(.)
   for r in "${repos[@]}"; do
     # --fetch only refreshes remote-tracking refs (Phase 0); nothing else moves.
-    [ "$fetch" -eq 0 ] || git -C "$r" fetch --prune origin >/dev/null 2>&1
+    if [ "$fetch" -ne 0 ] && ! git -C "$r" fetch --prune origin >/dev/null 2>&1; then
+      echo "error:fetch-failed:$r - retain; no fresh audit" >&2
+      rc=3; continue
+    fi
     one="$(ta_audit_repo "$r")" || { rc=3; continue; }
     reports+="$one"$'\n'
   done
