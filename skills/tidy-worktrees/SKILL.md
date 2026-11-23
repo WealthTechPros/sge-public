@@ -1,6 +1,6 @@
 ---
 description: Use when cleaning up git worktrees, branches, stashes or leftover files, after merging PRs or before new work.
-argument-hint: "[--force] [--inbox] [--audit] [repo dirs…]"
+argument-hint: "[--force] [--inbox] [--audit] [--resume <ledger>] [repo dirs…]"
 allowed-tools: Read, Grep, Glob, Agent, AskUserQuestion, Bash, mcp__plugin_sge_sge-memory__search_nodes, mcp__plugin_sge_sge-memory__create_entities
 ---
 
@@ -55,7 +55,24 @@ Targets the repo in the current directory (or the dirs in `$ARGUMENTS`), never t
 /sge:tidy-worktrees --force            # A and D only, one confirmed plan; never pushes or opens PRs
 /sge:tidy-worktrees --audit            # read-only JSON bucket audit (audit.sh), nothing changes
 /sge:tidy-worktrees --inbox            # read-only: one suggested action per item (inbox.sh)
+/sge:tidy-worktrees --resume <ledger>  # resume the runner's existing queues, not a new fleet audit
 ```
+
+For an explicitly requested fleet resume, use the
+[resumable runner](references/resumable-runner.md) with the existing queue:
+import once, then `next` / `audit` / `record` / `plan`. Prefer this durable
+execution ledger to rebuilding conversational packets. Azure DevOps history
+is bulk-paginated once per selected repository. Valuable work stays in the
+recovery lane for completion and owning checks; open PRs enter the merge lane
+and return to audit only after verified merge or another named invalidation.
+The coordinator still obtains exact approvals and runs the existing executor.
+No background service, automatic merge/deletion or plugin installation is implied.
+With `--resume`, read `status` and the current contract first. Prioritise already
+selected valuable recovery slices; do not let another cleanup packet displace
+their completion. Use `record --priority` for an explicitly chosen exact target.
+Then take at most five unfinished targets. Before each approved removal run
+`verify-plan` against the reviewed fingerprint and live ignored-filename set;
+a failed verification stops the executor handoff.
 
 **Route by exposed capabilities, not client or repository host.** If `Agent` and a structured question tool are exposed, Phases 1-5 are available, including on GitHub Copilot. Delegation still needs an explicit request or applicable instruction. Without either capability, use the [linear procedure](references/copilot-procedure.md); assess inline when `Agent` is absent and use numbered questions only when the question tool is absent. All paths retain the same scripts and guards on GitHub, Azure DevOps and Forgejo.
 
@@ -91,7 +108,6 @@ Then run the **engine**: `bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-top
 | Any lookup failed or the base is unresolved | C KEEP |
 
 An expired claim self-heals into the normal audit. Claim, recency, stash and squash-merge checks: [`references/safety-audit-checks.md`](references/safety-audit-checks.md). The engine requires the [shared lifecycle library](../lib/worktree-lifecycle.sh); shipping that dependency does not enable lifecycle hooks. Registered worktrees also get `worktree-lifecycle.sh audit <wt> <owner-session>`; KEEP/VALUABLE/uncertain wins over `candidate`. Offer `../worktrees/checkpoint.sh checkpoint <wt> <session>` for uncommitted work (exit 10 = partial = keep); a checkpoint never authorises deletion.
-
 
 ## Phase 2b — Locked worktrees (read-only audit, then a user choice)
 
@@ -141,7 +157,7 @@ Every item ends **already in main / PR opened / kept with a named blocker / disc
 
 ## Multi-repo
 
-Use the [continuing ledger](references/sweep-layouts.md#scope-and-continuing-execution-ledger), not a new full-fleet audit at each invocation or phase boundary. `audit.sh --multi <parent-dir> --summary --json-out audit.json` remains an explicitly requested folder-wide audit, not the default discovery or resume step. Audit queued repos once as selected; preserve the combined plan and unresolved targets. Follow the [packet budgets and separate recovery queue](references/sweep-layouts.md#packet-budgets-and-separate-recovery-queue). One coordinator executes confirmed plans serially while other repo lanes prepare; pause collection in the repo being mutated. Review collateral pruning before execution. This is procedure, not an installed atomic queue, cache or admission service.
+Use the [continuing ledger](references/sweep-layouts.md#scope-and-continuing-execution-ledger), not a new full-fleet audit at each invocation or phase boundary. `audit.sh --multi <parent-dir> --summary --json-out audit.json` remains an explicitly requested folder-wide audit, not the default discovery or resume step. Audit queued repos once as selected; preserve the combined plan and unresolved targets. For explicitly scaled fleets, use the [fleet batch execution plan](references/sweep-layouts.md#fleet-batch-execution-plan); otherwise follow the [packet budgets and separate recovery queue](references/sweep-layouts.md#packet-budgets-and-separate-recovery-queue). One coordinator executes confirmed plans serially while other repo lanes prepare; pause collection in the repo being mutated. Review collateral pruning before execution. This is procedure, not an installed atomic queue, cache or admission service.
 
 ## Key principles
 
