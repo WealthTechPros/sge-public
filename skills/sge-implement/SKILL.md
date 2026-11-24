@@ -161,11 +161,11 @@ The inner loop is owned by `/sge:tdd-workflow` — follow it for every acceptanc
 
 **Commit each slice** via `/sge:commit` — cadence per `/sge:tdd-workflow` Golden Rule 5 (never more than one cycle uncommitted). Pass it the spec id (`Spec: SPEC-NNN`) or the no-spec `SGE-Override` reason; it owns the trailer + quality gate.
 
-**Push early, draft early (issue #1170) — don't hold commits until Phase 6.** Once the **first meaningful commit** exists (enabler or first green slice), push and open a **draft** PR, then push each green-cycle commit so every checkpoint is durable (rationale + WIP rule: [`../worktrees/SKILL.md`](../worktrees/SKILL.md)).
+**Push early, draft early (issue #1170) — don't hold commits until Phase 6.** Once the **first meaningful commit** exists (enabler or first green slice), push and open a **draft** PR, then push each tested fix as it lands, so every checkpoint is durable (rationale + WIP rule: [`../worktrees/SKILL.md`](../worktrees/SKILL.md)).
 
 ```bash
 git push -u origin <branch>
-gh pr create --draft --title "<conventional title>" --body "Part of #<issue-number>"
+gh pr create --draft --title "<conventional title>" --base main --body "Part of #<issue-number>"
 gh pr edit --add-label hold
 # then, per green cycle:  /sge:commit ... && git push
 ```
@@ -202,6 +202,8 @@ Repeat per acceptance criterion.
 Run plain **`/sge:commit`** (no `--no-push`) — it quality-gates, commits anything outstanding with the correct trailer, and pushes. The draft PR usually exists from Phase 3 — **reuse it** (fill the body's cortex/verdict comments via `gh pr edit`); `gh pr create --draft` only if none exists.
 
 > **Label & merge-gate rule.** `pr-reviewed` and auto-merge are owned **exclusively** by `/sge:pr-review` — only it, after a clean review, applies `pr-reviewed` and arms auto-merge. Never `gh pr edit --add-label pr-reviewed` or `gh pr merge --auto` from this skill; a draft PR structurally cannot be auto-merged, and `hooks/git-policy-guard.sh` (SPEC-132) denies `gh pr merge` on a PR without `pr-reviewed`. **Undrafting is this skill's alone** (#2806): the author lane runs `"$SGE_AUTHOR_WRAPPER" gh pr ready` once its work is done — Phase 6.5 (pod handoff) or Phase 7.1 (self-drive) — never earlier; `/sge:pr-review` never undrafts (#1291).
+
+**Size, shape and QA (sge#3706).** `bash "$SGE_ROOT/skills/sge-implement/pr-size-gate.sh"`: warn over 1,500 changed lines, split over 3,000. Base `main`, no long-lived stacked drafts; a new PR rather than a second issue on an open one. Before ready: `/sge:qa-audit <pr-number> --adversarial` if it touches auth, tenant, approval, retention or deletion controls, report linked in the PR body. Default builder: WSL with Docker. [`pr-size-and-flow.md`](references/pr-size-and-flow.md).
 
 ### Choose the issue reference
 
