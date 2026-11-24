@@ -370,8 +370,8 @@ ta_main() {
   fi
   [ "${#repos[@]}" -gt 0 ] || repos=(.)
   for r in "${repos[@]}"; do
-    # --fetch only refreshes remote-tracking refs (Phase 0); nothing else moves.
-    if [ "$fetch" -ne 0 ] && ! git -C "$r" fetch --prune origin >/dev/null 2>&1; then
+    # Keep stale remote-tracking refs until their separate cleanup decision.
+    if [ "$fetch" -ne 0 ] && ! git -C "$r" fetch --no-prune origin >/dev/null 2>&1; then
       echo "error:fetch-failed:$r - retain; no fresh audit" >&2
       rc=3; continue
     fi

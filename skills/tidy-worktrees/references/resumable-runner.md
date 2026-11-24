@@ -34,7 +34,29 @@ lock refuses writes, never transfers ownership by age. Retain the file and
 resolve its exact writer/lock through a supervised decision. An interrupted
 read-only audit has not consumed queue entries; the next invocation resumes.
 
+Use a bounded Cortex lookup for the existing non-secret ledger pointer and
+handoff before discovery; memory is a lead, not the ledger, shared backup,
+current safety evidence or approval. Keep the actual state in a durable,
+protected local task store, not only an expiring session directory. A missing
+or unreadable ledger blocks resume: locate or recover the original, never
+re-import or silently start a replacement scan.
+
+`audit` skips targets with existing reviews or audit results and refused
+probes; it does not fetch or write when no target needs an audit. Reopen an
+affected target only with `invalidate --path ... --reason ...` after new
+evidence. Use `audit --path <target>` to select one ledger target. An unchanged
+repository audit artifact can supply subsequent packets; a missing, altered or
+refused artifact retains affected targets until an explicit invalidation.
+These artifacts are dated metadata, not current deletion evidence.
+This optimisation does not affect the fresh checks for `plan`,
+`verify-plan` or `execute`. Those currently use the repository-wide audit
+helper; do not claim they are target-only or bypass required safety gates.
+
 One packet has at most five targets and a ten-minute wall-clock budget.
+For an explicitly requested batch, `--limit 10` combines repository packets,
+with at most five targets per repository. The runner audits
+at most two distinct repositories in parallel, once per selected repository;
+work within each repository and all approved removals remain serial.
 Audit preparation runs the existing repository-wide helper once per selected
 repository; this is metadata, not five completed file-level reviews. It does
 not invent a target-only audit. Completed unrelated assessments are retained.
@@ -101,6 +123,11 @@ named ignored-file consent. Inspect collateral `worktree prune --dry-run`
 and use the mandatory junction guard and existing executor serially. Record
 its immutable execution and recovery receipts; no predicted merge or elapsed
 age authorises disposal.
+
+Each plan binds the target's assessment revision. Recording a new disposition
+or invalidating the target voids an earlier plan even if its Git SHA is
+unchanged. Older plans without this binding require a new plan and consent.
+An invalidated recovery target keeps its existing handoff after re-audit.
 
 Immediately before **each** approved removal, verify the reviewed plan's
 printed fingerprint, the fresh audit/tip and the complete live ignored-filename

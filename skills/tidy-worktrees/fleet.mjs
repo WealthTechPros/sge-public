@@ -2,14 +2,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { pathKey as key, stateLocation as outputLocation } from '../lib/local-state.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const sha = /^[0-9a-f]{40}$/;
 const digest = value => createHash('sha256').update(value).digest('hex');
 const read = file => JSON.parse(fs.readFileSync(file, 'utf8'));
+const execFileAsync = promisify(execFile);
 const bash = () => process.env.SGE_BASH || (process.platform === 'win32'
   ? path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Git', 'bin', 'bash.exe') : 'bash');
 
@@ -48,37 +50,97 @@ export function importQueue(queue) {
 
 export function packet(state, lane = 'review', limit = 5) {
   if (!['review', 'cleanup', 'recovery', 'merge', 'retained'].includes(lane)) throw new Error('invalid lane');
-  if (!Number.isInteger(limit) || limit < 1 || limit > 5) throw new Error('packet limit must be 1..5');
-  return state.items.filter(item => item.lane === lane && !item.blocker)
-    .sort((a, b) => (a.priority ?? 1000) - (b.priority ?? 1000)).slice(0, limit);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 10) throw new Error('batch limit must be 1..10');
+  const candidates = state.items.filter(item => item.lane === lane && !item.blocker)
+    .sort((a, b) => (a.priority ?? 1000) - (b.priority ?? 1000));
+  if (limit <= 5) return candidates.slice(0, limit);
+  const perRepo = new Map();
+  return candidates.filter(item => {
+    const repo = key(item.root);
+    const count = perRepo.get(repo) || 0;
+    if (count === 5) return false;
+    perRepo.set(repo, count + 1);
+    return true;
+  }).slice(0, limit);
+}
+
+export function auditPacket(state, lane, limit) {
+  return packet({ ...state, items: state.items.filter(item => item.pendingAudit
+    || (item.lane === 'review' && item.invalidation && !item.auditFailure)
+    || (!item.reviewed && !item.audit && !item.auditFailure)) }, lane, limit);
+}
+
+export async function auditRepositories(selected, audit, deadline, cached = new Map()) {
+  const roots = [...new Map(selected.map(item => [key(item.root), item.root])).values()];
+  const reports = new Map();
+  for (let i = 0; i < roots.length && Date.now() < deadline; i += 2) {
+    const batch = await Promise.all(roots.slice(i, i + 2).map(async root => {
+      if (cached.has(key(root))) return [key(root), cached.get(key(root))];
+      try {
+        return [key(root), await audit(root, Math.max(1, deadline - Date.now()))];
+      } catch {
+        return [key(root), { report: { items: [], refused: true }, artifact: null }];
+      }
+    }));
+    for (const [repo, result] of batch) reports.set(repo, result);
+  }
+  return reports;
+}
+
+function cachedAudit(entry, root) {
+  try {
+    const raw = fs.readFileSync(entry.artifact);
+    if (digest(raw) !== entry.sha256) throw new Error('audit artifact changed');
+    const reports = JSON.parse(raw);
+    const report = reports.length === 1 && reports[0];
+    if (!report || key(report.repo || '.') !== key(root) || report.refused
+      || report.open_pr_set_known !== true || !Array.isArray(report.items)) throw new Error('audit artifact incomplete');
+    return { report, artifact: entry.artifact, cached: true };
+  } catch {
+    return { report: { items: [], refused: true }, artifact: null, cached: true };
+  }
 }
 
 export function applyAudit(state, selected, report, auditFile, inspectedAt) {
   if (!report || !Array.isArray(report.items)) throw new Error('malformed audit');
   for (const item of selected) {
     const match = report.items.find(row => row.kind === 'worktree' && key(row.path || '.') === item.id);
+    const handoff = item.pendingHandoff;
+    delete item.pendingHandoff;
+    delete item.pendingAudit;
     item.inspectedAt = inspectedAt;
     item.auditFile = auditFile;
     if (!match || report.refused || report.open_pr_set_known !== true || !sha.test(match.tip || '')) {
-      item.lane = 'retained';
-      item.next = 'missing or refused evidence; retain original';
+      item.auditFailure = 'missing or refused evidence; retain original';
+      if (handoff?.lane === 'recovery') {
+        item.lane = handoff.lane;
+        item.next = handoff.next;
+      } else if (!['recovery', 'merge'].includes(item.lane)) {
+        item.lane = 'retained';
+        item.next = item.auditFailure;
+      }
       continue;
     }
+    delete item.auditFailure;
     item.audit = match;
     if (item.head !== match.tip || item.baseHead && item.baseHead !== report.base_tip) {
+      item.assessmentRevision = (item.assessmentRevision ?? 0) + 1;
       item.invalidation = 'target/base HEAD changed; previous assessment/approval not reusable';
       item.reviewed = false;
     }
     item.head = match.tip;
     item.baseHead = report.base_tip;
     item.branch = match.name;
-    // A mechanical bucket cannot establish the value of dirty or unfinished work.
-    item.lane = ['A', 'D'].includes(match.bucket) ? 'cleanup'
-      : match.pr_state === 'open' ? 'merge'
-        : match.bucket === 'B' || match.sub_verdict?.startsWith('NEEDS-DECISION') ? 'recovery' : 'retained';
+    const wasRecovery = item.lane === 'recovery' || handoff?.lane === 'recovery';
+    const needsRecovery = wasRecovery || match.dirty === 'yes'
+      || match.sub_verdict?.startsWith('NEEDS-DECISION');
+    const priorNext = handoff?.next || item.next;
+    item.lane = needsRecovery ? 'recovery' : ['A', 'D'].includes(match.bucket) ? 'cleanup'
+      : match.pr_state === 'open' ? 'merge' : match.bucket === 'B' ? 'recovery' : 'retained';
     item.next = item.lane === 'cleanup' ? 'fresh exact cleanup plan and separate consent'
       : item.lane === 'merge' ? 'finish acceptance; await authorised merge, then invalidate/re-audit'
-        : item.lane === 'recovery' ? 'review value, qualify writer/task, preserve, complete owning checks and draft PR'
+        : item.lane === 'recovery' ? (wasRecovery && priorNext
+          ? priorNext : 'review value, qualify writer/task, preserve, complete owning checks and draft PR')
           : match.reason || 'unknown - retain';
   }
 }
@@ -103,6 +165,21 @@ function save(file, state, previous) {
   }
 }
 
+async function withOperationLock(file, callback) {
+  const { DatabaseSync } = await import('node:sqlite');
+  const lock = new DatabaseSync(outputLocation(`${file}.operations.sqlite`));
+  let locked = false;
+  try {
+    lock.exec('PRAGMA busy_timeout=1000');
+    lock.exec('BEGIN IMMEDIATE');
+    locked = true;
+    return await callback();
+  } finally {
+    if (locked) lock.exec('ROLLBACK');
+    lock.close();
+  }
+}
+
 export function counts(state) {
   const result = {};
   for (const item of state.items) result[item.lane] = (result[item.lane] || 0) + 1;
@@ -124,11 +201,19 @@ export function planItem(item, report, names) {
   const ignored = [...names].sort();
   return {
     path: item.path, branch: match.name, recoverySha: match.tip, baseHead: report.base_tip, bucket: match.bucket,
-    reason: match.reason, auditRepo: report.repo,
+    reason: match.reason, auditRepo: report.repo, assessmentRevision: item.assessmentRevision ?? 0,
     selector: `${report.repo}::worktree:${match.name}@${match.tip}`,
     ignoredFileCount: ignored.length, ignoredFilenameSha256: digest(ignored.join('\0')),
     ignoredFiles: ignored, approved: false,
   };
+}
+
+export function verifyPlanDisposition(item, entry) {
+  if (!item || item.lane !== 'cleanup' || item.pendingAudit || item.blocker
+    || !Number.isSafeInteger(entry.assessmentRevision)
+    || entry.assessmentRevision !== (item.assessmentRevision ?? 0)) {
+    throw new Error('target disposition or assessment changed; fresh plan required; retain');
+  }
 }
 
 // A reviewed plan is bound to the source tip, branch AND the base it was judged
@@ -195,7 +280,8 @@ export function verifyRemoval(item, execution, recovery) {
   run('git', ['-C', item.root, 'cat-file', '-e', `${item.head}^{commit}`]);
 }
 
-export async function main(args) {
+export async function main(args, { operationLockHeld = false } = {}) {
+  const originalArgs = [...args];
   const command = args.shift();
   const options = {};
   while (args.length) {
@@ -213,11 +299,14 @@ export async function main(args) {
     save(file, state, null);
     return counts(state);
   }
+  if (!operationLockHeld && ['record', 'invalidate', 'preserved'].includes(command)) {
+    return withOperationLock(file, () => main(originalArgs, { operationLockHeld: true }));
+  }
   const previous = fs.readFileSync(file, 'utf8');
   const state = JSON.parse(previous);
   if (state.version !== 1 || !Array.isArray(state.items)) throw new Error('unknown ledger version');
   const limit = Number(options['--limit'] || 5);
-  if (!Number.isInteger(limit) || limit < 1 || limit > 5) throw new Error('packet limit must be 1..5');
+  if (!Number.isInteger(limit) || limit < 1 || limit > 10) throw new Error('batch limit must be 1..10');
   const lane = options['--lane'] || 'review';
   if (command === 'status') return counts(state);
   if (command === 'blocked') return state.items.filter(item => item.blocker).slice(0, limit);
@@ -238,10 +327,13 @@ export async function main(args) {
   }
   if (command === 'invalidate') {
     const item = state.items.find(row => row.id === key(options['--path'] || ''));
-    if (!item || !options['--reason'] || item.lane === 'removed') throw new Error('exact target and invalidation reason required');
+    if (!item || !options['--reason']?.trim() || item.lane === 'removed') throw new Error('exact target and invalidation reason required');
+    if (item.lane === 'recovery') item.pendingHandoff = { lane: item.lane, next: item.next };
+    item.assessmentRevision = (item.assessmentRevision ?? 0) + 1;
     item.lane = 'review';
     delete item.blocker;
     item.invalidation = options['--reason'];
+    item.pendingAudit = true;
     save(file, state, previous);
     return item;
   }
@@ -262,6 +354,9 @@ export async function main(args) {
       delete item.blocker;
     }
     item.lane = options['--status'];
+    item.assessmentRevision = (item.assessmentRevision ?? 0) + 1;
+    delete item.pendingHandoff;
+    delete item.pendingAudit;
     item.reviewed = true;
     item.next = options['--reason'];
     if (options['--blocker']) {
@@ -277,7 +372,8 @@ export async function main(args) {
   }
   if (['approve', 'execute', 'reconcile'].includes(command)) {
     const { manageExecution } = await import('./fleet-execution.mjs');
-    return manageExecution({ command, options, state, file, previous, save, run, verifyRemoval, main });
+    return manageExecution({ command, options, state, file, previous, save, run, verifyRemoval,
+      main: nestedArgs => main(nestedArgs, { operationLockHeld: true }) });
   }
   if (!['audit', 'plan', 'verify-plan'].includes(command)) throw new Error('usage: init|status|next|blocked|audit|record|invalidate|plan|verify-plan|approve|execute|reconcile --state <file>');
   if (command === 'plan' && (!options['--out'] || fs.existsSync(outputLocation(options['--out'])))) {
@@ -294,30 +390,56 @@ export async function main(args) {
     approvedEntry = reviewedPlan.items?.find(item => key(item.path) === key(options['--path']));
     if (!approvedEntry) throw new Error('target missing from reviewed plan');
   }
+  if (command === 'audit' && options['--path']
+    && !state.items.some(item => item.id === key(options['--path']))) throw new Error('exact ledger target required');
+  const auditScope = command === 'audit' && options['--path']
+    ? { ...state, items: state.items.filter(item => item.id === key(options['--path'])) } : state;
   const selected = command === 'verify-plan'
     ? state.items.filter(item => item.id === key(options['--path']))
-    : packet(state, command === 'plan' ? 'cleanup' : lane, limit);
+    : command === 'audit' ? auditPacket(auditScope, lane, limit)
+      : packet(state, 'cleanup', limit);
   if (command === 'verify-plan' && selected.length !== 1) throw new Error('exact ledger target required');
   if (command === 'verify-plan' && selected[0].blocker) throw new Error('unresolved target blocker; explicit evidence invalidation required');
+  if (command === 'verify-plan') verifyPlanDisposition(selected[0], approvedEntry);
+  if (command === 'audit' && selected.length === 0) {
+    return { processed: [], remaining: counts(state), mutations: 'none',
+      reason: 'no unaudited or explicitly invalidated targets; reuse existing reviews' };
+  }
+  if (!operationLockHeld) {
+    return withOperationLock(file, () => main(originalArgs, { operationLockHeld: true }));
+  }
   const deadline = Date.now() + 600000;
-  const reports = new Map();
   const store = path.dirname(outputLocation(path.join(`${file}.audits`, 'probe.json')));
   fs.mkdirSync(store, { recursive: true });
-  for (const item of selected) {
-    if (reports.has(key(item.root))) continue;
-    if (Date.now() >= deadline) break;
-    try {
-      const raw = run(bash(), [path.join(here, 'audit.sh'), '--fetch', item.root], {
-        timeout: Math.max(1, deadline - Date.now()),
-        env: { ...process.env, SGE_TIDY_BULK_COMPLETED: '1' },
-      });
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed) || parsed.length !== 1) throw new Error('expected one audit');
-      const artifact = outputLocation(path.join(store, `${randomUUID()}.json`));
-      fs.writeFileSync(artifact, raw, { flag: 'wx', mode: 0o600 });
-      reports.set(key(item.root), { report: parsed[0], artifact });
-    } catch {
-      reports.set(key(item.root), { report: { items: [], refused: true }, artifact: null });
+  const cached = new Map();
+  if (command === 'audit') {
+    for (const item of selected) {
+      const repo = key(item.root);
+      if (!selected.some(other => key(other.root) === repo && other.pendingAudit)
+        && state.repositoryAudits?.[repo]) {
+        cached.set(repo, cachedAudit(state.repositoryAudits[repo], item.root));
+      }
+    }
+  }
+  const reports = await auditRepositories(selected, async (root, timeout) => {
+    const { stdout: raw } = await execFileAsync(bash(), [path.join(here, 'audit.sh'), '--fetch', root], {
+      encoding: 'utf8', timeout, maxBuffer: 32 * 1024 * 1024, windowsHide: true,
+      env: { ...process.env, SGE_TIDY_BULK_COMPLETED: '1' },
+    });
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length !== 1) throw new Error('expected one audit');
+    const artifact = outputLocation(path.join(store, `${randomUUID()}.json`));
+    fs.writeFileSync(artifact, raw, { flag: 'wx', mode: 0o600 });
+    return { report: parsed[0], artifact, sha256: digest(raw) };
+  }, deadline, cached);
+  if (command === 'audit') {
+    state.repositoryAudits ||= {};
+    for (const [repo, result] of reports) {
+      if (result.cached) continue;
+      state.repositoryAudits[repo] = result.artifact && result.sha256
+        && !result.report.refused && result.report.open_pr_set_known === true
+        && key(result.report.repo || '.') === repo && Array.isArray(result.report.items)
+        ? { artifact: result.artifact, sha256: result.sha256 } : { artifact: null, sha256: null };
     }
   }
   const completed = [];
@@ -328,9 +450,11 @@ export async function main(args) {
     completed.push(item);
   }
   save(file, state, previous);
-  if (command === 'audit') return { processed: completed, remaining: counts(state), mutations: 'remote-tracking fetch and local ledger only' };
+  if (command === 'audit') return { processed: completed, remaining: counts(state),
+    mutations: [...reports.values()].some(result => !result.cached) ? 'remote-tracking fetch and local ledger only' : 'local ledger only' };
   if (command === 'verify-plan') {
     const item = completed[0];
+    verifyPlanDisposition(item, approvedEntry);
     verifyApprovedIdentity(item, approvedEntry, item && reports.get(key(item.root))?.report);
     const names = run('git', ['-C', item.path, 'ls-files', '--others', '--ignored', '--exclude-standard', '-z'])
       .split('\0').filter(Boolean);

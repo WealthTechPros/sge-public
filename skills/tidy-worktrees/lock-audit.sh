@@ -37,17 +37,50 @@ set +e
 
 _la_is_windows() { case "$(uname -s 2>/dev/null)" in MINGW*|MSYS*|CYGWIN*) return 0 ;; esac; return 1; }
 
+_la_powershell() {
+  local ps pf
+  ps="$(command -v pwsh 2>/dev/null || command -v pwsh.exe 2>/dev/null)"
+  if [ -n "$ps" ]; then printf '%s\n' "$ps"; return 0; fi
+  pf="${ProgramFiles:-${PROGRAMFILES:-}}"
+  if [ -n "$pf" ]; then
+    ps="$(cygpath -u "$pf/PowerShell/7/pwsh.exe" 2>/dev/null)"
+    if [ -n "$ps" ] && [ -x "$ps" ]; then printf '%s\n' "$ps"; return 0; fi
+  fi
+  command -v powershell.exe 2>/dev/null || command -v powershell 2>/dev/null
+}
+
 # <path> -> junction/reparse directories inside it, one per line. rc 1 = probe failed.
 _la_junctions() {
   _la_is_windows || return 0
-  LA_P="$(cygpath -w "$1" 2>/dev/null || printf '%s' "$1")" powershell.exe -NoProfile -NonInteractive -Command \
-    'Get-ChildItem -LiteralPath $env:LA_P -Recurse -Directory -Force -ErrorAction Stop | Where-Object { $_.LinkType -eq "Junction" } | ForEach-Object { $_.FullName }' 2>/dev/null
+  local ps
+  ps="$(_la_powershell)" || return 1
+  LA_P="$(cygpath -w "$1" 2>/dev/null || printf '%s' "$1")" "$ps" -NoProfile -NonInteractive -Command '
+    $ErrorActionPreference = "Stop"
+    try {
+      $queue = [System.Collections.Generic.Queue[string]]::new()
+      $queue.Enqueue($env:LA_P)
+      while ($queue.Count -gt 0) {
+        $dir = Get-Item -LiteralPath $queue.Dequeue() -Force
+        if (-not $dir.PSIsContainer -or ($dir.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+          throw "probe directory is not a normal directory"
+        }
+        foreach ($child in Get-ChildItem -LiteralPath $dir.FullName -Directory -Force) {
+          if ($child.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            Write-Output $child.FullName
+          } else { $queue.Enqueue($child.FullName) }
+        }
+      }
+      exit 0
+    } catch { exit 1 }
+  ' 2>/dev/null
 }
 
 # <junction-path> -> unlink the LINK only (Directory.Delete non-recursive never follows into the target)
 _la_unlink_junction() {
   _la_is_windows || return 1
-  LA_P="$(cygpath -w "$1" 2>/dev/null || printf '%s' "$1")" powershell.exe -NoProfile -NonInteractive -Command \
+  local ps
+  ps="$(_la_powershell)" || return 1
+  LA_P="$(cygpath -w "$1" 2>/dev/null || printf '%s' "$1")" "$ps" -NoProfile -NonInteractive -Command \
     '[System.IO.Directory]::Delete($env:LA_P, $false)' >/dev/null 2>&1
 }
 
