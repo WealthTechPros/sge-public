@@ -182,4 +182,15 @@ check "audit changed nothing (refs, worktrees, stash, working tree)" "$after" "$
 check "summary prints bucket counts and the read-only footer" "$(grep -c 'A merged' "$TMP/sum.txt"):$(grep -c 'nothing deleted, pushed or opened' "$TMP/sum.txt")" "1:1"
 check "ta_main --json-out writes a JSON array" "$(ta_main --json-out "$TMP/o.json" "$R" >/dev/null; jq 'type + ":" + (length|tostring)' "$TMP/o.json" | tr -d '\r')" '"array:1"'
 check "non-repo dir reported, others still audited" "$(ta_main "$TMP" "$R" 2>/dev/null | jq 'length')" "1"
+
+# A refresh must not prune unrelated tracking refs, even when Git config enables pruning.
+git init -q --bare "$TMP/remote.git"
+git -C "$R" remote add origin "$TMP/remote.git"
+git -C "$R" push -q origin main:refs/heads/main main:refs/heads/fresh
+git -C "$R" update-ref refs/remotes/origin/stale "$INIT"
+git -C "$R" update-ref -d refs/remotes/origin/fresh
+git -C "$R" config fetch.prune true
+ta_main --fetch "$R" >/dev/null
+check "fetch preserves unrelated stale remote-tracking refs" "$(git -C "$R" rev-parse refs/remotes/origin/stale)" "$INIT"
+check "fetch still refreshes new remote-tracking refs" "$(git -C "$R" rev-parse refs/remotes/origin/fresh)" "$(git -C "$R" rev-parse main)"
 exit $fail

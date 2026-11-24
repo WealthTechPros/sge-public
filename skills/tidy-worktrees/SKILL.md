@@ -65,14 +65,14 @@ execution ledger to rebuilding conversational packets. Azure DevOps history
 is bulk-paginated once per selected repository. Valuable work stays in the
 recovery lane for completion and owning checks; open PRs enter the merge lane
 and return to audit only after verified merge or another named invalidation.
-The coordinator records exact approval and uses `execute` (one target) or `reconcile` after interruption.
-No background service, automatic merge/deletion or plugin installation is implied.
-With `--resume`, read `status` and the current contract first. Prioritise already
-selected valuable recovery slices; do not let another cleanup packet displace
-their completion. Use `record --priority` for an explicitly chosen exact target.
-Then take at most five unfinished targets. Before each approved removal run
-`verify-plan` against the reviewed fingerprint and live ignored-filename set;
-a failed verification stops the executor handoff.
+Find the existing ledger first, as the runner reference says (a bounded Cortex lookup is a pointer, never the ledger,
+backup, safety evidence or approval); if it is missing, recover it rather than re-import or rescan the fleet.
+The coordinator records exact approval and uses `execute` (one target) or `reconcile` after interruption; no
+background service, automatic merge/deletion or plugin installation is implied. With `--resume`, read `status`
+and the current contract first. Prioritise already selected valuable recovery slices; do not let another cleanup packet displace their completion. Use `record --priority` for an explicitly
+chosen exact target. Then take at most five unfinished targets per repository; an explicitly requested batch may
+combine repository packets for up to ten targets. Before each approved removal run `verify-plan` against the
+reviewed fingerprint and live ignored-filename set; a failed verification stops the executor handoff.
 
 **Route by exposed capabilities, not client or repository host.** If `Agent` and a structured question tool are exposed, Phases 1-5 are available, including on GitHub Copilot. Delegation still needs an explicit request or applicable instruction. Without either capability, use the [linear procedure](references/copilot-procedure.md); assess inline when `Agent` is absent and use numbered questions only when the question tool is absent. All paths retain the same scripts and guards on GitHub, Azure DevOps and Forgejo.
 
@@ -80,7 +80,7 @@ Recovery, restore and limits: [`docs/worktree-lifecycle.md`](../../docs/worktree
 
 ## Phase 0 — Sync
 
-For the selected repo, `git fetch --prune`, then note `git rev-parse --show-toplevel` (the current-worktree guard). Without a fresh fetch, merged PRs look unmerged. Resume the ledger at its next target; refresh selected-target evidence before mutation, not the entire fleet. Name an invalidation and its scope before any broader rescan.
+For the selected repo, `git fetch --no-prune origin`, then note `git rev-parse --show-toplevel` (the current-worktree guard). Without a fresh fetch, merged PRs look unmerged. Keep remote-tracking ref pruning separate from the audit. Resume the ledger at its next target; refresh selected-target evidence before mutation, not the entire fleet. Name an invalidation and its scope before any broader rescan.
 
 ## Phase 1 — Inventory and open-PR set (read-only)
 

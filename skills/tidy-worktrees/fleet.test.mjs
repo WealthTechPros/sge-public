@@ -6,7 +6,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { pathKey } from '../lib/local-state.mjs';
-import { importQueue, packet, applyAudit, counts, planItem, verifyIgnored, verifyRemoval, verifyApprovedIdentity, main } from './fleet.mjs';
+import { importQueue, packet, auditPacket, auditRepositories, applyAudit, counts, planItem, verifyIgnored, verifyRemoval, verifyApprovedIdentity, verifyPlanDisposition, main } from './fleet.mjs';
 import { checkConsent, compareRemoval } from './fleet-execution.mjs';
 
 const head = 'a'.repeat(40);
@@ -37,7 +37,111 @@ test('imports existing reviews and removals without restarting them; unknown age
   state.items.find(item => path.basename(item.path) === 'unknown').priority = 0;
   assert.equal(path.basename(packet(state)[0].path), 'unknown');
   assert.throws(() => importQueue(queue([row('duplicate'), row('duplicate')])), /duplicate/);
-  assert.throws(() => packet(state, 'review', 6), /1..5/);
+  assert.throws(() => packet(state, 'review', 11), /1..10/);
+});
+
+test('audit selects only new or explicitly invalidated targets, not retained reviews or failed probes', () => {
+  const state = importQueue(queue([row('reviewed', 'KEEP_USEFUL_DIRTY_RECONCILE'),
+    row('audited'), row('failed'), row('invalidated'), row('new')]));
+  const [reviewed, audited, failed, invalidated, fresh] = state.items;
+  audited.audit = { tip: head };
+  failed.auditFailure = 'host unavailable';
+  invalidated.reviewed = true;
+  invalidated.pendingAudit = true;
+  assert.deepEqual(auditPacket(state, 'review', 5), [invalidated, fresh]);
+  assert.deepEqual(auditPacket(state, 'recovery', 5), []);
+  applyAudit(state, [invalidated], { items: [], refused: true }, null, 'now');
+  assert.equal(invalidated.pendingAudit, undefined);
+  assert.ok(!auditPacket(state, 'retained', 5).includes(invalidated));
+  assert.equal(reviewed.reviewed, true);
+});
+
+test('audit with only reviewed targets does not invoke a scan or mutate the ledger', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-reuse-'));
+  try {
+    const file = path.join(dir, 'state.json');
+    const input = path.join(dir, 'queue.json');
+    fs.writeFileSync(input, JSON.stringify(queue([row('reviewed', 'KEEP_USEFUL_DIRTY_RECONCILE')])));
+    await main(['init', '--state', file, '--queue', input]);
+    const before = fs.readFileSync(file, 'utf8');
+    const result = await main(['audit', '--state', file, '--lane', 'recovery']);
+    assert.deepEqual(result.processed, []);
+    assert.equal(result.mutations, 'none');
+    assert.equal(fs.readFileSync(file, 'utf8'), before);
+    assert.equal(fs.existsSync(`${file}.audits`), false);
+    assert.equal(fs.existsSync(`${file}.operations.sqlite`), false);
+  } finally { fs.rmSync(dir, { recursive: true }); }
+});
+
+test('later packets reuse a verified repository audit and refuse altered artifacts', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-artifact-'));
+  try {
+    const file = path.join(dir, 'state.json');
+    const input = path.join(dir, 'queue.json');
+    const artifact = path.join(dir, 'audit.json');
+    fs.writeFileSync(input, JSON.stringify(queue([row('first'), row('second')])));
+    await main(['init', '--state', file, '--queue', input]);
+    const state = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const report = audit(state.items[0]);
+    report.items.push({ ...report.items[0], path: state.items[1].path });
+    const raw = JSON.stringify([report]);
+    fs.writeFileSync(artifact, raw);
+    state.repositoryAudits = { [pathKey(root)]: { artifact, sha256: createHash('sha256').update(raw).digest('hex') } };
+    fs.writeFileSync(file, JSON.stringify(state));
+    const result = await main(['audit', '--state', file, '--path', state.items[0].path]);
+    assert.equal(result.processed.length, 1);
+    assert.equal(result.mutations, 'local ledger only');
+    fs.writeFileSync(artifact, 'altered');
+    const refused = await main(['audit', '--state', file, '--path', state.items[1].path]);
+    assert.match(refused.processed[0].auditFailure, /refused/);
+    await assert.rejects(main(['invalidate', '--state', file, '--path', state.items[1].path, '--reason', '  ']), /reason required/);
+    await main(['invalidate', '--state', file, '--path', state.items[1].path, '--reason', 'new evidence']);
+    const reopened = JSON.parse(fs.readFileSync(file, 'utf8')).items[1];
+    assert.equal(reopened.pendingAudit, true);
+    await assert.rejects(main(['audit', '--state', file, '--path', path.join(root, 'absent')]), /exact ledger target/);
+  } finally { fs.rmSync(dir, { recursive: true }); }
+});
+
+test('a ten-target batch is bounded to five per repository and skips blocked entries', () => {
+  const other = path.resolve(os.tmpdir(), 'other fixture repo');
+  const secondRepo = name => ({ ...row(name), root: other, path: path.join(other, name) });
+  const state = importQueue(queue([
+    ...Array.from({ length: 7 }, (_, i) => row(`first-${i}`)),
+    ...Array.from({ length: 7 }, (_, i) => secondRepo(`second-${i}`)),
+  ]));
+  state.items[0].blocker = { kind: 'owner' };
+  const selected = packet(state, 'review', 10);
+  assert.equal(selected.length, 10);
+  assert.equal(selected.filter(item => item.root === root).length, 5);
+  assert.equal(selected.filter(item => item.root === other).length, 5);
+  assert.ok(!selected.includes(state.items[0]));
+  assert.equal(packet(importQueue(queue(Array.from({ length: 7 }, (_, i) => row(`single-${i}`)))), 'review', 10).length, 5);
+  const third = path.resolve(os.tmpdir(), 'third fixture repo');
+  const sparse = importQueue(queue([row('priority'),
+    ...Array.from({ length: 5 }, (_, i) => secondRepo(`middle-${i}`)),
+    ...Array.from({ length: 4 }, (_, i) => ({ ...row(`last-${i}`), root: third, path: path.join(third, `last-${i}`) })),
+  ]));
+  assert.equal(packet(sparse, 'review', 10).length, 10);
+});
+
+test('repository audits run two at a time, once per root, and failures retain targets', async () => {
+  const roots = [root, path.join(root, 'second'), path.join(root, 'third')];
+  const started = [], releases = [];
+  const pending = auditRepositories([roots[0], roots[0], roots[1], roots[2]].map(repo => ({ root: repo })),
+    repo => new Promise((resolve, reject) => {
+      started.push(repo);
+      releases.push(repo === roots[1] ? () => reject(new Error('unavailable'))
+        : () => resolve({ report: { items: [] }, artifact: repo }));
+    }), Date.now() + 10000);
+  assert.deepEqual(started, roots.slice(0, 2));
+  releases.splice(0).forEach(release => release());
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(started, roots);
+  releases.splice(0).forEach(release => release());
+  const reports = await pending;
+  assert.equal(reports.size, 3);
+  assert.equal(reports.get(pathKey(roots[1])).report.refused, true);
+  assert.equal(reports.get(pathKey(roots[2])).artifact, roots[2]);
 });
 
 test('failed or missing evidence retains originals; dirty and open-PR work never becomes cleanup', () => {
@@ -53,6 +157,25 @@ test('failed or missing evidence retains originals; dirty and open-PR work never
     assert.notEqual(item.lane, 'cleanup', variation);
     assert.throws(() => planItem(item, report, []), /eligible/, variation);
   }
+  const state = importQueue(queue([row('valuable', 'KEEP_USEFUL_DIRTY_RECONCILE')]));
+  state.items[0].next = 'preserve the existing recovery handoff';
+  applyAudit(state, [state.items[0]], { items: [], refused: true }, null, 'now');
+  assert.equal(state.items[0].lane, 'recovery');
+  assert.equal(state.items[0].next, 'preserve the existing recovery handoff');
+  assert.match(state.items[0].auditFailure, /refused/);
+});
+
+test('a metadata audit cannot displace recovery handoffs or hide dirty work behind an open PR', () => {
+  const state = importQueue(queue([row('valuable', 'KEEP_USEFUL_DIRTY_RECONCILE'), row('dirty')]));
+  const [valuable, dirty] = state.items;
+  valuable.next = 'preserve the untracked deliverable before deciding';
+  applyAudit(state, [valuable], audit(valuable), 'artifact.json', 'now');
+  assert.equal(valuable.lane, 'recovery');
+  assert.equal(valuable.next, 'preserve the untracked deliverable before deciding');
+  const report = audit(dirty, 'C');
+  Object.assign(report.items[0], { dirty: 'yes', pr_state: 'open', sub_verdict: 'NEEDS-DECISION:UNCOMMITTED' });
+  applyAudit(state, [dirty], report, 'artifact.json', 'now');
+  assert.equal(dirty.lane, 'recovery');
 });
 
 test('target changes invalidate only that assessment; an unchanged reviewed target stays reviewed', () => {
@@ -65,6 +188,19 @@ test('target changes invalidate only that assessment; an unchanged reviewed targ
   assert.equal(state.items[0].reviewed, false);
   assert.match(state.items[0].invalidation, /HEAD changed/);
   assert.equal(state.items[1].lane, 'review');
+});
+
+test('a changed and restored tip cannot revive an earlier plan', () => {
+  const state = importQueue(queue([row('work')]));
+  const item = state.items[0];
+  const report = audit(item);
+  applyAudit(state, [item], report, 'audit.json', 'now');
+  const entry = planItem(item, report, []);
+  report.items[0].tip = 'c'.repeat(40);
+  applyAudit(state, [item], report, 'changed.json', 'later');
+  report.items[0].tip = head;
+  applyAudit(state, [item], report, 'restored.json', 'later still');
+  assert.throws(() => verifyPlanDisposition(item, entry), /assessment changed/);
 });
 
 test('plan binds full source SHA and every ignored filename, not ignored contents or approval', () => {
@@ -160,6 +296,80 @@ test('a fresh invocation resumes the same ledger, refuses re-import/concurrent w
   } finally { fs.rmSync(dir, { recursive: true }); }
 });
 
+test('invalidating recovery preserves its handoff after both a successful and a refused audit', async () => {
+  for (const succeeds of [true, false]) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-handoff-'));
+    try {
+      const file = path.join(dir, 'state.json');
+      const input = path.join(dir, 'queue.json');
+      fs.writeFileSync(input, JSON.stringify(queue([row('work', 'KEEP_USEFUL_DIRTY_RECONCILE')])));
+      await main(['init', '--state', file, '--queue', input]);
+      const prior = JSON.parse(fs.readFileSync(file, 'utf8')).items[0];
+      await main(['invalidate', '--state', file, '--path', prior.path, '--reason', 'new evidence']);
+      const state = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const item = state.items[0];
+      applyAudit(state, [item], succeeds ? audit(item) : { items: [], refused: true }, 'audit.json', 'now');
+      assert.equal(item.lane, 'recovery');
+      assert.equal(item.next, prior.next);
+    } finally { fs.rmSync(dir, { recursive: true }); }
+  }
+});
+
+test('a later retention decision or invalidation rejects the old plan before another audit', async () => {
+  for (const decision of ['invalidate', 'recovery']) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-old-plan-'));
+    try {
+      const file = path.join(dir, 'state.json');
+      const input = path.join(dir, 'queue.json');
+      const planFile = path.join(dir, 'plan.json');
+      const evidence = path.join(dir, 'evidence.txt');
+      fs.writeFileSync(input, JSON.stringify(queue([row('work')])));
+      fs.writeFileSync(evidence, 'review');
+      await main(['init', '--state', file, '--queue', input]);
+      const state = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const item = state.items[0];
+      applyAudit(state, [item], audit(item), 'audit.json', 'now');
+      fs.writeFileSync(file, JSON.stringify(state));
+      const raw = JSON.stringify({ items: [planItem(item, audit(item), [])] });
+      fs.writeFileSync(planFile, raw);
+      const fingerprint = createHash('sha256').update(raw).digest('hex');
+      if (decision === 'invalidate') {
+        await main(['invalidate', '--state', file, '--path', item.path, '--reason', 'new evidence']);
+      } else {
+        await main(['record', '--state', file, '--path', item.path, '--status', 'recovery',
+          '--reason', 'retain work', '--evidence', evidence]);
+      }
+      await assert.rejects(main(['verify-plan', '--state', file, '--plan', planFile,
+        '--fingerprint', fingerprint, '--path', item.path]), /disposition or assessment changed/);
+      assert.equal(fs.existsSync(`${file}.audits`), false);
+    } finally { fs.rmSync(dir, { recursive: true }); }
+  }
+});
+
+test('disposition changes cannot race an active execution gate', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-gate-'));
+  let gate;
+  try {
+    const file = path.join(dir, 'state.json');
+    const input = path.join(dir, 'queue.json');
+    const evidence = path.join(dir, 'evidence.txt');
+    fs.writeFileSync(input, JSON.stringify(queue([row('work')])));
+    fs.writeFileSync(evidence, 'review');
+    await main(['init', '--state', file, '--queue', input]);
+    const before = fs.readFileSync(file, 'utf8');
+    const { DatabaseSync } = await import('node:sqlite');
+    gate = new DatabaseSync(`${file}.operations.sqlite`);
+    gate.exec('BEGIN IMMEDIATE');
+    await assert.rejects(main(['invalidate', '--state', file, '--path', row('work').path, '--reason', 'changed']), /locked|busy/i);
+    await assert.rejects(main(['record', '--state', file, '--path', row('work').path, '--status', 'recovery',
+      '--reason', 'retain', '--evidence', evidence]), /locked|busy/i);
+    assert.equal(fs.readFileSync(file, 'utf8'), before);
+  } finally {
+    if (gate) { gate.exec('ROLLBACK'); gate.close(); }
+    fs.rmSync(dir, { recursive: true });
+  }
+});
+
 test('no output intermediates in a synchronised folder, including a symlink to it', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-location-'));
   try {
@@ -192,7 +402,7 @@ test('typed blockers leave the runnable queue until an explicit evidence invalid
       '--reason', 'writer unresolved', '--evidence', evidence, '--blocker', blocker]);
     assert.equal((await main(['next', '--state', file, '--lane', 'recovery'])).length, 0);
     assert.equal((await main(['blocked', '--state', file])).length, 1);
-    await assert.rejects(main(['blocked', '--state', file, '--limit', '6']), /1..5/);
+    await assert.rejects(main(['blocked', '--state', file, '--limit', '11']), /1..10/);
     assert.equal((await main(['status', '--state', file])).removed, 0);
     await main(['invalidate', '--state', file, '--path', row('blocked').path, '--reason', 'dated owner handoff received']);
     assert.equal((await main(['blocked', '--state', file])).length, 0);

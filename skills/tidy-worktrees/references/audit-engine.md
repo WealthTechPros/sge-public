@@ -6,7 +6,7 @@ Read-only and deterministic. It never deletes, pushes, commits, stashes, labels 
 bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/tidy-worktrees/audit.sh" [--summary] [--json-out <file>] [--fetch] [--multi <parent-dir>] [repo dirs…]
 ```
 
-`--multi <parent-dir>` audits every repo directly under a folder (a `.git` directory; linked worktrees are skipped). With `--summary` it adds combined `ALL` totals, the combined delete-plan size and every B/C/D item with its reason. The JSON from `--json-out` is the input to [`execute.sh`](executor.md). `--fetch` runs `git fetch --prune origin` first (Phase 0; it only moves remote-tracking refs). Needs `bash`, `git`, `jq`, `timeout`. Output is a JSON array with one report per repo (`--summary` prints counts and the items that need a decision).
+`--multi <parent-dir>` audits every repo directly under a folder (a `.git` directory; linked worktrees are skipped). With `--summary` it adds combined `ALL` totals, the combined delete-plan size and every B/C/D item with its reason. The JSON from `--json-out` is the input to [`execute.sh`](executor.md). `--fetch` runs `git fetch --no-prune origin` first (Phase 0), preserving unrelated remote-tracking refs. Needs `bash`, `git`, `jq`, `timeout`. Output is a JSON array with one report per repo (`--summary` prints counts and the items that need a decision).
 
 ## Report fields
 
