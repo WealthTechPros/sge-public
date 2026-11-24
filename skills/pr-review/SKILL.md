@@ -111,13 +111,13 @@ Before claiming the gate, pick the mode (same-head re-assert · **delta** on new
 
 ### Diff risk classification & dispatch scaling (drives cost — #688)
 
-`DIFF_RISK=$(rl_diff_risk "$PR" <bot_hot>)` — tier (`prose`/`trivial`/`generated`/`low`/`medium`/`high`): **low risk + clean bot review can skip fresh specialist dispatch**; **high risk (auth/payments/migrations/data-isolation) always gets full treatment** regardless of bot signal; never downgrade `high`-risk on bot review alone; all gates fail closed; Phase 5 pass-through wins. Tier table, security-path glob, mechanics (#984, #973, #1757, #2215): [`dispatch-scaling.md`](references/dispatch-scaling.md). `GOVERNANCE_TIER` `T0`/`T1` additionally caps dispatch below this table, never above/over `high`: [`tier-scaling.md`](references/tier-scaling.md).
+`DIFF_RISK=$(rl_diff_risk "$PR" <bot_hot>)` — tier (`prose`/`trivial`/`generated`/`low`/`medium`/`high`): **low risk + clean bot review can skip fresh specialist dispatch**; **high risk (auth/payments/migrations/data-isolation) always gets full treatment** regardless of bot signal; all gates fail closed; Phase 5 pass-through wins. Tier table, security-path glob, mechanics (#984, #973, #1757, #2215): [`dispatch-scaling.md`](references/dispatch-scaling.md). `GOVERNANCE_TIER` `T0`/`T1` additionally caps dispatch below this table, never above/over `high`: [`tier-scaling.md`](references/tier-scaling.md).
 
 ### Review tier (#2776)
 
 **Required:** `RT=$("$SGE_ROOT/skills/pr-review/review-tier.sh" pr "$PR" --floor "${ARG_TIER:-light}" --risk "$DIFF_RISK")` → `REVIEW_TIER`/`REVIEW_TIER_REASON`. Set `ARG_TIER` first with the `ARG_TIER=` parse of `--review-tier` in [`review-tier.md` § Computing it](references/review-tier.md#computing-it); depth per tier is there too.
 
-`CONTROL_BEARING=$(rl_diff_control_bearing "$PR")` (#2211; existing gate scripts only, sge#2980): selected tier, dispatches `/sge:qa-audit --adversarial` ONCE as a background `Agent` with the review lanes, never via the Skill tool, never retried: [details](references/behavioral-verification-tier.md).
+`CONTROL_BEARING=$(rl_diff_control_bearing "$PR")` (#2211), or an auth/tenant/approval/retention/deletion change (sge#3707): selected tier; no adversarial report → dispatches `/sge:qa-audit --adversarial` in the first pass, ONCE, bg `Agent`: [details](references/behavioral-verification-tier.md).
 
 `ORACLE_BEARING=$(rl_diff_oracle_bearing "$PR")` (#2222): oracle-derivation lens on fixture/snapshot/invariant changes: [details](references/oracle-derivation-review.md).
 
@@ -179,7 +179,7 @@ Run the repo's quality suite (commands in CLAUDE.md) **as background tasks in th
 
 ## Phase 4: Issue Validation, Traceability & QA Evidence
 
-**`governance_tier: T0` caps this phase** — 4.1/4.2 only, 4.3–4.6 skipped regardless of trigger: [`tier-scaling.md`](references/tier-scaling.md).
+**`governance_tier: T0` caps this phase** — 4.1/4.2 only, 4.3–4.6 skipped regardless of trigger, except 4.3a if `CONTROL_BEARING=1`: [`tier-scaling.md`](references/tier-scaling.md).
 
 **4.1 Requirements from the linked issue.** Build a table `| Requirement from Issue | Implemented? ✅/❌ | Evidence (file:line) |` covering every requirement and acceptance criterion. **Any unimplemented one is a BLOCKER.** Closure integrity: [`closure-integrity.md`](references/closure-integrity.md).
 
@@ -187,7 +187,7 @@ Run the repo's quality suite (commands in CLAUDE.md) **as background tasks in th
 
 **4.3 QA evidence (#732).** `rl_qa_evidence "$PR"` reads the qa-audit-verdict block's head_sha → `QA_COMMENT`/`QA_HEAD_SHA`: no report → `qa_evidence: none`; match → current, consume for 4.1 rows + cite URL; mismatch → `qa_evidence: stale@<sha>`, treat as if it had no QA report. High-risk + no report: optionally dispatch `/sge:qa-audit`. Page signals (`QA_CONSOLE_ERRORS`…): [4.3c](references/phase4-evidence-gates.md).
 
-**4.3a–4.6 Conditional evidence gates** — run each whose trigger fires: **4.3a** adversarial (`CONTROL_BEARING=1`; none/stale = **BLOCKER**) · **4.3b** oracle-derivation (`ORACLE_BEARING=1`) · **4.4** dual-backend seam-evidence ([`references/seam-evidence.md`](references/seam-evidence.md)) · **4.5** UI design evidence · **4.6** Invariants. Rules + finding literals: [`phase4-evidence-gates.md`](references/phase4-evidence-gates.md).
+**4.3a–4.6 Conditional evidence gates** — each whose trigger fires: **4.3a** adversarial (`CONTROL_BEARING=1`; after the first-pass run, runs `rl_qa_evidence "$PR"` itself for the head SHA; none/stale = **BLOCKER**) · **4.3b** oracle-derivation (`ORACLE_BEARING=1`) · **4.4** dual-backend seam-evidence ([ref](references/seam-evidence.md)) · **4.5** UI design evidence · **4.6** Invariants. Rules: [`phase4-evidence-gates.md`](references/phase4-evidence-gates.md).
 
 ## Phase 5: Aggregate and Report
 
