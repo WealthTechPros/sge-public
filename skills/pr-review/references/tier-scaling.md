@@ -121,7 +121,7 @@ and the risk map.
 | 3 (quality gates/CI) | full | full — required CI never scales down | full |
 | 4.1 requirements table | full | full | **lightweight**: changed-file-list vs. issue scope only, no per-AC evidence table |
 | 4.2 traceability | full | full | advisory only (unchanged severity — never a Blocker) |
-| 4.3–4.6 (adversarial/seam/design/invariants evidence gates) | per each gate's own trigger | per each gate's own trigger, **unchanged** | **skipped** — the audit-grade evidence machinery this tier exists to not pay for |
+| 4.3–4.6 (adversarial/seam/design/invariants evidence gates) | per each gate's own trigger | per each gate's own trigger, **unchanged** | **skipped** — the audit-grade evidence machinery this tier exists to not pay for, except 4.3a when `CONTROL_BEARING=1` (sge#3707), which also lifts the Phase 2 cap for its one adversarial dispatch |
 | 5.5 (thread resolution) | full | full | full — mechanical merge-gate step, and Phase 2 posted nothing to resolve |
 | 6–9 (post/promote/cleanup) | full | full | full, `mode: tier0` in the verdict |
 
