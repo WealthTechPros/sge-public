@@ -75,7 +75,12 @@ wi_scan() {
   [ -n "$def" ] || def=main
   base="origin/$def"
 
-  if ! heads="$(cd "$top" && hpr_open_pr_heads 2>/dev/null)"; then pr_known=0; heads=""; fi
+  # A caller that already read this repo's open-PR set (audit.sh's ta_pr_load)
+  # hands it over in WI_OPEN_PR_OK/WI_OPEN_PR_HEADS, so one audit makes one read
+  # (sge#3697). Its failure is passed on too: an unknown set stays unknown.
+  if [ -n "${WI_OPEN_PR_OK:-}" ]; then
+    heads="${WI_OPEN_PR_HEADS:-}"; [ "$WI_OPEN_PR_OK" = 1 ] || { pr_known=0; heads=""; }
+  elif ! heads="$(cd "$top" && hpr_open_pr_heads 2>/dev/null)"; then pr_known=0; heads=""; fi
 
   local owners; owners="$(wl_list "$top" 2>/dev/null)"
   local stashes; stashes="$(git -C "$top" stash list --format='%gs' 2>/dev/null | sed -n 's/^\(WIP on\|On\) \([^:]*\):.*/\2/p')"

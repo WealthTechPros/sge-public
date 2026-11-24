@@ -7,10 +7,11 @@
 #   wl_unregister <worktree> <session-id>  # drop OUR registry entry only
 #   wl_list [<repo-path>]                  # "<session>\t<path>\t<branch>" rows
 #   wl_audit <worktree> <session-id>       # verdict block (see below)
+#   wl_list <repo> | wl_audit_many         # "<path>\t<verdict>\t<reason>" rows; one open-PR read per repo
 #   wl_recovery_preview <worktree>         # inspect a candidate, no changes
 #   wl_recover <worktree> <owner> <entry-hash> <head> <status-hash>
 #   wl_recover_many <registration-entry>... # explicitly authorised selection
-#   bash worktree-lifecycle.sh <register|unregister|list|audit|recovery-preview|recover|recover-many> <args...>
+#   bash worktree-lifecycle.sh <register|unregister|list|audit|audit-many|recovery-preview|recover|recover-many> <args...>
 #
 # Registry: one file per owned worktree under <git-common-dir>/sge-worktrees/,
 # so every linked worktree of a repo shares ONE registry. Entries are written
@@ -286,10 +287,43 @@ wl_list() {
 _wl_verdict() { printf 'verdict:%s\nreason:%s\n' "$1" "$2"; }
 
 wl_audit() {
-  local wt="$1" sid="${2:-}" common f branch heads sup status
+  local wt="$1" sid="${2:-}" heads ok=1
   _wl_valid_session "$sid" || { echo "error:bad-session-id" >&2; return 5; }
   git -C "$wt" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "error:not-a-git-worktree" >&2; return 3; }
-  common="$(_wl_common_dir "$wt")" || return 3
+  # Open-PR set: live and fail-closed. Any failure => KEEP, never "no PRs".
+  heads="$(cd "$wt" && hpr_open_pr_heads 2>/dev/null)" || ok=0
+  _wl_audit_with "$wt" "$sid" "$ok" "$heads"
+}
+
+# wl_audit_many: audits "<session>\t<path>[\t...]" rows from stdin (wl_list's
+# shape), reading the open-PR set ONCE per repository instead of once per
+# worktree (sge#3697: at Azure DevOps scale that was hundreds of calls). A
+# failed read is remembered for that repository, so every one of its
+# worktrees is KEEP open-pr-lookup-failed (fail closed) without a retry storm.
+# Output: "<path>\t<verdict>\t<reason>" per row; unreadable rows are KEEP.
+wl_audit_many() {
+  local sid wt _rest common out v r
+  local -A ok_by=() heads_by=()
+  while IFS=$'\t' read -r sid wt _rest; do
+    [ -n "$wt" ] || continue
+    if ! _wl_valid_session "$sid" || ! common="$(_wl_common_dir "$wt" 2>/dev/null)"; then
+      printf '%s\tKEEP\tunreadable-row\n' "$wt"; continue
+    fi
+    if [ -z "${ok_by[$common]+x}" ]; then
+      ok_by[$common]=1
+      heads_by[$common]="$(cd "$wt" && hpr_open_pr_heads 2>/dev/null </dev/null)" || { ok_by[$common]=0; heads_by[$common]=""; }
+    fi
+    out="$(_wl_audit_with "$wt" "$sid" "${ok_by[$common]}" "${heads_by[$common]}" </dev/null)"
+    v="$(sed -n 's/^verdict://p' <<<"$out")"; r="$(sed -n 's/^reason://p' <<<"$out")"
+    printf '%s\t%s\t%s\n' "$wt" "${v:-KEEP}" "${r:-audit-failed}"
+  done
+}
+
+# _wl_audit_with <wt> <sid> <open-set-ok 1|0> <open-pr-heads>
+_wl_audit_with() {
+  local wt="$1" sid="$2" ok="$3" heads="$4" common f branch sup status
+  git -C "$wt" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { _wl_verdict KEEP not-a-git-worktree; return 0; }
+  common="$(_wl_common_dir "$wt")" || { _wl_verdict KEEP not-a-git-worktree; return 0; }
   f="$common/sge-worktrees/$(_wl_key "$(_wl_abs "$wt")").entry"
   [ -f "$f" ] || { _wl_verdict KEEP not-registered-foreign; return 0; }
   [ "$(_wl_entry_field "$f" session)" = "$sid" ] || { _wl_verdict KEEP owned-by-other-session; return 0; }
@@ -299,10 +333,8 @@ wl_audit() {
 
   branch="$(git -C "$wt" symbolic-ref -q --short HEAD 2>/dev/null)" || { _wl_verdict VALUABLE detached-head; return 0; }
 
-  # Open-PR set: live and fail-closed. Any failure => KEEP, never "no PRs".
-  if ! heads="$(cd "$wt" && hpr_open_pr_heads 2>/dev/null)"; then
-    _wl_verdict KEEP open-pr-lookup-failed; return 0
-  fi
+  # The caller read the open-PR set (fail closed): a failed read is KEEP, never "no PRs".
+  [ "$ok" = 1 ] || { _wl_verdict KEEP open-pr-lookup-failed; return 0; }
   if printf '%s\n' "$heads" | awk -F'\t' -v b="$branch" '$2==b{f=1} END{exit !f}'; then
     _wl_verdict KEEP open-pr; return 0
   fi
@@ -322,9 +354,10 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
     unregister) wl_unregister "$@" ;;
     list)       wl_list "$@" ;;
     audit)      wl_audit "$@" ;;
+    audit-many) wl_audit_many "$@" ;;
     recovery-preview) wl_recovery_preview "$@" ;;
     recover)    wl_recover "$@" ;;
     recover-many) wl_recover_many "$@" ;;
-    *) echo "usage: worktree-lifecycle.sh register|unregister|list|audit|recovery-preview|recover|recover-many ..." >&2; exit 2 ;;
+    *) echo "usage: worktree-lifecycle.sh register|unregister|list|audit|audit-many|recovery-preview|recover|recover-many ..." >&2; exit 2 ;;
   esac
 fi
