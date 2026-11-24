@@ -69,7 +69,10 @@ ta_pr_load() {
   _TA_OPEN="$(hpr_open_pr_heads 2>/dev/null)" || { _TA_OPEN_OK=0; _TA_OPEN=""; }
   _TA_ALL_OK=0; _TA_ALL_TRUNC=0; _TA_ALL=""
   _TA_INDEX_MODE=0; _TA_INDEX_OK=0; _TA_INDEX='[]'
-  if [ "$_TA_HOST" = azdo ] && [ "$_TA_OPEN_OK" -eq 1 ] && [ "${SGE_TIDY_BULK_COMPLETED:-0}" = 1 ]; then
+  # Azure DevOps: ONE paginated completed-PR index per repo is the default
+  # (sge#3697); per-branch lookups cost one call per branch and fail closed at
+  # scale. SGE_TIDY_BULK_COMPLETED=0 opts back into them.
+  if [ "$_TA_HOST" = azdo ] && [ "$_TA_OPEN_OK" -eq 1 ] && [ "${SGE_TIDY_BULK_COMPLETED:-1}" = 1 ]; then
     _TA_INDEX_MODE=1
     if raw="$(hpr_completed_pr_index 2>/dev/null)" &&
        _TA_INDEX="$(printf '%s' "$raw" | jq -ce --arg base "${1:-main}" '
@@ -195,7 +198,7 @@ _ta_rows() {
   done < <(git worktree list --porcelain 2>/dev/null; echo)
 
   local a r k repo p b tip d u pr age o ab_a ab_b author nameok ref
-  tmp="$(wi_scan "$top")"
+  tmp="$(WI_OPEN_PR_OK="${_TA_OPEN_OK:-0}" WI_OPEN_PR_HEADS="${_TA_OPEN:-}" wi_scan "$top")"
   while IFS=$'\t' read -r a r k repo p b tip d u pr age o; do
     [ -n "$a" ] || continue
     nameok=yes; _ta_safe_name "$b" || nameok=no

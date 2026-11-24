@@ -155,11 +155,22 @@ hpr_completed_pr_heads() {
     *) return 0 ;;
   esac
 }
-RA="$(ta_audit_repo "$R")"
+# per-branch lookups are the opt-out path since sge#3697 (SGE_TIDY_BULK_COMPLETED=0)
+RA="$(SGE_TIDY_BULK_COMPLETED=0 ta_audit_repo "$R")"
 ra() { printf '%s' "$RA" | jq -r --arg n "$1" '.items[] | select(.kind=="remote-branch" and .name==$n) | .bucket + ":" + .sub_verdict' | tr -d '\r'; }
 check "azdo: completed PR with matching head -> A" "$(ra feat/squash)" "A:MERGED"
 check "azdo: no completed PR, net work -> B" "$(ra feat/none-live)" "B:NEEDS-DECISION:LIVE-UNMERGED"
 check "azdo: completed-PR lookup failure -> C keep" "$(ra feat/lookup-fails)" "C:KEEP:pr-lookup-failed"
+# the default (sge#3697): one completed-PR index per repo, same outcomes
+hpr_completed_pr_index() {
+  [ "${INDEX_FAILS:-0}" = 0 ] || return 1
+  jq -cn --arg tip "$(tipof feat/squash)" '[{number: 5, headRefName: "feat/squash", headRefOid: $tip, baseRefName: "main", closedAt: "2026-11-01T00:00:00Z"}]'
+}
+RA="$(ta_audit_repo "$R")"
+check "azdo default index: completed PR with matching head -> A" "$(ra feat/squash)" "A:MERGED"
+check "azdo default index: no completed PR, net work -> B" "$(ra feat/none-live)" "B:NEEDS-DECISION:LIVE-UNMERGED"
+RA="$(INDEX_FAILS=1 ta_audit_repo "$R")"
+check "azdo default index: index failure -> C keep" "$(ra feat/squash)" "C:KEEP:pr-lookup-failed"
 STUB_HOST=forgejo
 RG="$(ta_audit_repo "$R")"
 check "forgejo: no closed-PR lookup -> squash merge is not A on PR evidence" \
