@@ -41,7 +41,7 @@ fi
 
 A branch is ⬜ SAFE only when a **completed** PR exists, its recorded source head (`lastMergeSourceCommit`) equals the local branch tip, **and** the tree is clean. Everything else stays 🟥 NEEDS-DECISION: a tip that moved past the completed head, an abandoned or active PR (only `status=completed` counts; completion is never inferred from mergeability or a merge commit), no completed PR, a missing token or disallowed host, an API/auth error, malformed JSON, or a page-cap hit (possible truncation). `hpr_completed_pr_heads` exits non-zero on every uncertainty; an empty list with exit 0 is a confirmed zero and also leaves the branch NEEDS-DECISION. Never print or log the token.
 
-On any other non-GitHub host (Forgejo/Gitea) there is no merged-PR lookup yet, so skip this cross-check: the branch stays 🟥 NEEDS-DECISION on ahead-count (fail safe — never SAFE on an unverified merge).
+On an unknown host there is no verified merged-PR lookup, so skip this cross-check: the branch stays 🟥 NEEDS-DECISION on ahead-count (fail safe — never SAFE on an unverified merge).
 
 If a merged PR exists for the branch **and** the branch tip equals the PR's `headRefOid` (on Azure DevOps, the completed PR's `lastMergeSourceCommit`) (no commits added after the merge) **and** the working tree is clean → ⬜ SAFE (squash-merged). If the tip has moved past the merged PR's head, the extra commits are 🟥 NEEDS-DECISION.
 

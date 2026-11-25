@@ -23,7 +23,7 @@ directory, e.g. `scripts/`; the check finds `issue-read.sh` in the repo's
 `scripts/`, beside itself, or under `SGE_ISSUE_READ`):
 
 ```bash
-cp "$PLUGIN"/scripts/{issue-read,with-repo-cwd,sge-env-compat,azdo-adapter,jira-adapter,forgejo-adapter}.sh scripts/
+cp "$PLUGIN"/scripts/{issue-read,with-repo-cwd,sge-env-compat,azdo-adapter,jira-adapter}.sh scripts/
 ```
 
 The check needs `jq`. Azure DevOps repos use

@@ -204,7 +204,7 @@ copying anything back by hand.
   timeout and forced termination is in `docs/copilot-cli-install.md`.
   Interactive exit and `/clear` were not observed.
 - **Needs `jq`, `git` and network.** The open-PR lookup needs `gh` auth (or the
-  Forgejo or Azure DevOps adapter). Offline runs produce `keep`, not `delete`.
+  Azure DevOps adapter). Offline runs produce `keep`, not `delete`.
 
 ## The confirmation gate
 

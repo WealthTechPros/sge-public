@@ -73,24 +73,21 @@ TARGET="${REPO_ARG:-$(git remote get-url origin 2>/dev/null)}"
 cd "$("$WRC" resolve "$TARGET")" || exit 1   # fail loud — NEVER fall back to the ambient cwd
 
 # Host detection: issue list/view ops route through issue-read.sh ($IR) which
-# selects `gh` for GitHub and the Forgejo/Gitea adapter for non-GitHub hosts.
+# selects the configured issue tracker for the target repository.
 HOST_KIND="$("$WRC" host 2>/dev/null || echo 'unknown')"
 
 # Routine-aware auth: in a Claude Code Routine sandbox the GitHub proxy injects
 # the real credential and GH_TOKEN is the placeholder `proxy-injected`; a local
 # `gh auth status` is not required. Accept proxy-injected auth; otherwise the
 # operator must be locally authenticated. See docs/routines-environment.md.
-# For non-GitHub hosts (Forgejo/Gitea), gh auth is not applicable — auth is via
-# FORGEJO_API_TOKEN or GITEA_TOKEN, checked by forgejo-adapter.sh on first call.
 if [ "$HOST_KIND" = "github" ]; then
   [ "$GH_TOKEN" = "proxy-injected" ] || [ "$GITHUB_TOKEN" = "proxy-injected" ] || gh auth status >/dev/null || exit 1
 fi
-# unknown host? references/forgejo-unknown-host.md
-[ "$HOST_KIND" = "unknown" ] && echo "WARNING: host unknown — see references/forgejo-unknown-host.md" >&2
+# issue-read validates the selected backend before querying it.
 echo "repo context: $(git remote get-url origin) ($(pwd)) host: ${HOST_KIND}"
 ```
 
-`IR` seam, Forgejo/Gitea + `SGE_FORGEJO_HOSTS`, origin check, artefact globs: [`references/repo-context.md`](references/repo-context.md).
+Issue tracker selection, origin check and artefact globs: [`references/repo-context.md`](references/repo-context.md).
 
 This skill is **read-only** unless `--setup` is given. It never edits issue bodies, never comments, never pushes.
 
@@ -203,13 +200,13 @@ A candidate that is `in_flight` is **claimed** — exclude it from the ready poo
 
 ## Phase 2 — Dependency gate
 
-Resolve each candidate's dependencies via the port (`"$IR" dependencies <number>`) and let an **open** dependency block it. The port is backend-agnostic: on GitHub/Forgejo it parses the issue body for `Depends on #123`, `Blocked by #123`, `Requires #123`, `DependsOn: #123` (the [dependency metadata grammar](../decompose-issue/SKILL.md#dependency-metadata-grammar)); on Jira it reads structural `is blocked by` issue links, resolving state via status **category** (DR2 — never a localised status name). Cross-repo refs (`org/repo#N`) are recognised and emitted as `unknown` (blocking), since they cannot be resolved repo-locally (#1732). **Limitation:** the port resolves only **direct** dependencies — no transitive walk (A → B → C) exists; `--analyze` / `--blocking` use the same direct-dependency resolution.
+Resolve each candidate's dependencies via the port (`"$IR" dependencies <number>`) and let an **open** dependency block it. The port is backend-agnostic: on GitHub it parses the issue body for `Depends on #123`, `Blocked by #123`, `Requires #123`, `DependsOn: #123` (the [dependency metadata grammar](../decompose-issue/SKILL.md#dependency-metadata-grammar)); on Jira it reads structural `is blocked by` issue links, resolving state via status **category** (DR2 — never a localised status name). Cross-repo refs (`org/repo#N`) are recognised and emitted as `unknown` (blocking), since they cannot be resolved repo-locally (#1732). **Limitation:** the port resolves only **direct** dependencies — no transitive walk (A → B → C) exists; `--analyze` / `--blocking` use the same direct-dependency resolution.
 
 ```bash
 is_blocked() {  # true if any dependency is open OR indeterminate
   # $IR dependencies routes through the ALM-adapter port: Jira uses structural
   # "is blocked by" issue links resolved via status CATEGORY (DR2, SPEC-105 §2.3);
-  # GitHub/Forgejo parses Depends on #N / Blocked by #N / Requires #N / DependsOn:
+  # GitHub parses Depends on #N / Blocked by #N / Requires #N / DependsOn:
   # from the issue body and resolves each dep's state.
   # Output: id\topen|closed|unknown.
   #

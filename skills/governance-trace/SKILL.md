@@ -61,7 +61,7 @@ A fork inherits the parent's full context, including its original directive (e.g
 
 **Issue context — fetch as your next action, after the target-repo resolution above:**
 
-> Routed via `scripts/issue-read.sh` (Forgejo/Gitea-safe, ADR-0010) as a **real Bash tool call**, the issue number parsed from your own invocation text and passed as a safely-quoted argument — never a preload injection line. Why: [`references/issue-fetch-rationale.md`](references/issue-fetch-rationale.md).
+> Routed via `scripts/issue-read.sh` as a **real Bash tool call**, the issue number parsed from your own invocation text and passed as a safely-quoted argument — never a preload injection line. Why: [`references/issue-fetch-rationale.md`](references/issue-fetch-rationale.md).
 > ```bash
 > bash "$SGE_ROOT/scripts/issue-read.sh" view "<ISSUE-NUMBER>" \
 >   || echo "NO_ISSUE_LOADED — pass an issue number"

@@ -136,7 +136,7 @@ result under `"safetyGate"` (the block in the Phase 0 state JSON) before writing
 Phase 0 state.
 
 > **`--dry-run`:** the gate still runs in full; a failing dry-run prints the block and exits.
-> **Forgejo?** [host-routing](references/host-routing.md) · **Jira?** [alm-routing](references/alm-routing.md)
+> **Jira?** [alm-routing](references/alm-routing.md)
 
 ## Pre-Flight (MANDATORY)
 

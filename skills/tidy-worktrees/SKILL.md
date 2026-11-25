@@ -54,7 +54,7 @@ Unlocking outside Phase 2b, deleting without one confirmed plan, merging or forc
 
 To park worktrees in bulk, close agent sessions and run `skills/tidy-worktrees/reclaim.sh` from a plain terminal. [Recovery runbook](../../docs/worktree-reclaim-runbook.md).
 
-**Route by exposed capabilities, not client or repository host.** With `Agent` and a structured question tool, run Phases 1-5; otherwise use the [linear procedure](references/copilot-procedure.md). Same scripts and guards on GitHub, Azure DevOps and Forgejo.
+**Route by exposed capabilities, not client or repository host.** With `Agent` and a structured question tool, run Phases 1-5; otherwise use the [linear procedure](references/copilot-procedure.md). Same scripts and guards on GitHub and Azure DevOps.
 
 ## Phase 1 — Inventory and open-PR set (read-only)
 

@@ -124,10 +124,6 @@ ta_pr_record() {
         printf '%s\n' "$out" | sort -t$'\t' -k3 | tail -1 | awk -F'\t' '{print "merged\t"$1"\t"$2}'
       else printf 'none\t-\t-\n'; fi
       return 0 ;;
-    forgejo)
-      # The Forgejo adapter has no closed/merged-PR lookup: only the open set is
-      # known, so a branch reads "none" and can only reach A/D on git evidence.
-      printf 'none\t-\t-\n'; return 0 ;;
     *) return 1 ;;
   esac
 }

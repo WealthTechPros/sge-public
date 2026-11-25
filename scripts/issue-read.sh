@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
 # issue-read.sh — host-aware read-only issue operations (ADR-0010, #1237).
-# Slice 2 of the #1146 non-GitHub-host epic: route read-only issue ops through
-# the forgejo-adapter seam (#1236) so /sge:sge-align and /sge:available-issues
-# work against Forgejo/Gitea-hosted repos.
 #
 # Two independent routing dimensions are resolved here:
 #
@@ -15,10 +12,7 @@
 #      normalising the Jira JSON to the SAME gh-compatible output shape. An
 #      UNRECOGNISED backend FAILS LOUD (SPEC-105 DR1) and issues NO gh call and
 #      NO Jira REST call — never a silent GitHub fallback against the wrong tracker.
-#   2. Git host — only when the ALM backend is `github`: route through
-#      scripts/forgejo-adapter.sh when the git host is forgejo/gitea (as
-#      classified by scripts/with-repo-cwd.sh host), else delegate to `gh`
-#      unchanged (byte-identical to before this change).
+#   2. Git host — on the GitHub tracker backend, use gh only for a GitHub origin.
 #
 # This is the ONLY seam for read-only issue list/view operations; all mutating
 # ops (create, close, edit, comment) remain in the calling skill (the Jira
@@ -27,12 +21,11 @@
 # Usage:
 #   issue-read.sh list  [--state open|closed|all] [--label <name>] [--limit N]
 #       JSON array: [{number,title,body,labels:[{name}],assignees:[{login}],state}]
-#       `state` is OPEN|CLOSED (gh-compatible) for both GitHub and Forgejo backends.
-#       Forgejo: paginated automatically; `--limit 0` means "all" (no cap).
+#       `state` is OPEN|CLOSED (gh-compatible).
 #       GitHub: delegates to `gh issue list --json number,title,body,labels,assignees,state`.
 #   issue-read.sh view  <number>
 #       Same JSON object shape for a single issue.
-#       `state` is OPEN|CLOSED for both backends.
+#       `state` is OPEN|CLOSED.
 #   issue-read.sh comments  <number>
 #       JSON array of the item's comments, oldest first: [{body, createdAt}].
 #       NOTHING else: the comment author (login, type, association, app,
@@ -40,7 +33,6 @@
 #       decide anything from who wrote a comment (sge#3254, SPEC-128).
 #       GitHub: `gh api --paginate`. Azure DevOps: azdo-adapter item-comments
 #       (deleted comments skipped). Jira: jira-adapter item-comments.
-#       Forgejo/Gitea has no comments route: it fails loud, never an empty list.
 #   issue-read.sh dependencies  <number>
 #       Print one line per dependency: `<id>\t<open|closed>`.
 #       GitHub: parses Depends on #N / Blocked by #N / Requires #N / DependsOn: #N
@@ -52,7 +44,6 @@
 #       GitHub: `gh issue list --search "<text> in:title"`.
 #       Jira: JQL `summary ~ "<text>"` scoped to SGE_JIRA_PROJECT, with
 #       injection-safe escaping so the text cannot break out of the JQL string.
-#       Forgejo: Gitea search API with `q=<text>&type=issues`.
 #       `--state` defaults to "open"; `--limit` defaults to 0 (no cap).
 #   issue-read.sh dispatch-label [--autonomous]
 #       Print the repo-configurable dispatch-label name on stdout.
@@ -76,8 +67,7 @@
 # SPEC-057: always run from the target repo's checkout cwd — shell state does
 # NOT persist across agent tool calls, so re-enter the resolved cwd at the top
 # of every shell call. This script classifies the host from the current cwd's
-# `origin` remote; a wrong cwd means wrong data (the gh/forgejo-adapter will
-# fail loud). Never falls back to the ambient cwd.
+# origin remote. Always run from the resolved checkout.
 #
 # ALM (issue-tracker) backend — SPEC-105:
 #   SGE_ALM_BACKEND   unset/empty|github (default) | jira. `jira` routes reads
@@ -98,10 +88,6 @@
 #
 # Auth:
 #   GitHub:        `gh auth` (unchanged, exactly as before).
-#   Forgejo/Gitea: FORGEJO_API_TOKEN (preferred) or GITEA_TOKEN. The host must
-#                  be explicitly trusted via SGE_FORGEJO_HOSTS (';'-separated)
-#                  or SGE_FORGEJO_DEFAULT_HOST. See scripts/forgejo-adapter.sh
-#                  and docs/decisions/0010-non-github-host-adapter.md (ADR-0010).
 # END_USAGE
 
 set -euo pipefail
@@ -111,21 +97,11 @@ set -euo pipefail
 sge_env_compat DISPATCH_LABEL JIRA_PROJECT JIRA_BASE_URL JIRA_HOSTS JIRA_BEARER JIRA_EMAIL JIRA_API_TOKEN JIRA_CLAIM_TRANSITION_ID JIRA_RELEASE_TRANSITION_ID JIRA_CLAIM_STATUS JIRA_ISSUETYPE JIRA_CLOSE_TRANSITION_ID
 
 _IR_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-_FA="${_IR_SCRIPT_DIR}/forgejo-adapter.sh"
 _JA="${_IR_SCRIPT_DIR}/jira-adapter.sh"
 _AA="${_IR_SCRIPT_DIR}/azdo-adapter.sh"
 _WRC="${_IR_SCRIPT_DIR}/with-repo-cwd.sh"
 
 _ir_err() { printf 'issue-read: error: %s\n' "$*" >&2; }
-
-# mktemp helper for _ir_forgejo_list's per-page accumulation buffers.
-# Mirrors the _ja_mktemp / _aa_mktemp convention (jira-adapter.sh,
-# azdo-adapter.sh): fail loud when a temp file cannot be created, never
-# silently proceed without a buffer.
-_ir_mktemp() {
-  mktemp "${TMPDIR:-/tmp}/issue-read.XXXXXX" 2>/dev/null \
-    || { _ir_err "mktemp failed — cannot buffer a Forgejo issue-list page"; return 1; }
-}
 
 # Resolve the declared ALM (issue-tracker) backend at the resolver seam
 # (SPEC-105). Prints `github` | `jira` on stdout; propagates the resolver's
@@ -142,119 +118,15 @@ _ir_usage() {
   exit 2
 }
 
-# Classify the current checkout's git host.
-# Returns: github | forgejo | unknown
-_ir_host() {
-  "$_WRC" host 2>/dev/null | tr -d '\n' || printf 'unknown'
-}
-
-# Print the current checkout's origin URL, or fail loud.
-_ir_origin() {
-  git remote get-url origin 2>/dev/null \
-    || { _ir_err "no 'origin' remote in cwd '$(pwd)'"; exit 1; }
-}
-
-# jq expression that maps a single Forgejo/Gitea issue JSON object to the
-# gh-compatible output shape used by `gh issue list --json ...` and
-# `gh issue view --json ...`.  `state` is normalised to OPEN|CLOSED so both
-# backends look the same to callers that compare `.state` to "OPEN".
-_IR_JQ_NORMALISE='{
-  number: .number,
-  title: (.title // ""),
-  body: (.body // ""),
-  labels: [.labels[]? | {name: .name}],
-  assignees: [.assignees[]? | {login: .login}],
-  state: (.state // "open" | ascii_upcase)
-}'
-
-# Fetch and normalise one page of Forgejo issues.
-# Prints a JSON array on stdout.
-_ir_forgejo_page() { # <origin> <qs>
-  bash "$_FA" list-issues-filtered "$1" "$2" \
-    | jq "[.[] | ${_IR_JQ_NORMALISE}]"
-}
-
-# Paginate Forgejo issues, accumulating into a single JSON array.
-# Stops when: the page is short (last page), OR collected >= limit (when > 0).
-#
-# Each page is buffered to its OWN temp file rather than folded into a shell
-# variable via `jq --argjson` on every iteration. `--argjson` passes its value
-# as a command-line argument, so accumulating the WHOLE running array through
-# it every loop makes the argv grow with every page — confirmed to crash with
-# `jq: Argument list too long` on 36+ issues (Windows/Git-Bash ARG_MAX).
-# Slurping the per-page temp files with `jq -s` at the end reads them via
-# stdin/file, which has no such argv ceiling.
-_ir_forgejo_list() { # <origin> <state> <label> <limit>
-  local origin="$1" state="$2" label="$3" limit="$4"
-  local page=1 page_size=50 collected=0
-  local page_files=() result rc=0
-
-  # Cleaned up on every exit path (success, early break, or a failure below) —
-  # never leaves page buffers behind, and the trap is cleared once handled so
-  # it cannot refire on an unrelated outer return.
-  _ir_forgejo_list_cleanup() {
-    [ "${#page_files[@]}" -eq 0 ] || rm -f "${page_files[@]}"
-    trap - INT TERM
-  }
-  trap '_ir_forgejo_list_cleanup' INT TERM
-
-  while true; do
-    local qs="state=${state}&type=issues&limit=${page_size}&page=${page}"
-    [ -n "$label" ] && qs="${qs}&labels=${label}"
-
-    local chunk
-    chunk="$(_ir_forgejo_page "$origin" "$qs")" || { rc=1; break; }
-
-    local chunk_len
-    chunk_len="$(printf '%s' "$chunk" | jq 'length')" || { rc=1; break; }
-    [ "$chunk_len" -eq 0 ] && break
-
-    local pf
-    pf="$(_ir_mktemp)" || { rc=1; break; }
-    printf '%s' "$chunk" > "$pf"
-    page_files+=("$pf")
-
-    collected=$((collected + chunk_len))
-    # Stop when we have enough.
-    [ "$limit" -gt 0 ] && [ "$collected" -ge "$limit" ] && break
-    # Stop when the page was short (no more pages).
-    [ "$chunk_len" -lt "$page_size" ] && break
-    page=$((page + 1))
-  done
-
-  if [ "$rc" -eq 0 ]; then
-    if [ "${#page_files[@]}" -eq 0 ]; then
-      result='[]'
-    else
-      # Slurp every page file and flatten (each file holds a JSON array, not a
-      # single object) into one array — file-based input, no argv growth.
-      result="$(jq -s '[.[][]]' "${page_files[@]}")" || rc=1
-    fi
-  fi
-
-  _ir_forgejo_list_cleanup
-
-  [ "$rc" -eq 0 ] || return 1
-
-  # Trim to limit when requested. --argjson keeps the caller value out of the
-  # jq program text (limit is the one arg that reaches an interpreter); the
-  # already-slurped, size-bounded result is safe to pass this way.
-  if [ "$limit" -gt 0 ]; then
-    printf '%s' "$result" | jq --argjson n "$limit" '.[0:$n]'
-  else
-    printf '%s' "$result"
-  fi
-}
-
-# Fetch and normalise a single Forgejo issue by index.
-_ir_forgejo_view() { # <origin> <number>
-  bash "$_FA" view-issue "$1" "$2" \
-    | jq "${_IR_JQ_NORMALISE}"
+# Refuse an unsupported git origin before any GitHub API call.
+_ir_require_github() {
+  local host
+  host="$("$_WRC" host)" || return 1
+  [ "$host" = github ] || { _ir_err "host kind '${host}' has no issue-read adapter"; return 1; }
 }
 
 # jq expression that maps a single Jira issue object (the shape jira-adapter.sh
-# view-item / list-dispatchable returns) to the SAME gh-compatible output shape
-# the forgejo path produces, so callers stay backend-agnostic:
+# view-item / list-dispatchable returns) to the gh-compatible output shape:
 #   number   — the Jira issueKey string ("PROJ-123"), the item's identity on Jira
 #   labels   — Jira labels are bare strings; lift each to {name: <string>}
 #   assignee — Jira Cloud carries displayName/accountId, Server carries name;
@@ -316,7 +188,7 @@ _ir_jira_dependencies() { # <issueKey>
 }
 
 # ── Azure Boards (SPEC-110 S2, issue #2985) ────────────────────────────────
-# The same gh-compatible shape as the Jira/Forgejo paths. `number` is the
+# The same gh-compatible shape as the Jira path. `number` is the
 # integer work-item id; labels are the System.Tags tokens; `state` is derived
 # from the state CATEGORY when present (DR2), else a closed-name heuristic.
 _IR_JQ_AZDO_ITEM='{
@@ -454,52 +326,6 @@ _ir_github_dependencies() { # <number>
   done
 }
 
-# P7 item-dependencies via the Forgejo backend. Same body-text parsing as
-# GitHub (including cross-repo ref detection, #1732), but state resolution
-# uses issue-read view (which routes through forgejo-adapter).
-# Fails closed on an indeterminate lookup exactly as the GitHub backend does
-# (issue #1726) — see that function's header for the rationale.
-_ir_forgejo_dependencies() { # <number>
-  local body dep_nums n state
-  command -v jq >/dev/null 2>&1 || { _ir_err "jq not found — required for dependency resolution"; exit 1; }
-  local origin
-  origin="$(_ir_origin)" || exit 1
-  # NB: the pipeline's exit status is jq's, so check the fetch separately —
-  # `_ir_forgejo_view ... | jq` would mask a failed fetch behind a successful jq.
-  local raw
-  if ! raw="$(_ir_forgejo_view "$origin" "$1")"; then
-    _ir_err "dependencies: could not read issue #$1 body — reporting UNKNOWN (fail-closed, #1726)"
-    printf '%s\tunknown\n' "$1"
-    return 3
-  fi
-  body="$(printf '%s' "$raw" | jq -r '.body // ""')" || body=""
-  # Cross-repo refs: emit as unknown (fail-closed, #1732).
-  local dep_refs xref
-  dep_refs="$(printf '%s' "$body" \
-    | grep -ioE '(depends[ -]?on|blocked[ -]?by|requires)[[:space:]:]+[A-Za-z0-9._-]+/[A-Za-z0-9._-]+#[0-9]+' \
-    | grep -oE '[A-Za-z0-9._-]+/[A-Za-z0-9._-]+#[0-9]+' | sort -u)" || true
-  for xref in $dep_refs; do
-    _ir_err "dependencies: cross-repo ref '$xref' cannot be resolved repo-locally — reporting UNKNOWN (fail-closed, #1732)"
-    printf '%s\tunknown\n' "$xref"
-  done
-  dep_nums="$(printf '%s' "$body" \
-    | grep -ioE '(depends[ -]?on|blocked[ -]?by|requires)[[:space:]:]+#[0-9]+' \
-    | grep -oE '[0-9]+' | sort -un)" || true
-  for n in $dep_nums; do
-    if ! raw="$(_ir_forgejo_view "$origin" "$n")"; then
-      _ir_err "dependencies: could not resolve dependency #$n — reporting UNKNOWN (fail-closed, #1726)"
-      printf '%s\tunknown\n' "$n"
-      continue
-    fi
-    state="$(printf '%s' "$raw" | jq -r '.state // ""')" || state=""
-    case "$state" in
-      CLOSED|closed) printf '%s\tclosed\n' "$n" ;;
-      OPEN|open)     printf '%s\topen\n' "$n" ;;
-      *)             printf '%s\tunknown\n' "$n" ;;
-    esac
-  done
-}
-
 # P10 `search` via the Jira backend, normalised to the gh array shape. (Naming:
 # the PORT/seam operation is `search`; `search-items` is the jira-adapter's own
 # verb — the same two-level split every other operation avoids by using one name.)
@@ -523,46 +349,13 @@ _ir_jira_search() { # <text> <state> <limit>
   fi
 }
 
-# P10 search via the Forgejo backend. Gitea's issue search API accepts a `q`
-# parameter for free-text matching. State and limit forwarded.
-_ir_forgejo_search() { # <origin> <text> <state> <limit>
-  local origin="$1" text="$2" state="$3" limit="$4"
-  local page_size=50 qs
-  # URL-encode the query text via jq (safe) or percent-encode fallback.
-  # The fallback encodes everything outside the unreserved set byte-by-byte
-  # (same approach as jira-adapter.sh _ja_urlencode) so characters like &, =,
-  # +, # cannot corrupt the query string.
-  local encoded
-  if command -v jq >/dev/null 2>&1; then
-    encoded="$(printf '%s' "$text" | jq -sRr '@uri')"
-  else
-    local i c out=''
-    for (( i=0; i<${#text}; i++ )); do
-      c="${text:$i:1}"
-      case "$c" in
-        [A-Za-z0-9.~_-]) out="$out$c" ;;
-        *) out="$out$(printf '%%%02X' "'$c")" ;;
-      esac
-    done
-    encoded="$out"
-  fi
-  qs="state=${state}&type=issues&limit=${page_size}&q=${encoded}"
-  local chunk
-  chunk="$(_ir_forgejo_page "$origin" "$qs")"
-  if [ "$limit" -gt 0 ]; then
-    printf '%s' "$chunk" | jq --argjson n "$limit" '.[0:$n]'
-  else
-    printf '%s' "$chunk"
-  fi
-}
-
 # P9 dispatch-label-config via the Jira backend. Routes through jira-adapter.sh
 # which reads SGE_DISPATCH_LABEL (default sge-ready, DP2).
 _ir_jira_dispatch_label() {
   bash "$_JA" dispatch-label-config
 }
 
-# P9 dispatch-label-config via the GitHub/Forgejo backend. Reads the
+# P9 dispatch-label-config via the GitHub backend. Reads the
 # `dispatch-label:` key from CLAUDE.md in the current checkout (the same
 # convention available-issues uses). Validates the extracted label against
 # the same character class the Jira path enforces ([A-Za-z0-9._-]+).
@@ -622,12 +415,12 @@ _ir_github_dispatch_label() {
 }
 
 # The fleet default dispatch label (sge#3243). Jira and Azure DevOps already
-# default to it inside their adapters (SGE_DISPATCH_LABEL, DP2); GitHub/Forgejo
+# default to it inside their adapters (SGE_DISPATCH_LABEL, DP2); GitHub
 # defaults to it only on the --autonomous path.
 _IR_DEFAULT_DISPATCH_LABEL="sge-ready"
 
 # Per-ALM dispatch-label resolution (P9). Prints the declared label, or empty
-# when a GitHub/Forgejo repo declares none; a malformed value is a hard error.
+# when a GitHub repo declares none; a malformed value is a hard error.
 _ir_dispatch_label() {
   local alm
   alm="$(_ir_alm)" || exit 1
@@ -644,18 +437,8 @@ _ir_dispatch_label() {
 
 # When GH_REPO names a target repo, resolve it to a local checkout and cd
 # there before any host/ALM classification runs (issue #2207, PR #2266
-# review). `_ir_host`/`_ir_origin`/`_ir_alm` all classify from the CURRENT
-# CWD's git origin — setting GH_REPO alone (the prior convention, copied from
-# `gh`'s own --repo handling) does nothing for the Forgejo/Jira paths, and a
-# cwd-mismatched GH_REPO on the GitHub path silently reads the WRONG
-# same-numbered issue from cwd's repo instead of GH_REPO's. `with-repo-cwd.sh
-# resolve` already fast-paths "cwd already matches" as its own step 0, so this
-# is a no-op whenever cwd already matches GH_REPO (the common case); it only
-# changes behaviour when they diverge, which was previously either silently
-# wrong (GitHub path) or a hard, hard-to-diagnose adapter error (Forgejo
-# path). Never silently continues in the wrong cwd: an unresolvable GH_REPO
-# fails loud via _wrc_resolve's own fail-closed error (SPEC-057), not a
-# fall-through.
+# review). This allows host and tracker commands to operate in the intended
+# checkout and fails closed if the target cannot be resolved.
 _ir_cd_to_gh_repo() {
   [ -n "${GH_REPO:-}" ] || return 0
   local target_dir
@@ -689,7 +472,7 @@ _ir_main() {
       done
       # ALM (tracker) backend FIRST — fail loud on an unrecognised backend (DR1)
       # before any gh/Jira call; `jira` routes P1 list-dispatchable through the
-      # Jira adapter, `github` falls through to the unchanged git-host switch.
+      # Jira adapter, and the GitHub path checks the checkout origin before calling gh.
       local alm
       alm="$(_ir_alm)" || exit 1
       if [ "$alm" = "jira" ]; then
@@ -699,24 +482,11 @@ _ir_main() {
       elif [ "$alm" != "github" ]; then
         _ir_unknown_alm "$alm"
       else
-        local host
-        host="$(_ir_host)"
-        case "$host" in
-          github)
-            local gh_args=(--state "$state" --json "number,title,body,labels,assignees,state")
-            [ -n "$label" ]  && gh_args+=(--label "$label")
-            [ "$limit" -gt 0 ] && gh_args+=(--limit "$limit")
-            gh issue list "${gh_args[@]}"
-            ;;
-          forgejo)
-            _ir_forgejo_list "$(_ir_origin)" "$state" "$label" "$limit"
-            ;;
-          *)
-            _ir_err "host kind '${host}' has no issue-read adapter — only github and forgejo are supported." \
-                    "Add the host to SGE_FORGEJO_HOSTS (';'-separated) or SGE_FORGEJO_DEFAULT_HOST."
-            exit 1
-            ;;
-        esac
+        _ir_require_github || exit 1
+        local gh_args=(--state "$state" --json "number,title,body,labels,assignees,state")
+        [ -n "$label" ]  && gh_args+=(--label "$label")
+        [ "$limit" -gt 0 ] && gh_args+=(--limit "$limit")
+        gh issue list "${gh_args[@]}"
       fi
       ;;
 
@@ -739,20 +509,8 @@ _ir_main() {
         case "$n" in
           *[!0-9]*) _ir_err "view: issue number must be a positive integer, got '${n}'"; exit 2 ;;
         esac
-        local host
-        host="$(_ir_host)"
-        case "$host" in
-          github)
-            gh issue view "$n" --json "number,title,body,labels,assignees,state"
-            ;;
-          forgejo)
-            _ir_forgejo_view "$(_ir_origin)" "$n"
-            ;;
-          *)
-            _ir_err "host kind '${host}' has no issue-read adapter"
-            exit 1
-            ;;
-        esac
+        _ir_require_github || exit 1
+        gh issue view "$n" --json "number,title,body,labels,assignees,state"
       fi
       ;;
 
@@ -771,13 +529,8 @@ _ir_main() {
         case "$n" in
           *[!0-9]*) _ir_err "comments: issue number must be a positive integer, got '${n}'"; exit 2 ;;
         esac
-        local host
-        host="$(_ir_host)"
-        case "$host" in
-          github) _ir_github_comments "$n" ;;
-          forgejo) _ir_err "comments: the Forgejo/Gitea host has no comments route in this seam — refusing rather than returning an empty list"; exit 1 ;;
-          *) _ir_err "host kind '${host}' has no issue-read adapter"; exit 1 ;;
-        esac
+        _ir_require_github || exit 1
+        _ir_github_comments "$n"
       fi
       ;;
 
@@ -796,13 +549,8 @@ _ir_main() {
         case "$n" in
           *[!0-9]*) _ir_err "dependencies: issue number must be a positive integer, got '${n}'"; exit 2 ;;
         esac
-        local host
-        host="$(_ir_host)"
-        case "$host" in
-          github)  _ir_github_dependencies "$n" ;;
-          forgejo) _ir_forgejo_dependencies "$n" ;;
-          *)       _ir_err "host kind '${host}' has no issue-read adapter"; exit 1 ;;
-        esac
+        _ir_require_github || exit 1
+        _ir_github_dependencies "$n"
       fi
       ;;
 
@@ -837,23 +585,11 @@ _ir_main() {
       elif [ "$alm" != "github" ]; then
         _ir_unknown_alm "$alm"
       else
-        local host
-        host="$(_ir_host)"
-        case "$host" in
-          github)
-            local gh_args=(--search "$search_text in:title" --state "$state"
-                           --json "number,title,body,labels,assignees,state")
-            [ "$limit" -gt 0 ] && gh_args+=(--limit "$limit")
-            gh issue list "${gh_args[@]}"
-            ;;
-          forgejo)
-            _ir_forgejo_search "$(_ir_origin)" "$search_text" "$state" "$limit"
-            ;;
-          *)
-            _ir_err "host kind '${host}' has no issue-read adapter"
-            exit 1
-            ;;
-        esac
+        _ir_require_github || exit 1
+        local gh_args=(--search "$search_text in:title" --state "$state"
+                       --json "number,title,body,labels,assignees,state")
+        [ "$limit" -gt 0 ] && gh_args+=(--limit "$limit")
+        gh issue list "${gh_args[@]}"
       fi
       ;;
 
@@ -866,6 +602,7 @@ _ir_main() {
       local n="${2:-}"
       [ -n "$n" ] || _ir_usage 'admitted needs <number>'
       [ "$(_ir_alm)" = "github" ] || { _ir_err "admitted: no admission marker for this ALM — refusing (fail closed)"; exit 1; }
+      _ir_require_github || exit 1
       # The marker and label events must be for the dispatch label THIS repo
       # selects on now (declared, else the fleet default), so a marker for an old
       # label cannot admit after the label changes (sge#3352). An empty or

@@ -31,7 +31,7 @@ Stashes are always C `NEEDS-DECISION:STASH` and never carry commands. The branch
 
 ## Host routing
 
-GitHub: one bulk `gh pr list --state all` (cap `SGE_AUDIT_PR_LIMIT`, default 2000). Records found in a truncated list are used; absence from a truncated list is a lookup failure (keep). Azure DevOps: `hpr_completed_pr_heads <branch>` per branch (needs `SGE_AZDO_TOKEN`). Forgejo/Gitea: only the open set exists, so a branch reaches A or D only on git evidence. Unknown host: everything is C.
+GitHub: one bulk `gh pr list --state all` (cap `SGE_AUDIT_PR_LIMIT`, default 2000). Records found in a truncated list are used; absence from a truncated list is a lookup failure (keep). Azure DevOps: `hpr_completed_pr_heads <branch>` per branch (needs `SGE_AZDO_TOKEN`). Unknown host: everything is C.
 
 ## Commands are literal
 

@@ -172,7 +172,7 @@ source "$SGE_ROOT/skills/pr-monitor/monitor-lib.sh"
 
 ---
 
-> **Non-GitHub hosts (Forgejo/Gitea):** when `origin` is a Forgejo/Gitea instance, `source "$SGE_ROOT/skills/lib/forgejo-pr-mutate.sh"` (sources `host-pr-read.sh` too) and replace `gh pr list/view/checks` reads with `hpr_list`/`hpr_view`/`hpr_checks`, and rerun/merge/label writes with `fpr_rerun`/`fpr_merge_ready`+`fpr_merge`/`fpr_add_label`/`fpr_remove_label` (#2582, not live-validated). Auth fails loud; host must be on the adapter allow-list (ADR-0010). Routing table, degrade rules, auth detail: [`host-adapter-routing.md`](references/host-adapter-routing.md).
+> **Azure Repos.** Read the [host routing guide](references/host-adapter-routing.md) before checking PR state or changing a PR. Stop on unsupported hosts or operations.
 
 ## Per-PR classification (each cycle)
 

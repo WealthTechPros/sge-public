@@ -288,10 +288,7 @@ chronic false-positive). Flag a drop early, mid-morning, not after a lost aftern
 > both need cwd, not just `GH_REPO`. See [`gh-repo`](../gh-repo/SKILL.md).
 
 > **Host-routed (sge-public#47).** Detect the host first — `gh` only talks to
-> GitHub. On a Forgejo/Gitea remote there is no merged-PR search yet, so report
-> `THROUGHPUT_SKIP` with the reason (plus the open-PR backlog from the adapter's
-> `list-prs`, via `hpr_open_pr_heads`) — **never** a silent `0 merged`, which
-> would fire a false `THROUGHPUT_WARN` (or hide a real collapse). The same
+> GitHub. On other hosts report `THROUGHPUT_SKIP` and include the open-PR backlog when the host adapter can read it. The same rule
 > applies on GitHub when `gh` fails: skip, don't count zero.
 
 ```bash
@@ -331,32 +328,30 @@ fi
 
 ---
 
-## Component C2: CI portability scan (Forgejo sge-public#48, Azure Pipelines sge#3030)
+## Component C2: CI portability scan (Azure Pipelines sge#3030)
 
-On a Forgejo/Gitea host (`.forgejo/workflows/`) or an Azure DevOps host
+On an Azure DevOps host
 (`azure-pipelines.yml`, `.azure-pipelines/**`; `hpr_host_kind` = `azdo`), warn on
 steps that are GitHub-only and fail silently or noisily on that CI, so the
 per-PR noise is not misread as a regression:
 
-- `uses: actions/github-script` (Forgejo), `uses: actions/*` and `GitHub*@N`
+- `uses: actions/*` and `GitHub*@N`
   tasks such as `GitHubRelease@1` (Azure Pipelines): no equivalent on that host.
 - bare `gh ` invocations: the GitHub CLI is not in stock runner/agent images
-  and cannot talk to a Forgejo or Azure DevOps API.
+  and cannot talk to the Azure DevOps API.
 
 ```bash
 # the `gh` executable in command position, any subcommand (auth, secret, ...)
 GH='(^|[[:space:];|&(])gh[[:space:]]+[a-z]'
 FILES=""
 case "$(hpr_host_kind)" in
-  forgejo) WHERE="a Forgejo runner"; PAT="uses:[[:space:]]*actions/github-script|$GH"
-           FILES="$(find .forgejo/workflows -name '*.y*ml' -type f 2>/dev/null)" ;;
   azdo)    WHERE="an Azure Pipelines agent"; PAT="uses:[[:space:]]*actions/|task:[[:space:]]*GitHub[A-Za-z]*@|$GH"
            FILES="$(find azure-pipelines.y*ml .azure-pipelines -name '*.y*ml' -type f 2>/dev/null)" ;;
 esac   # github and unknown hosts: skipped
 CI_PORTABILITY_WARNS=0
 if [ -n "$FILES" ]; then
   WARNS="$(printf '%s\n' "$FILES" | xargs grep -nE "$PAT" 2>/dev/null \
-    | sed "s|^|CI_PORTABILITY_WARN: GitHub-only step on $WHERE (fix: curl the host REST API, see references/forgejo-actions-portability.md): |")"
+    | sed "s|^|CI_PORTABILITY_WARN: GitHub-only step on $WHERE (fix: curl the host REST API, see references/azure-pipelines-portability.md): |")"
   if [ -n "$WARNS" ]; then
     printf '%s\n' "$WARNS"
     CI_PORTABILITY_WARNS="$(printf '%s\n' "$WARNS" | wc -l | tr -d ' ')"
@@ -367,8 +362,8 @@ true
 
 Advisory only: never gates fan-out, never fails the run. The snippet sets
 `CI_PORTABILITY_WARNS` (read by the heartbeat line as `ci_portability=`). Fix
-text and `curl` replacements (label, PR comment) for both hosts:
-[`references/forgejo-actions-portability.md`](references/forgejo-actions-portability.md).
+text and `curl` replacements (label, PR comment) for Azure Pipelines:
+[`references/azure-pipelines-portability.md`](references/azure-pipelines-portability.md).
 
 ---
 

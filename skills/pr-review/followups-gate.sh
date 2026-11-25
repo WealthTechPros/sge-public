@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # followups-gate.sh — the follow-up preservation gate, shared by pr-labels.sh
-# (GitHub / Forgejo) and pr-labels-azdo.sh (Azure Repos, issue #2989). SOURCE it:
+# (GitHub) and pr-labels-azdo.sh (Azure Repos, issue #2989). SOURCE it:
 # it defines assert_followups_preserved only. It reads $PR, $REVIEWED,
-# $_PRL_HOST, $_PRL_ORIGIN, $_PRL_ADAPTER and $_PRL_SCRIPT_DIR from the caller.
+# $_PRL_HOST, $_PRL_ORIGIN and $_PRL_SCRIPT_DIR from the caller.
 # Moved verbatim out of pr-labels.sh; the only change is the azdo body read.
 
 # Follow-up preservation gate (issue #859).
@@ -31,15 +31,7 @@
 assert_followups_preserved() {
   local body rc extra=""
   rc=0
-  # Forgejo path (issue #1239): read PR body via the REST adapter instead of gh.
-  if [[ "${_PRL_HOST:-github}" == "forgejo" ]]; then
-    body=$("$_PRL_ADAPTER" pr-body "$_PRL_ORIGIN" "$PR" 2>/dev/null) || rc=$?
-    if [[ "$rc" -ne 0 ]]; then
-      echo "refusing: PR #$PR — could not read PR body from Forgejo adapter; follow-up preservation gate fails closed (issue #859, issue #1239)" >&2
-      echo "Fix adapter access (token, allow-list, network) and retry, or pass --skip-followup-check if this PR declares no follow-ups." >&2
-      return 1
-    fi
-  elif [[ "${_PRL_HOST:-github}" == "azdo" ]]; then
+  if [[ "${_PRL_HOST:-github}" == "azdo" ]]; then
     # Azure Repos (#2989): the PR description, via the adapter's gh-shaped get-pr.
     body=$(bash "$_PRL_SCRIPT_DIR/../../scripts/azdo-adapter.sh" get-pr "$_PRL_ORIGIN" "$PR" 2>/dev/null | jq -r '.body // ""') || rc=$?
     if [[ "$rc" -ne 0 ]]; then

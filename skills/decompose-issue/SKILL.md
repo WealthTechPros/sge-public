@@ -145,7 +145,7 @@ The output of this phase is a small DAG: the enabler at the root, vertical slice
 
 ### 3d. Validate every `owns` path against the real tree (mandatory)
 
-A file map is only worth the recon it saves if its paths are real. The Lean Agent Contract tells lanes to orient **only** from the file map (capped recon, no open-ended search), so a phantom path sends a lane hunting for files that aren't there before it can even start — a wrong map is worse than none. (In the 2026-07-16 swarm a child map named `skills/lib/forgejo-adapter.sh` and `skills/**/with-repo-cwd.sh`; `skills/lib/` did not exist and the resolver was at `scripts/with-repo-cwd.sh`, so the lane burned recon budget reconciling the map mid-build — #1271.)
+A file map is only worth the recon it saves if its paths are real. The Lean Agent Contract tells lanes to orient **only** from the file map (capped recon, no open-ended search), so a phantom path sends a lane hunting for files that aren't there before it can even start — a wrong map is worse than none. See #1271 for the original file-map regression.
 
 Before you emit any child's `owns` footprint, run every path through `scripts/validate-file-map.sh` — do not eyeball it: emit `ok` paths as-is, mark paths the child creates `(new)`, and correct or drop every `flag`ged phantom (cross-repo children: validate against that repo's tree). Commands and output format: [`references/file-map-validation.md`](references/file-map-validation.md).
 
@@ -204,7 +204,7 @@ Spec-lane example (enabler `E1` via `"$IW" create-deduped` with `Parent:`/`Depen
 > enumerated from the source of truth (e.g. `brand-assets/tokens.json`)."* A
 > name-grep-only AC on a sweep child is a false-green trap — see Phase 3b.
 
-**No-spec lane** (general feature/bug/chore parent): drop the `SPEC-NNN-` title prefix and use the `enabler` / `story` labels alone (plus any `module:*` label inherited from the parent). The children inherit the parent's milestone — GitHub-only convention (Jira/Forgejo have no equivalent field carried through `$IW`), so it is fetched separately here rather than in the shared preload, whose normalised `issue-read.sh view` shape stays deliberately narrow (`number,title,body,labels,assignees,state`) across all three backends:
+**No-spec lane** (general feature/bug/chore parent): drop the `SPEC-NNN-` title prefix and use the `enabler` / `story` labels alone (plus any `module:*` label inherited from the parent). The children inherit the parent's milestone — GitHub-only convention (other trackers do not expose this field through `$IW`), so it is fetched separately here rather than in the shared preload, whose normalised `issue-read.sh view` shape stays deliberately narrow (`number,title,body,labels,assignees,state`) across backends:
 
 ```bash
 PARENT_MILESTONE=$(gh issue view "$PARENT" --json milestone --jq '.milestone.title // empty')

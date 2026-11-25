@@ -53,37 +53,9 @@ Drive a pull request's CI to green by reading the actual failures, reproducing t
 
 ---
 
-## Host routing — Forgejo / non-GitHub repos (ADR-0010, #1146 slice #1240)
+## Host routing
 
-`gh pr checks`, `gh pr view`, and `gh run view` assume the PR is on GitHub.
-When the repo is Forgejo-hosted, detect this at **Step 0** and substitute the
-adapter equivalents — never mix `gh` and adapter calls for the same PR.
-
-```bash
-HOST_KIND=$("$SGE_ROOT/scripts/with-repo-cwd.sh" host 2>/dev/null || echo unknown)
-echo "[pr-fix] host-kind: $HOST_KIND"
-```
-
-| `HOST_KIND` | Action |
-|---|---|
-| `github` | existing `gh`-based path — unchanged |
-| `forgejo` | route PR state and CI status reads through `forgejo-adapter.sh`; push via `git push` as usual |
-| `unknown` | **fail loud** — `echo "BLOCKED: unknown host — cannot drive PR on an unrecognised git host"; exit 1` |
-
-### Forgejo call-site substitution (pr-fix loop)
-
-Full detail: [`references/forgejo-routing.md`](references/forgejo-routing.md).
-
-### Forgejo: declaring the PR green
-
-Full detail: [`references/forgejo-routing.md`](references/forgejo-routing.md).
-
-### Token prerequisites (Forgejo)
-
-Set `FORGEJO_API_TOKEN` (preferred) or `GITEA_TOKEN` in the environment, via
-whichever secret manager the repo already uses. Declare the
-host in `SGE_FORGEJO_HOSTS`. The adapter refuses loud on first authenticated
-call when either is missing — the fix never proceeds silently.
+Resolve the target repository before using its CI and review commands. Use the GitHub CLI for a GitHub repository. For Azure Repos use the operations documented in the [Azure Repos review guide](../pr-review/references/host-adapter-routing.md). Stop when the host is unknown or the required operation is unavailable.
 
 ---
 
