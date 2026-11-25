@@ -52,3 +52,5 @@ Each approval is `path@full-tip-sha` (or the `discard_approval` token for a disc
 - `remove`: unlock, unlink Windows junctions (links only, non-recursive delete; the probe must come back empty; a probe that errors counts as not empty), `git worktree remove` (no force), then `git branch -D` of the local branch. If any step before the remove fails the lock is restored with its original reason.
 
 Never deleted or changed: remote branches, review labels (`pr-reviewing`, `pr-reviewed`), permissions. No merge, rescue, force or PR. The JSON result records, per item, the full recovery SHA, the completed-PR number and the ignored-file disposition (`none`, `kept` or `discarded:<n>`); copy them into the final report. Exit 4 means at least one approved item was stopped.
+
+A dirty locked worktree whose work was recovered through **another branch** (for example squash-merged with small corrections) stays protected here. Use the separate reconciliation flow in [`reconcile.md`](reconcile.md), which proves what is recovered, checkpoints the rest and asks for reconcile, release and removal as separate decisions.
