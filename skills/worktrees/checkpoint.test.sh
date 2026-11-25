@@ -234,6 +234,7 @@ out="$(ck checkpoint "$TMP/f8/unreg" "$SID" 2>&1)"; rc=$?
 # to another session are still refused above.
 check "unregistered linked worktree is checkpointed (sge#3697)" "$rc" "0"
 check "  ... and its checkout is unchanged" "$(git -C "$TMP/f8/unreg" status --porcelain | tr -d '\r')" "?? wip.txt"
+check_has "unregistered checkpoint says so" "$out" "ownership:unregistered-explicit"
 out="$(ck checkpoint "$WT" 'bad id;x' 2>&1)"; rc=$?
 check "bad session id rejected" "$rc" "5"
 before_count="$(find "$TMP/store" -mindepth 2 -maxdepth 2 -type d 2>/dev/null | wc -l | tr -d ' ')"
