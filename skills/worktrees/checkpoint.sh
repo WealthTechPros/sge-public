@@ -29,9 +29,9 @@
 #   captured. The result names the unsupported coverage (categories, counts and
 #   sanitised path names only; never contents), status is "partial", exit 10, and
 #   the output always carries retain-worktree:yes + safe-to-remove:no. This tool
-#   never authorises deletion of a worktree. Uncertain ownership (the main
-#   checkout, or a linked worktree registered to ANOTHER session) is refused
-#   with nothing written; an unregistered linked worktree is accepted (#3697).
+#   never authorises deletion of a worktree. The main checkout and a linked
+#   worktree registered to another session are refused with nothing written.
+#   An unregistered linked worktree named explicitly is accepted (#3697).
 #
 # Atomicity: payload and manifest are built in a private temp dir inside the
 # store and renamed into place last; interrupted runs leave only a ".tmp.*" dir
@@ -272,6 +272,8 @@ ck_checkpoint() {
     [ -f "$entry" ] && [ ! -L "$entry" ] || { _ck_refuse 4 ownership-uncertain-bad-registration; return 4; }
     owner="$(_wl_entry_field "$entry" session)"
     if [ "$owner" != "$sid" ]; then _ck_refuse 4 ownership-uncertain-other-session; return 4; fi
+  else
+    printf 'ownership:unregistered-explicit\n'
   fi
 
   root="$(_ck_store_root)" || { _ck_refuse 6 store-unresolvable; return 6; }

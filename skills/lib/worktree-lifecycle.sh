@@ -11,6 +11,7 @@
 #   wl_recovery_preview <worktree>         # inspect a candidate, no changes
 #   wl_recover <worktree> <owner> <entry-hash> <head> <status-hash>
 #   wl_recover_many <registration-entry>... # explicitly authorised selection
+#   wl_retire_registry [<repo-path>]       # one-shot: archive every entry (sge#3697)
 #   bash worktree-lifecycle.sh <register|unregister|list|audit|audit-many|recovery-preview|recover|recover-many> <args...>
 #
 # Registry: one file per owned worktree under <git-common-dir>/sge-worktrees/,
@@ -275,6 +276,39 @@ wl_recover_many() (
   [ "$failed" -eq 0 ] && [ "$skipped" -eq 0 ]
 )
 
+# wl_retire_registry [<path-in-repo>] — one-shot retirement of the ownership
+# registry (sge#3697). Registrations never expired, so every session left a
+# permanent "in use" claim; the .sge-wt-claim lease and its TTL are now the only
+# claim. Moves every <common>/sge-worktrees/*.entry into
+# sge-worktrees/retired/<utc-ts>/ (kept as evidence, never deleted). An entry
+# whose .lock is held is left in place and reported as busy; rerun later.
+# Touches no worktree, branch or checkout. Idempotent.
+# Output: "busy:<path>" per busy entry, then "archived:<n>" and "dir:<archive>".
+wl_retire_registry() (
+  local common dir f key n=0 failed=0 dest ts
+  common="$(_wl_common_dir "${1:-.}")" || { echo "error:not-a-git-worktree" >&2; return 3; }
+  dir="$common/sge-worktrees"
+  ts="$(date -u +%Y%m%dT%H%M%SZ)"
+  dest="$dir/retired/$ts"
+  for f in "$dir"/*.entry; do
+    [ -f "$f" ] && [ ! -L "$f" ] || continue
+    key="$(basename "$f" .entry)"
+    if ! mkdir "$dir/$key.lock" 2>/dev/null; then
+      printf 'busy:%s\n' "$(_wl_entry_field "$f" path)"; continue
+    fi
+    if mkdir -p "$dest" && mv -n -- "$f" "$dest/" && [ ! -e "$f" ]; then
+      n=$((n + 1))
+    else
+      failed=$((failed + 1))
+      printf 'error:archive-failed:%s\n' "$(_wl_entry_field "$f" path)" >&2
+    fi
+    rmdir "$dir/$key.lock" 2>/dev/null || :
+  done
+  printf 'archived:%s\n' "$n"
+  [ "$n" -eq 0 ] || printf 'dir:%s\n' "$dest"
+  [ "$failed" -eq 0 ]
+)
+
 wl_list() {
   local common f
   common="$(_wl_common_dir "${1:-.}")" || { echo "error:not-a-git-worktree" >&2; return 3; }
@@ -358,6 +392,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
     recovery-preview) wl_recovery_preview "$@" ;;
     recover)    wl_recover "$@" ;;
     recover-many) wl_recover_many "$@" ;;
-    *) echo "usage: worktree-lifecycle.sh register|unregister|list|audit|audit-many|recovery-preview|recover|recover-many ..." >&2; exit 2 ;;
+    retire-registry) wl_retire_registry "$@" ;;
+    *) echo "usage: worktree-lifecycle.sh register|unregister|list|audit|audit-many|recovery-preview|recover|recover-many|retire-registry ..." >&2; exit 2 ;;
   esac
 fi

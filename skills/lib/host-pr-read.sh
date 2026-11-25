@@ -418,7 +418,7 @@ hpr_check_is_failing() {
 # own page cap may have truncated the list (issue #2946), so no cap here.
 hpr_open_pr_heads() {
   command -v jq >/dev/null 2>&1 || { _hpr_err "jq is required for hpr_open_pr_heads"; return 1; }
-  local host raw cap jqf n origin
+  local host raw cap jqf okf='.headRefName' n origin
   host="$(hpr_host_kind)"
   case "$host" in
     github)
@@ -434,7 +434,7 @@ hpr_open_pr_heads() {
       [ -f "$_HPR_ADAPTER" ] || { _hpr_err "forgejo-adapter.sh not found at $_HPR_ADAPTER"; return 1; }
       raw="$(_hpr_timed bash "$_HPR_ADAPTER" list-prs "$origin")" \
         || { _hpr_err "forgejo-adapter.sh list-prs failed — open-PR set unknown"; return 1; }
-      jqf='.[] | "\(.number)\t\(.head.ref)"'
+      jqf='.[] | "\(.number)\t\(.head.ref)"'; okf='.head.ref'
       ;;
     azdo)
       cap=""
@@ -456,6 +456,11 @@ hpr_open_pr_heads() {
     _hpr_err "open-PR list hit the page cap ($n >= $cap) — may be truncated; open-PR set unknown"
     return 1
   fi
+  # Every record needs a numeric number and a non-empty head branch: a record
+  # without them would drop its branch from the protection set (CodeRabbit, #3726).
+  printf '%s' "$raw" | jq -e "all(.[]; type == \"object\" and (.number | type) == \"number\"
+      and (($okf) | type) == \"string\" and ($okf) != \"\")" >/dev/null 2>&1 \
+    || { _hpr_err "open-PR payload has a record without a number or head branch — open-PR set unknown"; return 1; }
   # tr: jq.exe on Windows emits CRLF; a stray \r would corrupt branch names.
   printf '%s' "$raw" | jq -r "$jqf" | tr -d '\r'
 }
