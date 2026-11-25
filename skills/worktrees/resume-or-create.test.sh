@@ -71,19 +71,87 @@ check "held-fresh -> verdict backoff" "$(echo "$out" | grep '^verdict:')" "verdi
 check "backoff exit code 10"          "$rc_backoff" "10"
 
 # --- My own fresh claim -> resume (mine), not backoff ---
+# (the other agent's fresh lease is released first: roc_claim never steals it, sge#3697)
+rm -f "$WT/.sge-wt-claim"
 SGE_AGENT_ID="me" roc_claim "$WT"
 check "claim-state mine" "$(SGE_AGENT_ID=me roc_claim_state "$WT")" "mine"
 out="$(SGE_AGENT_ID=me roc_decide 42 "$ROOT" 2>/dev/null)"; rc_mine=$?
 check "mine -> verdict resume"    "$(echo "$out" | grep '^verdict:')" "verdict:resume"
 check "mine resume exit code 0"   "$rc_mine" "0"
 
+# --- sge#3697: roc_claim is an atomic check-and-claim under the shared lease lock ---
+printf 'other-agent %s
+' "$(date +%s)" > "$WT/.sge-wt-claim"
+SGE_AGENT_ID="me" roc_claim "$WT" 2>/dev/null; rc_steal=$?
+check "roc_claim refuses a fresh foreign lease (rc 10)" "$rc_steal" "10"
+check "roc_claim leaves the fresh foreign lease in place" "$(cut -d' ' -f1 "$WT/.sge-wt-claim")" "other-agent"
+LOCK="$(git -C "$WT" rev-parse --absolute-git-dir)/sge-wt-claim.lock"
+printf 'other-agent %s
+' "$(( $(date +%s) - 3600 ))" > "$WT/.sge-wt-claim"
+mkdir "$LOCK"
+SGE_LEASE_LOCK_WAIT_DS=1 SGE_AGENT_ID="me" roc_claim "$WT" 2>/dev/null; rc_busy=$?
+check "roc_claim fails while another holder has the lease lock (rc 4)" "$rc_busy" "4"
+check "roc_claim wrote nothing while locked out" "$(cut -d' ' -f1 "$WT/.sge-wt-claim")" "other-agent"
+rmdir "$LOCK"
+SGE_AGENT_ID="me" roc_claim "$WT"; rc_take=$?
+check "roc_claim takes over an expired lease" "$rc_take:$(cut -d' ' -f1 "$WT/.sge-wt-claim")" "0:me"
+check "roc_claim releases the lease lock" "$([ -e "$LOCK" ] && echo held || echo released)" "released"
+mkdir "$LOCK"; touch -d '@1' "$LOCK" 2>/dev/null || touch -t 197001010000 "$LOCK"
+SGE_LEASE_LOCK_WAIT_DS=1 SGE_AGENT_ID="me" roc_claim "$WT"; rc_stale=$?
+check "a lock untouched past SGE_LEASE_LOCK_STALE_S is a crashed holder's and is broken" "$rc_stale" "0"
+mkdir "$LOCK"; touch "$LOCK/x"; touch -d '@1' "$LOCK" 2>/dev/null || touch -t 197001010000 "$LOCK"
+SGE_LEASE_LOCK_WAIT_DS=1 SGE_AGENT_ID="me" timeout 20 bash -c 'source "$1"; roc_claim "$2"' _ "$HERE/resume-or-create.sh" "$WT" 2>/dev/null; rc_stuck=$?
+check "a stale lock that cannot be removed still ends at the wait limit (rc 4, no spin)" "$rc_stuck" "4"
+rm -rf "$LOCK"
+# CodeRabbit on #3701: the protocol only ever removes the lock instance it judged
+# stale (re-checked under "$LOCK.break") or the one this shell holds (its token).
+mkdir "$LOCK"; touch -d '@1' "$LOCK" 2>/dev/null || touch -t 197001010000 "$LOCK"
+mkdir "$LOCK.break"
+SGE_LEASE_LOCK_WAIT_DS=1 SGE_AGENT_ID="me" roc_claim "$WT" 2>/dev/null; rc_brk=$?
+check "a stale lock another contender is mid-reclaim on is left to it (rc 4)" "$rc_brk:$([ -d "$LOCK" ] && echo lock-kept)" "4:lock-kept"
+touch -d '@1' "$LOCK.break" 2>/dev/null || touch -t 197001010000 "$LOCK.break"
+SGE_LEASE_LOCK_WAIT_DS=3 SGE_AGENT_ID="me" roc_claim "$WT" 2>/dev/null; rc_brk2=$?
+check "a crashed reclaimer's break lock does not pin the lock forever" "$rc_brk2:$([ -e "$LOCK" ] || [ -e "$LOCK.break" ] && echo left || echo clean)" "0:clean"
+( sge_lease_lock "$WT"; rm -rf "$LOCK"; mkdir "$LOCK"; sge_lease_unlock )
+check "unlock never removes a replacement lock taken after ours was broken" "$([ -d "$LOCK" ] && echo kept || echo removed)" "kept"
+rmdir "$LOCK"
+( sge_lease_lock "$WT"; rm -rf "$LOCK"; sge_lease_touch )
+check "touch never recreates a lock path this shell no longer holds" "$([ -e "$LOCK" ] && echo created || echo absent)" "absent"
+check "lease lock lives outside the work tree" "$(git -C "$WT" status --porcelain --ignored | grep -c 'sge-wt-claim.lock')" "0"
+
 # --- Expired claim (older than TTL) -> free -> resume, takeover allowed ---
 printf 'other-agent %s\n' "$(( $(date +%s) - 3600 ))" > "$WT/.sge-wt-claim"
 check "expired claim -> free" "$(roc_claim_state "$WT")" "free"
 
-# --- Malformed claim timestamp -> free (fail safe) ---
+# --- Invalid claim records require manual reconciliation ---
 printf 'other-agent notanumber\n' > "$WT/.sge-wt-claim"
-check "malformed claim -> free" "$(roc_claim_state "$WT")" "free"
+check "invalid claim remains protected" "$(roc_claim_state "$WT")" "held-fresh"
+printf 'other-agent %s\0\n' "$(( $(date +%s) - 3600 ))" >"$WT/.sge-wt-claim"
+check "binary corruption in a lease remains protected" "$(roc_claim_state "$WT" 2>/dev/null)" "held-fresh"
+
+# A clock ahead of the local host must not pin an abandoned claim forever.
+printf 'other-agent %s\n' "$(( $(date +%s) + 3600 ))" > "$WT/.sge-wt-claim"
+check "a recently written claim from an ahead clock stays protected" "$(roc_claim_state "$WT")" "held-fresh"
+touch -d '1 hour ago' "$WT/.sge-wt-claim"
+check "an aged claim from an ahead clock expires by file age" "$(roc_claim_state "$WT")" "free"
+
+# An unchanged expired claim stays free when the clock reaches its recorded timestamp.
+(
+  date() { printf '%s\n' "$clock_now"; }
+  claim="$WT/.sge-wt-claim"
+  printf 'other-agent 1800003600\n' >"$claim"
+  touch -d '@1799996400' "$claim"
+  clock_now=1800000000
+  before="$(roc_claim_state "$WT")"
+  clock_now=1800003600
+  printf '%s:%s\n' "$before" "$(roc_claim_state "$WT")" >"$TMP/clock-transition"
+)
+check "an expired claim stays free across the writer timestamp" "$(cat "$TMP/clock-transition")" "free:free"
+
+previous="other-agent $(( $(date +%s) - 3600 ))"
+printf '%s\n' "$previous" >"$WT/.sge-wt-claim"
+(mv() { return 1; }; SGE_AGENT_ID=me roc_claim "$WT" 2>/dev/null); rc=$?
+check "failed claim replacement retains the previous lease" "$rc:$(cat "$WT/.sge-wt-claim")" "1:$previous"
 
 # --- Non-git root -> exit 3 ---
 roc_decide 42 "$TMP" >/dev/null 2>&1; check "non-git root exit 3" "$?" "3"

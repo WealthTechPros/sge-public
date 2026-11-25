@@ -203,15 +203,21 @@ alone does not prove loading, and missing records never authorise a kill.
 `hooks/copilot/worktree-lifecycle.sh` is a Copilot CLI adapter for the
 worktree-preservation family (epic #3216, SPEC-139 — an internal spec, not
 published here).
-It is **best-effort and never destructive**: it registers the session's linked
-worktree in the shared ownership registry, records a heartbeat and the end of
-the session, calls the checkpoint hook point (`skills/worktrees/checkpoint.sh`, the #3234
-store), and at the next *new* session start tells the
-agent which owned worktrees earlier sessions left open, each with its shared
-audit verdict. It never deletes, stashes, resets, commits, pushes, unregisters
-or opens a PR, never releases another session's claim, and never writes prompt
-text, file contents or secrets to its state or logs. Nothing it prints means
-"backed up" or "safe to remove".
+It is **best-effort and never destructive**: it records a heartbeat and the end
+of the session, calls the checkpoint hook point (`skills/worktrees/checkpoint.sh`,
+the #3234 store) for the session's linked worktree, and at the next *new*
+session start prints one line counting the repository's other open worktrees.
+It no longer registers worktrees in the ownership registry (sge#3697: a
+registration never expired, so every session left a permanent "in use" claim);
+the `.sge-wt-claim` lease and its TTL are the only claim. The adapter writes
+that lease on the session's own linked worktree at start and refreshes it at
+every `agentStop`, so a live session keeps a fresh lease and a crashed one
+frees its worktree after `SGE_WT_CLAIM_TTL_MIN` (default 30); the lease file is
+kept out of `git status` through the repository's `info/exclude`. It never deletes,
+stashes, resets, commits, pushes, registers, unregisters or opens a PR, never
+releases another session's claim, and never writes prompt text, file contents
+or secrets to its state or logs. Nothing it prints means "backed up" or "safe
+to remove".
 
 ### Install from the private source (user-level hook file)
 
@@ -237,28 +243,22 @@ is safe: duplicate events are deduplicated per session.
 | Resume (`--resume`) | `sessionStart` fires again with `source: "resume"` and the same `sessionId`. The adapter prints no handoff. |
 | Normal completion | `agentStop` at the end of each turn (with `stopReason`, `stop_hook_active`), then `sessionEnd` with `reason: "complete"`. `-p` and piped runs fire `sessionEnd` once per completed turn. |
 | Hook timeout | A hook over its `timeoutSec` is killed and Copilot logs "timed out; allowing processing to proceed". The other hooks and the session continue. |
-| Forced termination | Killing the Copilot process mid-turn fires neither `agentStop` nor `sessionEnd`. The registry entry and heartbeat survive, and the next start reports the session as "interrupted: no clean end recorded" once its heartbeat is older than `SGE_LIFECYCLE_STALE_SECS` (default 1800). |
-| Duplicate sources | Two hook files for the same event both run. The adapter does the work once (per-session lock and a 10 s dedupe window): one registry entry, one checkpoint call, one handoff. |
+| Forced termination | Killing the Copilot process mid-turn fires neither `agentStop` nor `sessionEnd`. Nothing is left claimed: the worktree is counted in the next start's one-line note and `/sge:tidy-worktrees` can reclaim it once any lease is past its TTL. |
+| Duplicate sources | Two hook files for the same event both run. The adapter does the work once (per-session lock and a 10 s dedupe window): one checkpoint call, one note. |
 | Interactive exit and `/clear` | **Not observed.** Headless runs cannot drive them. Per the Copilot CLI changelog `/clear` runs `sessionEnd` hooks, in the background, and `sessionEnd` output is not processed; the adapter does not rely on either. |
 
 ### Known gaps (reported, not hidden)
 
 - Without `skills/worktrees/checkpoint.sh` nothing is copied: the state records
-  `checkpoint=unavailable` and the handoff says so. With it, the adapter
+  `checkpoint=unavailable`. With it, the adapter
   records only the exit status (0 `complete`, 10 `partial-rc10`, other
   `failed-rcN`), never coverage detail or output; recovery handles come from
   `checkpoint.sh list` or `/sge:tidy-worktrees`. The wiring is exercised against
   the real store in the hook test, not on the live Copilot CLI (the earlier
   headless runs predate the store).
-- A later session that merely reuses a worktree registered to an earlier
-  session does not take ownership (a foreign claim is never overwritten), so
-  its interruption is not reported under its own id; the worktree is still
-  listed and audited under the owner.
-- Liveness is a heartbeat heuristic. A single turn longer than
-  `SGE_LIFECYCLE_STALE_SECS` can look interrupted, and a killed session looks
-  active until the window passes.
-- The handoff audit calls the open-PR lookup, which needs network and `gh`
-  auth. On any failure the verdict is `KEEP` with the reason, never "no PRs".
+- A worktree still carrying a legacy registration for another session (written
+  before sge#3697) is not checkpointed by this session; the registration itself
+  is left untouched.
 - The Claude Code adapters are out of scope for this slice. The adapter
   already accepts the Claude/VS Code-style payload (`session_id`,
   `SessionStart`/`Stop`/`SessionEnd`), so wiring it from `hooks/hooks.json`

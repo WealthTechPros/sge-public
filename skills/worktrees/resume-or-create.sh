@@ -88,6 +88,8 @@ RG_WT_CLAIM_TTL_MIN="${SGE_WT_CLAIM_TTL_MIN:-30}"
 # in-repo `.worktrees/` exception already gitignores and the sibling layout is
 # outside any repo tree. Contents: "<agent-id> <epoch-seconds>".
 RG_CLAIM_FILE=".sge-wt-claim"
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/lease-lock.sh"
 
 # roc_find_worktree <id> <repo-root> [purpose=issue]
 # Prints the path of an existing worktree for <purpose>-<id>, or nothing.
@@ -144,18 +146,31 @@ roc_open_pr() {
 # Reads the claim lease inside <worktree> and classifies it:
 #   free        — no claim, or an EXPIRED claim (older than the TTL)
 #   mine        — a fresh claim whose agent id == $SGE_AGENT_ID
-#   held-fresh  — a fresh claim owned by a DIFFERENT agent (back off)
+#   held-fresh  — a fresh foreign claim or an invalid record (back off)
 roc_claim_state() {
   local wt="$1"
   local f="$wt/$RG_CLAIM_FILE"
-  [ -f "$f" ] || { echo "free"; return 0; }
-  local owner ts now age_min
-  read -r owner ts < "$f" 2>/dev/null || { echo "free"; return 0; }
-  # A malformed / empty timestamp is treated as expired (fail safe to takeover).
-  case "$ts" in ''|*[!0-9]*) echo "free"; return 0 ;; esac
-  now=$(date +%s)
-  age_min=$(( (now - ts) / 60 ))
-  if [ "$age_min" -ge "$RG_WT_CLAIM_TTL_MIN" ]; then
+  if [ ! -e "$f" ] && [ ! -L "$f" ]; then echo "free"; return 0; fi
+  local LC_ALL=C owner ts now age_sec size record
+  local shape=$'^([^[:space:]]+) (0|[1-9][0-9]{0,9})\n$'
+  if [ -L "$f" ] || [ ! -f "$f" ]; then echo "held-fresh"; return 0; fi
+  size=$(wc -c <"$f" 2>/dev/null) || { echo "held-fresh"; return 0; }
+  [ "$size" -le 4096 ] || { echo "held-fresh"; return 0; }
+  record="$(cat "$f" 2>/dev/null && printf x)" || { echo "held-fresh"; return 0; }
+  record="${record%x}"
+  # Bash drops NUL bytes in command substitution. Protect records it could not read byte for byte.
+  [ "${#record}" -eq "$size" ] || { echo "held-fresh"; return 0; }
+  [[ "$record" =~ $shape ]] || { echo "held-fresh"; return 0; }
+  owner="${BASH_REMATCH[1]}"
+  ts="${BASH_REMATCH[2]}"
+  now=$(date +%s) || { echo "held-fresh"; return 0; }
+  age_sec=$((now - ts))
+  # Use the earlier of the written timestamp and the file mtime throughout the
+  # lease. A skewed writer's expired record must never become fresh again.
+  local file_age
+  file_age="$(_sge_lease_age "$f")" || { echo "held-fresh"; return 0; }
+  if [ "$file_age" -gt "$age_sec" ]; then age_sec="$file_age"; fi
+  if [ "$((age_sec / 60))" -ge "$RG_WT_CLAIM_TTL_MIN" ]; then
     echo "free"; return 0
   fi
   if [ -n "${SGE_AGENT_ID:-}" ] && [ "$owner" = "$SGE_AGENT_ID" ]; then
@@ -166,16 +181,39 @@ roc_claim_state() {
 }
 
 # roc_claim <worktree> — write/refresh THIS agent's claim lease.
+# An atomic check-and-claim (sge#3697): under the shared lease lock it refuses a
+# FRESH lease of another agent (exit 10, lease untouched) and otherwise writes
+# this agent's. Exit 4 when the lock stays busy; nothing is written then. A
+# directory that is not a git checkout has no lock to take and is written as before.
 roc_claim() {
-  local wt="$1"
+  local wt="$1" rc=0 claim tmp epoch
   [ -d "$wt" ] || return 3
-  printf '%s %s\n' "${SGE_AGENT_ID:-unknown}" "$(date +%s)" > "$wt/$RG_CLAIM_FILE"
+  sge_lease_lock "$wt"; rc=$?
+  [ "$rc" -ne 1 ] || { echo "roc_claim: lease lock busy for $wt" >&2; return 4; }
+  if [ "$(roc_claim_state "$wt")" = held-fresh ]; then
+    sge_lease_unlock
+    echo "roc_claim: $wt holds a foreign or invalid lease; left intact" >&2
+    return 10
+  fi
+  claim="$wt/$RG_CLAIM_FILE"
+  epoch="$(date +%s)" || { sge_lease_unlock; return 1; }
+  tmp="$(mktemp "$claim.tmp.XXXXXX")" || { sge_lease_unlock; return 1; }
+  printf '%s %s\n' "${SGE_AGENT_ID:-unknown}" "$epoch" >"$tmp" && mv -f -- "$tmp" "$claim"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then rm -f -- "$tmp"; fi
+  sge_lease_unlock
+  return "$rc"
 }
 
-# roc_release <worktree> — drop the claim lease (best effort).
+# roc_release <worktree> — drop this agent's live claim (best effort).
 roc_release() {
   local wt="$1"
-  rm -f "$wt/$RG_CLAIM_FILE" 2>/dev/null || true
+  [ -n "${SGE_AGENT_ID:-}" ] || return 0
+  sge_lease_lock "$wt" || return 0
+  if [ "$(roc_claim_state "$wt")" = mine ]; then
+    rm -f "$wt/$RG_CLAIM_FILE" 2>/dev/null || true
+  fi
+  sge_lease_unlock
 }
 
 # roc_decide <id> [repo-root] [base-ref] [purpose=issue] — the single entrypoint.

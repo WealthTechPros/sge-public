@@ -96,8 +96,15 @@ export async function manageExecution({ command, options, state, file, run, veri
     if (!verified.verified) throw new Error('fresh verification failed');
     const prune = spawnSync('git', ['-C', item.root, 'worktree', 'prune', '--dry-run', '--verbose'], { encoding: 'utf8', timeout: 60000 });
     if (prune.status !== 0 || prune.stdout || prune.stderr) throw new Error('collateral prune preview not empty');
-    const status = run('git', ['-C', item.path, 'status', '--porcelain', '--untracked-files=all']);
-    if (status.trim() || fs.lstatSync(path.join(item.path, '.sge-wt-claim'), { throwIfNoEntry: false })) throw new Error('files or claim changed');
+    const status = run('git', ['-C', item.path, 'status', '--porcelain', '--untracked-files=all']).trim();
+    if (status && status !== '?? .sge-wt-claim') throw new Error('files or claim changed');
+    if (status || fs.lstatSync(path.join(item.path, '.sge-wt-claim'), { throwIfNoEntry: false })) {
+      const bash = process.env.SGE_BASH || (process.platform === 'win32'
+        ? path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Git', 'bin', 'bash.exe') : 'bash');
+      const lease = run(bash, [path.join(here, '../worktrees/resume-or-create.sh'), 'claim-state', item.path],
+        { timeout: 10000, windowsHide: true });
+      if (lease.trim() !== 'free') throw new Error('files or claim changed');
+    }
     const before = snapshot(item.root, run);
     fs.writeFileSync(journal, JSON.stringify({ fingerprint, path: item.path, head: item.head,
       asOf: new Date().toISOString(), before, execution, recovery }), { flag: 'wx', mode: 0o600 });
