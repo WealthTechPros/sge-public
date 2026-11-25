@@ -5,6 +5,10 @@ Operator guide for the worktree-work preservation lifecycle (SPEC-139, epic
 confirmation gate**. It is not a backup product and not a guarantee against
 disk failure.
 
+> **Many stuck "in use" worktrees?** Start with the read-only audit below.
+> Maintainers can find the registry retirement decision and bulk reclaim
+> runbook in the development repository under ADR-0023 and issue #3697.
+
 ## The four pieces
 
 | Piece | What it does | What it never does |
