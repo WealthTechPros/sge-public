@@ -8,7 +8,8 @@
 # -SkipFile lists git-tracked link paths (relative, '/'-separated) to leave for
 # git, which removes them as links. Prints the number of links unlinked. Any
 # error exits non-zero and the caller skips the worktree (fail closed).
-param([Parameter(Mandatory = $true)][string]$Path, [string]$SkipFile = '')
+# -CheckOnly refuses every directory reparse point before unlinking anything.
+param([Parameter(Mandatory = $true)][string]$Path, [string]$SkipFile = '', [switch]$CheckOnly)
 $ErrorActionPreference = 'Stop'
 try {
   $root = Get-Item -LiteralPath $Path -Force
@@ -23,6 +24,7 @@ try {
     $dir = $queue.Dequeue()
     foreach ($child in Get-ChildItem -LiteralPath $dir -Force -Directory) {
       if ($child.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        if ($CheckOnly) { throw 'directory reparse point requires separate preservation' }
         $rel = $child.FullName.Substring($rootFull.Length + 1).Replace('\', '/').ToLowerInvariant()
         if (-not $skip.ContainsKey($rel)) { $links.Add($child.FullName) }
       } else { $queue.Enqueue($child.FullName) }

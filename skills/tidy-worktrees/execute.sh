@@ -30,9 +30,9 @@
 #      (roc_claim_state; an unreadable claim counts as live), not the current
 #      checkout, default branch or a protected name. Any failed check or failed
 #      lookup is a SKIP, never a deletion.
-#   4. Before each worktree removal the link guard unlinks every untracked
-#      directory junction / symlink inside it without descending into it (Windows:
-#      junction-guard.ps1; POSIX: find -type l, which never follows links).
+#   4. The interactive link guard unlinks untracked directory links without
+#      following them. Bulk reclaim leaves Windows directory reparse points
+#      untouched and parks eligible checkouts with Git without deleting contents.
 #   5. `git -c core.longpaths=true worktree remove` without --force; a refusal
 #      is a SKIP. Then prune, and `git branch -D` only on a re-confirmed tip.
 #   6. A remote branch is deleted only when a fresh per-branch open-PR lookup
@@ -75,9 +75,18 @@ _tx_out() { # <status> <repo> <kind> <name> <tip> <reason> [<detail>]
 # Unlink every UNTRACKED directory junction / symlink under <dir> without
 # following it. Links git tracks (mode 120000) are left alone: git removes them
 # as links, and unlinking one would read as a modification and make git refuse.
-# Prints the number unlinked; non-zero exit = guard failed (caller SKIPs).
+# In preserve mode, refuse Windows directory reparse points without unlinking
+# anything. Native POSIX symlinks are handled by Git. Prints the number unlinked.
 _tx_link_guard() {
-  local dir="$1" n=0 l ps skip rc rel
+  local dir="$1" mode="${2:-}" n=0 l ps skip rc rel ps_mode=()
+  if [ "$mode" = preserve ]; then
+    if ! _tx_is_win; then
+      [ ! -L "$dir" ] || return 1
+      echo 0
+      return
+    fi
+    ps_mode=(-CheckOnly)
+  fi
   local -; set -o pipefail # a failed ls-files must fail the guard, not read as "no tracked links"
   skip="$(mktemp)" || return 1
   git -C "$dir" ls-files -s -z 2>/dev/null | tr '\0' '\n' | awk '$1 == "120000" { sub(/^[^\t]*\t/, ""); print }' >"$skip" \
@@ -86,7 +95,7 @@ _tx_link_guard() {
     ps="$(command -v pwsh 2>/dev/null || command -v powershell.exe 2>/dev/null || command -v powershell 2>/dev/null)"
     [ -n "$ps" ] || { rm -f "$skip"; echo "no PowerShell for the junction guard" >&2; return 1; }
     "$ps" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$(cygpath -w "$_TX_HERE/junction-guard.ps1")" \
-      -Path "$(cygpath -w "$dir")" -SkipFile "$(cygpath -w "$skip")" | tr -d '\r'
+      -Path "$(cygpath -w "$dir")" -SkipFile "$(cygpath -w "$skip")" "${ps_mode[@]}" | tr -d '\r'
     rc="${PIPESTATUS[0]}"
     rm -f "$skip"
     return "$rc"
@@ -116,6 +125,41 @@ _tx_branch() {
   [ "$_TX_DRY" -eq 0 ] || { echo "WOULD branch -D"; return; }
   git -C "$repo" branch -D "$name" >/dev/null 2>&1 || { echo "SKIP git-refused-branch-delete"; return; }
   echo "DONE"
+}
+
+_tx_ignored_free() {
+  local ignored
+  ignored="$(git -C "$1" ls-files --others --ignored --exclude-standard --directory --no-empty-directory)" || return 1
+  [ -z "$ignored" ]
+}
+
+# ls-files quotes names containing line breaks. Lowercase tags mark
+# assume-unchanged entries and S marks skip-worktree. Neither is safe to drop.
+_tx_index_visible() {
+  (set -o pipefail
+   git -C "$1" ls-files -v | LC_ALL=C awk '/^[a-zS] / { hidden=1 } END { exit hidden+0 }')
+}
+
+# The parking container is a sibling of the original path.
+_tx_parked_path() {
+  case "$2" in ''|*[!A-Za-z0-9]*) return 1 ;; esac
+  printf '%s.sge-parked-%s/%s\n' "$1" "$2" "${1##*/}"
+}
+
+_tx_reverse_move() {
+  local repo path parked parent
+  printf -v repo '%q' "$1"; printf -v path '%q' "$2"; printf -v parked '%q' "$3"; printf -v parent '%q' "${2%/*}"
+  # Git appends the parked basename to the parent, checking the exact target.
+  printf '[ ! -e %s ] && [ ! -L %s ] && git -C %s worktree move %s %s\n' "$path" "$path" "$repo" "$parked" "$parent"
+}
+
+_tx_recent_reason() {
+  local minutes="${SGE_WT_RECENCY_GUARD_MIN:-10}" recent
+  case "$minutes" in ''|*[!0-9]*) echo recency-guard-unavailable; return ;; esac
+  [ "$minutes" -eq 0 ] && return 0
+  recent="$(find "$1" -type f ! -name .git -mmin "-$minutes" -print -quit 2>/dev/null)" \
+    || { echo recency-guard-unavailable; return; }
+  [ -z "$recent" ] || echo recent-files
 }
 
 # <worktree> -> 0 only when its .sge-wt-claim lease is absent or older than the
@@ -158,9 +202,12 @@ _tx_drop_expired_claim() {
   rm -f -- "$f"
 }
 
-_tx_worktree() { # <repo> <def> <name> <path> <tip>
-  local repo="$1" def="$2" name="$3" path="$4" tip="$5" por blk="" line cur want st n r
+_tx_worktree() { # <repo> <def> <name> <path> <tip> <bucket>
+  local repo="$1" def="$2" name="$3" path="$4" tip="$5" bucket="${6:-A}" por blk="" line cur want st n r
   [ "$path" != - ] || { _tx_out SKIP "$repo" worktree "$name" "$tip" no-path; return 1; }
+  case "$path" in
+    *.sge-parked-*/*) _tx_out SKIP "$repo" worktree "$name" "$tip" already-parked; return 1 ;;
+  esac
   if [ "$name" != "(detached)" ]; then
     _tx_safe_name "$name" || { _tx_out SKIP "$repo" worktree "$name" "$tip" unsafe-name; return 1; }
     ! _tx_protected "$name" "$def" || { _tx_out SKIP "$repo" worktree "$name" "$tip" protected; return 1; }
@@ -170,6 +217,7 @@ _tx_worktree() { # <repo> <def> <name> <path> <tip>
   want="$(_tx_real "$path")"
   [ -n "$want" ] || [ ! -e "$path" ] || { _tx_out SKIP "$repo" worktree "$name" "$tip" path-unreadable; return 1; }
   if [ -z "$want" ]; then # directory already gone: prune and settle the branch on its tip
+    [ "${_SGE_BULK_RECLAIM:-0}" != 1 ] || { _tx_out SKIP "$repo" worktree "$name" "$tip" path-missing; return 1; }
     printf '%s\n' "$por" | grep -qxF "worktree $path" && [ "$_TX_DRY" -eq 0 ] && git -C "$repo" worktree prune >/dev/null 2>&1
     r="GONE"; [ "$name" = "(detached)" ] || r="$(_tx_branch "$repo" "$name" "$tip")"
     _tx_out "${r%% *}" "$repo" worktree "$name" "$tip" worktree-already-gone "branch: $r"
@@ -194,12 +242,39 @@ _tx_worktree() { # <repo> <def> <name> <path> <tip>
     [ "$cur" = "$name" ] || { _tx_out SKIP "$repo" worktree "$name" "$tip" branch-changed "now=${cur:-detached}"; return 1; }
   fi
   st="$(git -C "$path" status --porcelain --untracked-files=no 2>/dev/null)" || { _tx_out SKIP "$repo" worktree "$name" "$tip" status-failed; return 1; }
-  [ -z "$st" ] || { _tx_out SKIP "$repo" worktree "$name" "$tip" dirty; return 1; }
-  if [ "$_TX_DRY" -eq 1 ]; then _tx_out WOULD "$repo" worktree "$name" "$tip" remove-worktree-and-branch; return 0; fi
+  if [ -n "$st" ] && { [ "${_SGE_BULK_RECLAIM:-0}" != 1 ] || [ "$bucket" != B ]; }; then
+    _tx_out SKIP "$repo" worktree "$name" "$tip" dirty; return 1
+  fi
+  if [ "${_SGE_BULK_RECLAIM:-0}" = 1 ]; then
+    _tx_ignored_free "$path" || { _tx_out SKIP "$repo" worktree "$name" "$tip" ignored-files; return 1; }
+    _tx_index_visible "$path" || { _tx_out SKIP "$repo" worktree "$name" "$tip" hidden-or-unreadable-index; return 1; }
+    r="$(_tx_recent_reason "$path")"
+    [ -z "$r" ] || { _tx_out SKIP "$repo" worktree "$name" "$tip" "$r"; return 1; }
+  fi
+  if [ "$_TX_DRY" -eq 1 ]; then
+    r=remove-worktree-and-branch
+    [ "${_SGE_BULK_RECLAIM:-0}" != 1 ] || r=park-worktree
+    _tx_out WOULD "$repo" worktree "$name" "$tip" "$r"; return 0
+  fi
   # The lease lock is held from the re-check through `git worktree remove` (which
   # deletes the admin dir and the lock with it), so no lease can be written or
   # refreshed between the check and the removal.
   sge_lease_lock "$path" || { _tx_out SKIP "$repo" worktree "$name" "$tip" lease-lock-busy; return 1; }
+  if [ "${_SGE_BULK_RECLAIM:-0}" = 1 ]; then
+    local parked
+    _tx_claim_free "$path" || { sge_lease_unlock; _tx_out SKIP "$repo" worktree "$name" "$tip" live-claim; return 1; }
+    _tx_link_guard "$path" preserve >/dev/null || { sge_lease_unlock; _tx_out SKIP "$repo" worktree "$name" "$tip" link-guard-failed; return 1; }
+    # Set POSIX permissions at creation. NTFS inherits the parent directory's ACL.
+    parked="$(_tx_parked_path "$path" "${_SGE_PARKING_ID:-}")" && (umask 077; mkdir -- "${parked%/*}") \
+      || { sge_lease_unlock; _tx_out SKIP "$repo" worktree "$name" "$tip" parking-path-unavailable; return 1; }
+    if ! git -C "$repo" -c core.longpaths=true worktree move "$path" "${parked%/*}" >/dev/null 2>&1; then
+      # Keep even a partially moved checkout discoverable in the journal.
+      sge_lease_unlock; _tx_out SKIP "$repo" worktree "$name" "$tip" parking-refused "$parked"; return 1
+    fi
+    sge_lease_unlock
+    _tx_out DONE "$repo" worktree "$name" "$tip" parked "$parked"
+    return
+  fi
   _tx_drop_expired_claim "$path" || { sge_lease_unlock; _tx_out SKIP "$repo" worktree "$name" "$tip" live-claim claim-changed; return 1; }
   n="$(_tx_link_guard "$path")" || { sge_lease_unlock; _tx_out SKIP "$repo" worktree "$name" "$tip" link-guard-failed; return 1; }
   git -C "$repo" -c core.longpaths=true worktree remove "$path" >/dev/null 2>&1 \
@@ -283,7 +358,9 @@ tx_main() {
         | .items[] | select((.bucket | IN($buckets | split(",")[]))
                             and (((.commands // []) | length > 0) or .bucket == "B")
                             and (.kind | IN("worktree", "branch", "remote-branch")))
-        | ["ITEM", $r, $d, .kind, .name, (.path // "-"), .tip, .bucket, (.reason // "-")] | @tsv end' "${audits[@]}" 2>/dev/null)" \
+        | ["ITEM", $r, $d, .kind, .name, (.path // "-"), .tip, .bucket, (.reason // "-")] | map(. // "" | tostring)
+      | if any(.[]; test("[\t\r\n]") or (explode | index(0) != null)) then error("unsupported control character in audit field")
+        else join("\t") end end' "${audits[@]}" 2>/dev/null)" \
     || { echo "cannot read the audit JSON" >&2; return 2; }
   plan="$(printf '%s\n' "$plan" | tr -d '\r')"
 
@@ -329,7 +406,10 @@ tx_main() {
     while IFS=$'\t' read -r repo def kind name path tip bucket reason; do
       [ -n "$repo" ] || continue
       printf -v qr '%q' "$repo"; printf -v qn '%q' "$name"
-      if [ "$kind" = remote-branch ]; then t="git -C $qr push origin $tip:refs/heads/$qn"
+      if [ "${_SGE_BULK_RECLAIM:-0}" = 1 ]; then
+        [ "$kind" = worktree ] || exit 1
+        t="$(_tx_reverse_move "$repo" "$path" "$(_tx_parked_path "$path" "${_SGE_PARKING_ID:-}")")"
+      elif [ "$kind" = remote-branch ]; then t="git -C $qr push origin $tip:refs/heads/$qn"
       else t="git -C $qr branch $qn $tip"; fi
       printf '%s,%s,%s,%s,%s,%s,%s,%s\n' "$(_tx_csv "$repo")" "$kind" "$(_tx_csv "$name")" "$(_tx_csv "$path")" \
         "$(_tx_csv "$tip")" "$bucket" "$(_tx_csv "$reason")" "$(_tx_csv "$t")"
@@ -349,7 +429,7 @@ tx_main() {
       while IFS=$'\t' read -r repo def kind name path tip bucket reason; do
         [ "$repo" = "$r" ] && [ "$kind" = "$k" ] || continue
         case "$kind" in
-          worktree) _tx_worktree "$repo" "$def" "$name" "$path" "$tip" || skipped+="$name " ;;
+          worktree) _tx_worktree "$repo" "$def" "$name" "$path" "$tip" "$bucket" || skipped+="$name " ;;
           branch) _tx_local_branch "$repo" "$def" "$name" "$tip" || skipped+="$name " ;;
           remote-branch)
             if [[ "$skipped" == *" $name "* ]]; then _tx_out SKIP "$repo" remote-branch "$name" "$tip" local-copy-skipped
@@ -359,6 +439,9 @@ tx_main() {
     done
   done <<<"$repos"
   echo "SUMMARY: done=$_TX_N_DONE skipped=$_TX_N_SKIP gone=$_TX_N_GONE would=$_TX_N_WOULD (recovery: $rec)"
+  if [ "${_SGE_BULK_RECLAIM:-0}" = 1 ] && [ "$_TX_DRY" -eq 0 ] && [ "$_TX_N_DONE" -ne "${#sels[@]}" ]; then
+    return 6
+  fi
   return 0
 }
 

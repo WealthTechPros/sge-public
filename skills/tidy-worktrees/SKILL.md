@@ -52,7 +52,7 @@ Unlocking outside Phase 2b, deleting without one confirmed plan, merging or forc
 /sge:tidy-worktrees --resume <ledger>  # resume the runner's queues ([runner](references/resumable-runner.md))
 ```
 
-**Bulk reclaim** is tracked in [#3723](https://github.com/WealthTechPros/sge/pull/3723). Until it ships, use the reviewed procedure below.
+To park worktrees in bulk, close agent sessions and run `skills/tidy-worktrees/reclaim.sh` from a plain terminal. [Recovery runbook](../../docs/worktree-reclaim-runbook.md).
 
 **Route by exposed capabilities, not client or repository host.** With `Agent` and a structured question tool, run Phases 1-5; otherwise use the [linear procedure](references/copilot-procedure.md). Same scripts and guards on GitHub, Azure DevOps and Forgejo.
 
