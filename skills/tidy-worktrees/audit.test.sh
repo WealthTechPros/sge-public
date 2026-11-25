@@ -171,11 +171,6 @@ check "azdo default index: completed PR with matching head -> A" "$(ra feat/squa
 check "azdo default index: no completed PR, net work -> B" "$(ra feat/none-live)" "B:NEEDS-DECISION:LIVE-UNMERGED"
 RA="$(INDEX_FAILS=1 ta_audit_repo "$R")"
 check "azdo default index: index failure -> C keep" "$(ra feat/squash)" "C:KEEP:pr-lookup-failed"
-STUB_HOST=forgejo
-RG="$(ta_audit_repo "$R")"
-check "forgejo: no closed-PR lookup -> squash merge is not A on PR evidence" \
-  "$(printf '%s' "$RG" | jq -r '.items[] | select(.kind=="remote-branch" and .name=="feat/squash") | .bucket' | tr -d '\r')" "B"
-check "forgejo: git-reachable branch still A" "$(printf '%s' "$RG" | jq -r '.items[] | select(.kind=="remote-branch" and .name=="feat/merged-ff") | .bucket' | tr -d '\r')" "A"
 STUB_HOST=unknown
 RU="$(ta_audit_repo "$R")"
 check "unknown host -> every item kept (lookup failed)" "$(printf '%s' "$RU" | jq '[.items[] | select(.kind=="remote-branch" and .bucket!="C")] | length')" "0"

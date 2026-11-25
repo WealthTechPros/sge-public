@@ -13,8 +13,7 @@
 # (P5 comment-item, P6 create-item — DP3 scope-gated, P8 link-close-on-merge).
 # Still absent: P7/P9's Jira realisations, which are S4 scope.
 #
-# Structure mirrors scripts/forgejo-adapter.sh (SPEC-094) point-for-point:
-# injection-safe field encoding (_ja_json_str = the _fa_json_str family), the
+# The adapter enforces injection-safe field encoding, the
 # read-only-vs-mutating boundary checked BEFORE any credential/host/project
 # resolution, host allow-list before auth, redirects pinned so the credential
 # never rides a cross-host redirect, and path components validated before URL
@@ -55,7 +54,7 @@
 #                                   when set, list-dispatchable additionally
 #                                   excludes items sitting in it.
 #
-# Read-only-vs-mutating boundary (the FORGEJO_ADAPTER_ALLOW_WRITE analogue):
+# Read-only and mutating operations:
 #   Read ops     — always allowed.
 #   Mutating ops — REFUSE unless JIRA_ADAPTER_ALLOW_WRITE=1, checked BEFORE any
 #                  credential, project, or JQL resolution, so a read-path
@@ -115,8 +114,7 @@
 # END_USAGE
 #
 # NOTE: shell state does NOT persist across agent tool calls; skills re-derive
-# their adapter context at the top of every shell call, exactly as for
-# with-repo-cwd.sh and forgejo-adapter.sh.
+# their adapter context at the top of every shell call.
 
 # SGD_ fallback: remove in SGD rename Phase 6
 # shellcheck source=sge-env-compat.sh
@@ -135,8 +133,7 @@ _JA_SELF="${BASH_SOURCE[0]}"
 _ja_err() { printf 'jira-adapter: error: %s\n' "$*" >&2; }
 
 # Emit a JSON string literal (surrounding quotes included) for arbitrary text —
-# the SAFE encoder for free-text fields, reproduced from forgejo-adapter.sh's
-# _fa_json_str. Prefer jq; the jq-less fallback escapes backslash FIRST, then
+# the encoder for free-text fields. Prefer jq; the jq-less fallback escapes backslash FIRST, then
 # double-quote, then the literal control bytes tab/CR/LF, so a value containing
 # '"' or '\' can never close the string early and inject sibling keys. Never
 # hand-interpolate untrusted item text straight into a JSON body — call this.

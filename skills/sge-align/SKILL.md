@@ -106,7 +106,7 @@ gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null \
   | jq 'length' 2>/dev/null || echo "n/a"                                   # Open drift issues at start
 ```
 
-Re-define `IR` at the top of every subsequent Bash call (SPEC-057 shell-state rule, as for `WRC`). Forgejo/Gitea routing and `SGE_FORGEJO_HOSTS`: [`references/forgejo-routing.md`](references/forgejo-routing.md).
+Re-define `IR` at the top of every subsequent Bash call (SPEC-057 shell-state rule, as for `WRC`).
 
 ## Sweep scope (governance layers L0–L8)
 
@@ -179,7 +179,7 @@ Every issue this command files carries a hidden stable key: `<!-- sge-drift-key:
 "$IR" list --label "$LABEL" --state open --limit 1000
 ```
 
-**Pagination guard:** `issue-read.sh list` handles Forgejo pagination automatically (page-based, 50/page) and emits the full set up to `--limit`. For GitHub, if the returned count equals `--limit`, re-run with a larger limit or use `gh api --paginate "repos/{owner}/{repo}/issues?labels=$LABEL&state=open&per_page=100"` — never reconcile against a silently truncated list. (`IR` must be defined from the Run context block above; re-define it at the top of this Bash call.)
+**Pagination guard:** For GitHub, if the returned count equals `--limit`, re-run with a larger limit or use `gh api --paginate "repos/{owner}/{repo}/issues?labels=$LABEL&state=open&per_page=100"` — never reconcile against a silently truncated list. (`IR` must be defined from the Run context block above; re-define it at the top of this Bash call.)
 
 - Gap **with** a matching open issue → leave it (comment only if evidence materially changed).
 - Gap **with no** issue → create one (Step 3).

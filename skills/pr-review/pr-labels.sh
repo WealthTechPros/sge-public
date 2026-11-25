@@ -208,7 +208,6 @@
 #                                             need to remove agent-reviewed first.
 #   pr-labels.sh status <pr>                  print "reviewing=<bool> reviewed=<bool> hold=<bool>
 #                                             changes-requested=<bool> excluded-reviewer=<bool>" (#2238)
-#                                             (Forgejo keeps the two-field form — #1419)
 #                                             (issue #1147: falls back to a
 #                                             GraphQL read — a separate quota
 #                                             bucket — on a REST failure; see
@@ -417,14 +416,6 @@ _sge_default_branch_cfg() { # -> the base repo's default-branch .claude/sge.json
 }
 _sge_ensure_agent_bot_login() {
   [ -n "${SGE_AGENT_BOT_LOGIN+x}" ] && return 0
-  # A Forgejo/Gitea repo is invisible to gh: the lookup below could only ever
-  # be a stray gh call on a forgejo host (SPEC-094 s2.2a, #3067). Trust no
-  # extra App there, which is what a failed lookup already yielded.
-  if [ "${_PRL_HOST:-github}" = "forgejo" ]; then
-    SGE_AGENT_BOT_LOGIN=""
-    export SGE_AGENT_BOT_LOGIN
-    return 0
-  fi
   SGE_AGENT_BOT_LOGIN="$(_sge_default_branch_cfg \
     | jq -r 'if type == "object" then (.agentBotLogin // empty | strings) else empty end' 2>/dev/null || true)"
   export SGE_AGENT_BOT_LOGIN
@@ -801,34 +792,26 @@ PR="${2:-}"
 [[ -n "$CMD" && -n "$PR" ]] || usage
 [[ "$PR" =~ ^[0-9]+$ ]] || { echo "error: <pr> must be a PR number, got '$PR'" >&2; exit 2; }
 
-# ── Forgejo/non-GitHub host routing (issue #1239) ─────────────────────────
-# Detect the git host from the current checkout's origin (or FORGEJO_ORIGIN).
-# On non-GitHub hosts, label read/write operations route through forgejo-adapter.sh
-# instead of gh, preserving every exit-code and output-contract in this script.
+# Route PR operations using the checkout origin.
 _PRL_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _PRL_WRC="${_PRL_SCRIPT_DIR}/../../scripts/with-repo-cwd.sh"
-_PRL_ADAPTER="${_PRL_SCRIPT_DIR}/../../scripts/forgejo-adapter.sh"
-_PRL_HOST="github"    # default: existing gh-based path, unchanged
-_PRL_ORIGIN=""        # origin URL used to derive slug / API base for Forgejo
-
-if [ -f "$_PRL_WRC" ] && [ -f "$_PRL_ADAPTER" ]; then
-  if [ -n "${FORGEJO_ORIGIN:-}" ]; then
-    _PRL_ORIGIN="$FORGEJO_ORIGIN"
-  else
-    _PRL_ORIGIN=$(git remote get-url origin 2>/dev/null) || _PRL_ORIGIN=""
-  fi
-  if [ -n "$_PRL_ORIGIN" ]; then
-    # shellcheck source=scripts/with-repo-cwd.sh
-    . "$_PRL_WRC"
-    _PRL_HOST=$(_wrc_host_kind "$(_wrc_url_host "$_PRL_ORIGIN")")
-  fi
+_PRL_HOST=github
+_PRL_ORIGIN=$(git remote get-url origin 2>/dev/null) || _PRL_ORIGIN=""
+if [ -n "$_PRL_ORIGIN" ]; then
+  # shellcheck source=scripts/with-repo-cwd.sh
+  . "$_PRL_WRC" || exit 1
+  _PRL_HOST=$(_wrc_host_kind "$(_wrc_url_host "$_PRL_ORIGIN")")
+  case "$_PRL_HOST" in
+    github|azdo) ;;
+    *) echo "pr-labels: unsupported origin host" >&2; exit 1 ;;
+  esac
 fi
 
 # ── Azure Repos host dispatch (SPEC-110 S4, issue #2985) ──────────────────
 # The whole gate state machine for an Azure Repos PR lives in
 # pr-labels-azdo.sh (PR tags, a compare-and-swap claim ref, vote + thread
 # verdicts bound to the head, the DP5 CI gate). It never falls through to
-# the gh code below; GitHub and Forgejo PRs never reach this branch.
+# the GitHub code below.
 if [ "$_PRL_HOST" = "azdo" ]; then
   # shellcheck source=skills/pr-review/pr-labels-azdo.sh
   . "${_PRL_SCRIPT_DIR}/pr-labels-azdo.sh"
@@ -837,25 +820,6 @@ if [ "$_PRL_HOST" = "azdo" ]; then
   exit "$_prl_azdo_rc"
 fi
 
-# ── Forgejo/Gitea host dispatch (SPEC-094 §2.2a, issue #3067) ─────────────
-# The gate state machine for a Forgejo PR is ported slice by slice into
-# pr-labels-forgejo.sh. A subcommand whose slice has not landed answers
-# $_PRL_FJ_NOT_IMPLEMENTED (75); that alone falls through to the inline
-# Forgejo path below (#1239), so nothing regresses mid-port. Every other exit
-# code, including the exit 2 refusal of an unsupported subcommand, is final and
-# never reaches gh.
-# The fall-through needs BOTH the 75 and the stub's own marker, so a real slice
-# that happens to propagate a 75 from a command stays a final refusal.
-if [ "$_PRL_HOST" = "forgejo" ]; then
-  # shellcheck source=skills/pr-review/pr-labels-forgejo.sh
-  . "${_PRL_SCRIPT_DIR}/pr-labels-forgejo.sh" || exit 1   # a missing file refuses, never skips
-  _prl_fj_rc=0
-  _PRL_FJ_STUB_HIT=0
-  _prl_forgejo_main "$@" || _prl_fj_rc=$?
-  if [ "$_prl_fj_rc" -ne "$_PRL_FJ_NOT_IMPLEMENTED" ] || [ "$_PRL_FJ_STUB_HIT" != 1 ]; then
-    exit "$_prl_fj_rc"
-  fi
-fi
 
 # _attest_dir_trusted <dir> -- create (0700) and verify a daemon-injected attestation
 # directory: a real directory (not a symlink), owned by this user, no group/other
@@ -926,8 +890,7 @@ hold_status() {
 # REST→GraphQL→fail-loud reader, kept deliberately separate from
 # label_status rather than folded into its output — label_status's exact
 # string "reviewing=false reviewed=true" is depended on verbatim elsewhere
-# in this script (the post-swap verification loop in `pass`) and by
-# pr-labels-forgejo-adapter.test.sh; changing its shape would break both.
+# in this script (the post-swap verification loop in `pass`).
 changes_requested_status() {
   _read_label_state '"changes-requested=\(index("changes-requested")!=null)"' changes_requested_status 'changes-requested label' 2238
 }
@@ -1316,7 +1279,7 @@ assert_required_checks_green() {
 
 # Follow-up preservation gate (issue #859): assert_followups_preserved lives in
 # followups-gate.sh so the Azure Repos path (pr-labels-azdo.sh) shares the ONE
-# scanner instead of a copy. Same function, same behaviour on GitHub/Forgejo.
+# scanner instead of a copy.
 # Loaded on first use (the real definition replaces this stub), so merely
 # sourcing the function definitions above the dispatcher never needs the file.
 assert_followups_preserved() {
@@ -1380,86 +1343,6 @@ _repo_has_dedicated_automerge_bot() {
     -exec grep -lq "Standing automation for WealthTech Pros' Model-B autonomous review loop" {} \; -print -quit 2>/dev/null)"
   [ -n "$hit" ]
 }
-
-# ── Forgejo function overrides (issue #1239) ──────────────────────────────
-# Redefine the gh-calling label helpers for the Forgejo/Gitea REST adapter path.
-# Output contracts (label_status → "reviewing=<bool> reviewed=<bool>",
-# fix_claim_status → "fixing=<bool>") and call signatures are preserved exactly.
-# The exit-code contract (3/4/5/6/7) is preserved: every guard that inspects
-# label state now reads via the adapter, so the same logic fires the same exit.
-if [ "$_PRL_HOST" = "forgejo" ]; then
-  # All mutating adapter calls in this block need FORGEJO_ADAPTER_ALLOW_WRITE=1.
-  export FORGEJO_ADAPTER_ALLOW_WRITE=1
-
-  add_label() {
-    "$_PRL_ADAPTER" pr-add-label "$_PRL_ORIGIN" "$PR" "$1" >/dev/null
-  }
-
-  remove_label() {
-    local _out
-    if ! _out=$("$_PRL_ADAPTER" pr-remove-label "$_PRL_ORIGIN" "$PR" "$1" 2>&1); then
-      echo "warning: failed to remove label '$1' from PR #$PR (Forgejo): $_out" >&2
-    fi
-  }
-
-  label_status() {
-    local _out _errfile
-    _errfile=$(mktemp)
-    if _out=$("$_PRL_ADAPTER" pr-label-status "$_PRL_ORIGIN" "$PR" 2>"$_errfile"); then
-      rm -f "$_errfile"
-      printf '%s\n' "$_out"
-      return 0
-    fi
-    local _err
-    _err=$(cat "$_errfile" 2>/dev/null)
-    rm -f "$_errfile"
-    echo "error: could not read label state for PR #$PR (Forgejo adapter): $_err" >&2
-    return 1
-  }
-
-  fix_claim_status() {
-    local _out _errfile
-    _errfile=$(mktemp)
-    if _out=$("$_PRL_ADAPTER" pr-fix-claim-status "$_PRL_ORIGIN" "$PR" 2>"$_errfile"); then
-      rm -f "$_errfile"
-      printf '%s\n' "$_out"
-      return 0
-    fi
-    local _err
-    _err=$(cat "$_errfile" 2>/dev/null)
-    rm -f "$_errfile"
-    echo "error: could not read pr-fixing claim for PR #$PR (Forgejo adapter): $_err" >&2
-    return 1
-  }
-
-  ensure_labels() {
-    "$_PRL_ADAPTER" pr-ensure-label "$_PRL_ORIGIN" \
-      "pr-reviewing" "FBCA04" "PR review in progress (SGE)"
-    "$_PRL_ADAPTER" pr-ensure-label "$_PRL_ORIGIN" \
-      "pr-reviewed"  "0E8A16" "Reviewed via SGE PR-review gate"
-    "$_PRL_ADAPTER" pr-ensure-label "$_PRL_ORIGIN" \
-      "changes-requested" "D93F0B" "Review failed — findings need addressing (SGE)"
-  }
-
-  ensure_fixing_label() {
-    "$_PRL_ADAPTER" pr-ensure-label "$_PRL_ORIGIN" \
-      "pr-fixing" "FBCA04" "CI-fix in progress (SGE pr-fix)"
-  }
-
-  is_draft() {
-    local _val _errfile
-    _errfile=$(mktemp)
-    if ! _val=$("$_PRL_ADAPTER" pr-is-draft "$_PRL_ORIGIN" "$PR" 2>"$_errfile"); then
-      local _err
-      _err=$(cat "$_errfile" 2>/dev/null)
-    rm -f "$_errfile"
-      echo "error: could not determine draft status for PR #$PR (Forgejo adapter): $_err" >&2
-      return 1
-    fi
-    rm -f "$_errfile"
-    [[ "$_val" == "true" ]]
-  }
-fi
 
 # Resolve the agent-bot login once in this shell for the claim subcommands, so
 # the readers below (often run in $(...) subshells) inherit it instead of each
@@ -1704,89 +1587,87 @@ case "$CMD" in
     # Distinct exit 10. Same trusted-author filter as review-coverage/
     # sync-check (issue #2294/#1941) so an outside, non-collaborator comment
     # cannot forge a verdict to trip (or dodge) this check either way.
-    if [[ "${_PRL_HOST:-github}" != "forgejo" ]]; then
-      _PASS_HEAD=$(gh pr view "$PR" --json headRefOid --jq .headRefOid 2>/dev/null) || _PASS_HEAD=""
-      _PASS_REPO_FULL="${GH_REPO:-$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || true)}"
-      # SPEC-090: ONE invariant, and it is the merge gate's own reader. `pass` consults only
-      # `gate-labels.sh latest-for-head` (reviews AND issue comments, the gate's trust rules,
-      # its fence/structural parsing), so it cannot disagree with `gate-labels.sh current`
-      # (re-checked by sge-auto-merge.yml, which requires an exact `pass`):
-      #   1. an unresolvable head or repo, or any fetch/parse failure of that reader, refuses;
-      #   2. when the reader reports a verdict word for this head it must be EXACTLY `pass`
-      #      (incomplete, malformed, fail, garbled and empty-valued all refuse);
-      #   3. when it reports NO verdict for the head, behaviour is unchanged: a body the reader
-      #      cannot see (BOM, fullwidth colon, untrusted author, PAT comment fallback) is just as
-      #      invisible to `current`, so it can never produce a merge.
-      if [[ -z "$_PASS_HEAD" || -z "$_PASS_REPO_FULL" ]]; then
-        echo "refusing: PR #$PR -- the PR head or the repository could not be resolved (head='${_PASS_HEAD:0:12}', repo='${_PASS_REPO_FULL}'), so the verdict guard cannot run. Fail closed (SPEC-090)." >&2
-        exit 11
-      fi
-      if ! _PASS_GL=$(bash "$(dirname "${BASH_SOURCE[0]}")/gate-labels.sh" latest-for-head "$PR" "$_PASS_HEAD" 2>/dev/null); then
-        echo "refusing: PR #$PR -- the trusted verdicts for the current head (${_PASS_HEAD:0:12}) could not be read or parsed (API error or garbage). Fail closed (SPEC-090)." >&2
-        exit 11
-      fi
-      _PASS_GL_WORD=$(printf '%s' "${_PASS_GL#*$'\t'}" | tr -d '[:space:]')
-      if [[ -n "$_PASS_GL_WORD" && "$_PASS_GL_WORD" != "pass" ]]; then
-        echo "refusing: PR #$PR -- the latest trusted sge-verdict for the current head (${_PASS_HEAD:0:12}) is '${_PASS_GL_WORD:0:40}', not exactly 'pass' (incomplete, malformed, fail and garbled values all block). Only a clean 'verdict: pass' may proceed (SPEC-090)." >&2
-        exit 11
-      fi
-      if [[ -n "$_PASS_HEAD" && -n "$_PASS_REPO_FULL" ]]; then
-        # Deliberately WIDER than the gate's trust (gate-labels.sh GL_TRUST_FILTER): this read can
-        # only REFUSE (shadow mode), never admit, so extra authors fail safe.
-        _PASS_TRUST='.user.login == "wtp-sge[bot]" or .user.login == "github-actions[bot]"
-             or (((.author_association // "") | ascii_upcase) as $assoc
-                 | $assoc == "OWNER" or $assoc == "MEMBER" or $assoc == "COLLABORATOR")'
-        _PASS_LAST=$(gh api "repos/$_PASS_REPO_FULL/pulls/$PR/reviews" --paginate \
-          --jq '[.[] | select(.body != null) | select('"$_PASS_TRUST"') | select(.body | test("```sge-verdict")) | .body] | last // empty' \
-          2>/dev/null) || {
-            echo "refusing: PR #$PR -- the shadow-verdict read for the current head (${_PASS_HEAD:0:12}) failed. Fail closed (SPEC-090)." >&2
-            exit 11
-          }
-        if [[ -n "$_PASS_LAST" ]]; then
-          # Fallbacks (found by adversarial re-verification, issue #2653): a
-          # trusted, fence-matching verdict whose body has no matchable
-          # commit/sha/head or mode line makes BOTH grep pipelines below exit
-          # non-zero (no match). Under this script's `set -euo pipefail`
-          # (top of file), an unguarded assignment from a failing pipeline
-          # aborts the WHOLE `pass` command with an undiagnosed exit 1 —
-          # colliding with the pre-existing is_draft refusal's exit 1 and
-          # giving no diagnostic, unlike every other guard in this file.
-          # Mirrors the `|| _PASS_HEAD=""` / `|| _PASS_LAST=""` fallbacks two
-          # statements above: an empty result here just means "this verdict
-          # doesn't match the shadow-laundering shape", which correctly
-          # falls through to a normal pass (fails closed either way; this
-          # only fixes the diagnosability, not a security gap).
-          # Extracted in-shell (sge#3642 review): no pipe to SIGPIPE under
-          # pipefail and no here-string temp file whose failure would read as
-          # "not a shadow verdict" and fall through to a normal pass. Same
-          # first-match, case-insensitive semantics as the grep -Eio form.
-          _PASS_LAST_SHA="" _PASS_LAST_MODE=""
-          _pl_nc_restore=0 _pl_f_restore=0
-          shopt -q nocasematch || { shopt -s nocasematch; _pl_nc_restore=1; }
-          case $- in *f*) ;; *) set -f; _pl_f_restore=1 ;; esac
-          _pl_ifs="$IFS"; IFS=$'\n'
-          # shellcheck disable=SC2206  # split on newlines only, globbing off
-          _pl_lines=($_PASS_LAST)
-          IFS="$_pl_ifs"
-          if [[ "$_pl_f_restore" = 1 ]]; then set +f; fi
-          for _pl_line in ${_pl_lines[@]+"${_pl_lines[@]}"}; do
-            if [[ -z "$_PASS_LAST_SHA" && $_pl_line =~ ^[[:space:]]*(commit|sha|head)[[:space:]]*:[[:space:]]*([0-9a-f]+) ]]; then
-              _PASS_LAST_SHA="${BASH_REMATCH[2]}"
-            fi
-            if [[ -z "$_PASS_LAST_MODE" && $_pl_line =~ ^[[:space:]]*mode[[:space:]]*:.* ]]; then
-              _PASS_LAST_MODE="${BASH_REMATCH[0]}"
-            fi
-          done
-          if [[ "$_pl_nc_restore" = 1 ]]; then shopt -u nocasematch; fi
-          _PASS_LAST_SHA_NORM=$(printf '%s' "$_PASS_LAST_SHA" | tr '[:upper:]' '[:lower:]')
-          _PASS_HEAD_NORM=$(printf '%s' "$_PASS_HEAD" | tr '[:upper:]' '[:lower:]')
-          if [[ -n "$_PASS_LAST_SHA_NORM" && ${#_PASS_LAST_SHA_NORM} -ge 7 \
-                && "$_PASS_HEAD_NORM" == "$_PASS_LAST_SHA_NORM"* \
-                && "$_PASS_LAST_MODE" == *shadow* ]]; then
-            echo "refusing: PR #$PR — the latest trusted sge-verdict at the current head (${_PASS_HEAD:0:12}) is a PR Warden shadow-mode verdict ($_PASS_LAST_MODE). A shadow verdict is deliberately untrusted for gate purposes and cannot be promoted via 'pass' without a fresh, real review posted at this head (issue #2653)." >&2
-            echo "Run a real (non-shadow) /sge:pr-review at this head first — it will post its own fresh verdict before calling pass — or if this dispatch IS meant to be shadow mode, call 'shadow-pass' instead of 'pass'." >&2
-            exit 10
+    _PASS_HEAD=$(gh pr view "$PR" --json headRefOid --jq .headRefOid 2>/dev/null) || _PASS_HEAD=""
+    _PASS_REPO_FULL="${GH_REPO:-$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || true)}"
+    # SPEC-090: ONE invariant, and it is the merge gate's own reader. `pass` consults only
+    # `gate-labels.sh latest-for-head` (reviews AND issue comments, the gate's trust rules,
+    # its fence/structural parsing), so it cannot disagree with `gate-labels.sh current`
+    # (re-checked by sge-auto-merge.yml, which requires an exact `pass`):
+    #   1. an unresolvable head or repo, or any fetch/parse failure of that reader, refuses;
+    #   2. when the reader reports a verdict word for this head it must be EXACTLY `pass`
+    #      (incomplete, malformed, fail, garbled and empty-valued all refuse);
+    #   3. when it reports NO verdict for the head, behaviour is unchanged: a body the reader
+    #      cannot see (BOM, fullwidth colon, untrusted author, PAT comment fallback) is just as
+    #      invisible to `current`, so it can never produce a merge.
+    if [[ -z "$_PASS_HEAD" || -z "$_PASS_REPO_FULL" ]]; then
+      echo "refusing: PR #$PR -- the PR head or the repository could not be resolved (head='${_PASS_HEAD:0:12}', repo='${_PASS_REPO_FULL}'), so the verdict guard cannot run. Fail closed (SPEC-090)." >&2
+      exit 11
+    fi
+    if ! _PASS_GL=$(bash "$(dirname "${BASH_SOURCE[0]}")/gate-labels.sh" latest-for-head "$PR" "$_PASS_HEAD" 2>/dev/null); then
+      echo "refusing: PR #$PR -- the trusted verdicts for the current head (${_PASS_HEAD:0:12}) could not be read or parsed (API error or garbage). Fail closed (SPEC-090)." >&2
+      exit 11
+    fi
+    _PASS_GL_WORD=$(printf '%s' "${_PASS_GL#*$'\t'}" | tr -d '[:space:]')
+    if [[ -n "$_PASS_GL_WORD" && "$_PASS_GL_WORD" != "pass" ]]; then
+      echo "refusing: PR #$PR -- the latest trusted sge-verdict for the current head (${_PASS_HEAD:0:12}) is '${_PASS_GL_WORD:0:40}', not exactly 'pass' (incomplete, malformed, fail and garbled values all block). Only a clean 'verdict: pass' may proceed (SPEC-090)." >&2
+      exit 11
+    fi
+    if [[ -n "$_PASS_HEAD" && -n "$_PASS_REPO_FULL" ]]; then
+      # Deliberately WIDER than the gate's trust (gate-labels.sh GL_TRUST_FILTER): this read can
+      # only REFUSE (shadow mode), never admit, so extra authors fail safe.
+      _PASS_TRUST='.user.login == "wtp-sge[bot]" or .user.login == "github-actions[bot]"
+           or (((.author_association // "") | ascii_upcase) as $assoc
+               | $assoc == "OWNER" or $assoc == "MEMBER" or $assoc == "COLLABORATOR")'
+      _PASS_LAST=$(gh api "repos/$_PASS_REPO_FULL/pulls/$PR/reviews" --paginate \
+        --jq '[.[] | select(.body != null) | select('"$_PASS_TRUST"') | select(.body | test("```sge-verdict")) | .body] | last // empty' \
+        2>/dev/null) || {
+          echo "refusing: PR #$PR -- the shadow-verdict read for the current head (${_PASS_HEAD:0:12}) failed. Fail closed (SPEC-090)." >&2
+          exit 11
+        }
+      if [[ -n "$_PASS_LAST" ]]; then
+        # Fallbacks (found by adversarial re-verification, issue #2653): a
+        # trusted, fence-matching verdict whose body has no matchable
+        # commit/sha/head or mode line makes BOTH grep pipelines below exit
+        # non-zero (no match). Under this script's `set -euo pipefail`
+        # (top of file), an unguarded assignment from a failing pipeline
+        # aborts the WHOLE `pass` command with an undiagnosed exit 1 —
+        # colliding with the pre-existing is_draft refusal's exit 1 and
+        # giving no diagnostic, unlike every other guard in this file.
+        # Mirrors the `|| _PASS_HEAD=""` / `|| _PASS_LAST=""` fallbacks two
+        # statements above: an empty result here just means "this verdict
+        # doesn't match the shadow-laundering shape", which correctly
+        # falls through to a normal pass (fails closed either way; this
+        # only fixes the diagnosability, not a security gap).
+        # Extracted in-shell (sge#3642 review): no pipe to SIGPIPE under
+        # pipefail and no here-string temp file whose failure would read as
+        # "not a shadow verdict" and fall through to a normal pass. Same
+        # first-match, case-insensitive semantics as the grep -Eio form.
+        _PASS_LAST_SHA="" _PASS_LAST_MODE=""
+        _pl_nc_restore=0 _pl_f_restore=0
+        shopt -q nocasematch || { shopt -s nocasematch; _pl_nc_restore=1; }
+        case $- in *f*) ;; *) set -f; _pl_f_restore=1 ;; esac
+        _pl_ifs="$IFS"; IFS=$'\n'
+        # shellcheck disable=SC2206  # split on newlines only, globbing off
+        _pl_lines=($_PASS_LAST)
+        IFS="$_pl_ifs"
+        if [[ "$_pl_f_restore" = 1 ]]; then set +f; fi
+        for _pl_line in ${_pl_lines[@]+"${_pl_lines[@]}"}; do
+          if [[ -z "$_PASS_LAST_SHA" && $_pl_line =~ ^[[:space:]]*(commit|sha|head)[[:space:]]*:[[:space:]]*([0-9a-f]+) ]]; then
+            _PASS_LAST_SHA="${BASH_REMATCH[2]}"
           fi
+          if [[ -z "$_PASS_LAST_MODE" && $_pl_line =~ ^[[:space:]]*mode[[:space:]]*:.* ]]; then
+            _PASS_LAST_MODE="${BASH_REMATCH[0]}"
+          fi
+        done
+        if [[ "$_pl_nc_restore" = 1 ]]; then shopt -u nocasematch; fi
+        _PASS_LAST_SHA_NORM=$(printf '%s' "$_PASS_LAST_SHA" | tr '[:upper:]' '[:lower:]')
+        _PASS_HEAD_NORM=$(printf '%s' "$_PASS_HEAD" | tr '[:upper:]' '[:lower:]')
+        if [[ -n "$_PASS_LAST_SHA_NORM" && ${#_PASS_LAST_SHA_NORM} -ge 7 \
+              && "$_PASS_HEAD_NORM" == "$_PASS_LAST_SHA_NORM"* \
+              && "$_PASS_LAST_MODE" == *shadow* ]]; then
+          echo "refusing: PR #$PR — the latest trusted sge-verdict at the current head (${_PASS_HEAD:0:12}) is a PR Warden shadow-mode verdict ($_PASS_LAST_MODE). A shadow verdict is deliberately untrusted for gate purposes and cannot be promoted via 'pass' without a fresh, real review posted at this head (issue #2653)." >&2
+          echo "Run a real (non-shadow) /sge:pr-review at this head first — it will post its own fresh verdict before calling pass — or if this dispatch IS meant to be shadow mode, call 'shadow-pass' instead of 'pass'." >&2
+          exit 10
         fi
       fi
     fi
@@ -1913,15 +1794,6 @@ case "$CMD" in
         exit 7
       fi
     fi
-    # Forgejo path (issue #1239): the thread-resolution gate is GitHub-specific
-    # (GraphQL reviewThreads). Forgejo/Gitea has a different PR review model and
-    # no exact equivalent of required_review_thread_resolution. Force-skip the
-    # gate on Forgejo — all other guards (claim-check, follow-up, convergence,
-    # required-checks, label swap) are preserved on both paths.
-    if [[ "$_PRL_HOST" == "forgejo" && "$SKIP_THREAD_CHECK" != "true" ]]; then
-      SKIP_THREAD_CHECK=true
-      echo "PR #$PR: thread-resolution gate not applicable on Forgejo/Gitea host — skipping (issue #1239)" >&2
-    fi
     # Human-hold gate (issue #1393): a `hold` label is a human sign-off
     # requirement applied either explicitly (prose "HOLD:" in the PR body parsed
     # at review start) or automatically by /sge:pr-review when a security
@@ -1936,25 +1808,18 @@ case "$CMD" in
     # (not 'pass') so they release pr-reviewing without promoting; this guard
     # also defends against any path that calls 'pass' directly while hold is set.
     # Distinct exit 8.
-    # GitHub-only for now (issue #1393 + #1419): the hold mechanism (apply-hold,
-    # held, hold_status) is wired against the gh label path; on a Forgejo host the
-    # gate is skipped so the adapter's own review model governs — matching how the
-    # thread-resolution gate above is host-scoped. `status` likewise keeps its
-    # two-field (reviewing/reviewed) output on Forgejo (see the `status` command).
-    if [[ "${_PRL_HOST:-github}" != "forgejo" ]]; then
-      HOLD_STATUS=$(hold_status 2>/dev/null) || {
-        echo "refusing: PR #$PR — could not read hold label state; human-hold gate fails closed (issue #1393)" >&2
-        echo "Fix gh access (auth, rate limit, network) and retry." >&2
-        echo "To release the pr-reviewing claim without promoting, run: pr-labels.sh held $PR" >&2
-        exit 8
-      }
-      if [[ "$HOLD_STATUS" == *"hold=true"* ]]; then
-        echo "refusing: PR #$PR carries the '$HOLD' label — the gate cannot open while a human sign-off is pending (issue #1393)" >&2
-        echo "The review verdict has been posted. Remove the '$HOLD' label once sign-off is obtained; the next" >&2
-        echo "review cycle will detect the clean prior verdict at the same head and promote normally." >&2
-        echo "To release the pr-reviewing claim without promoting, run: pr-labels.sh held $PR" >&2
-        exit 8
-      fi
+    HOLD_STATUS=$(hold_status 2>/dev/null) || {
+      echo "refusing: PR #$PR — could not read hold label state; human-hold gate fails closed (issue #1393)" >&2
+      echo "Fix gh access (auth, rate limit, network) and retry." >&2
+      echo "To release the pr-reviewing claim without promoting, run: pr-labels.sh held $PR" >&2
+      exit 8
+    }
+    if [[ "$HOLD_STATUS" == *"hold=true"* ]]; then
+      echo "refusing: PR #$PR carries the '$HOLD' label — the gate cannot open while a human sign-off is pending (issue #1393)" >&2
+      echo "The review verdict has been posted. Remove the '$HOLD' label once sign-off is obtained; the next" >&2
+      echo "review cycle will detect the clean prior verdict at the same head and promote normally." >&2
+      echo "To release the pr-reviewing claim without promoting, run: pr-labels.sh held $PR" >&2
+      exit 8
     fi
     # Thread resolution gate (issue #652 / ppp#9923):
     # Branch rulesets with required_review_thread_resolution=true block merge
@@ -2130,68 +1995,16 @@ case "$CMD" in
     # the converged ref tip as the authoritative head for the --expect-head
     # comparison (criterion: compare against the branch ref tip, not solely the
     # PR object head GitHub returns).
-    #
-    # Forgejo path (issue #1239): Gitea/Forgejo PR objects don't have the async
-    # lag that necessitates 3-way convergence polling. A single REST read for the
-    # PR head SHA is sufficient. The CONVERGED_HEAD global is still set so the
-    # --expect-head race guard works identically on both paths.
     if [[ "$AUTO_MERGE" == "true" || -n "$EXPECT_HEAD" ]]; then
-      if [[ "$_PRL_HOST" == "forgejo" ]]; then
-        _FJ_HEAD=$("$_PRL_ADAPTER" pr-head-sha "$_PRL_ORIGIN" "$PR" 2>&1) \
-          || { echo "error: could not read PR head SHA for PR #$PR (Forgejo): $_FJ_HEAD" >&2; exit 1; }
-        CONVERGED_HEAD="$_FJ_HEAD"
-        echo "PR #$PR: Forgejo head SHA = ${CONVERGED_HEAD:0:9} (issue #1239)" >&2
-      else
-        await_head_convergence || exit 1
-      fi
+      await_head_convergence || exit 1
     fi
     # Required-check guard (issue #885): before arming auto-merge, refuse if any
     # genuinely-required check is still red/pending. Runs BEFORE the label swap
     # so a red required gate blocks BOTH the pr-reviewed promotion and the arm —
     # the code-content verdict cannot talk past an independently-red required
     # gate (spec-drift, issue-link, CI). Distinct from head-convergence (#288).
-    #
-    # Forgejo path (issue #1239): use Gitea's combined commit status at the
-    # converged head SHA as the required-check proxy. Any failure/error state
-    # refuses the promotion — matching the fail-closed posture of the GitHub
-    # gate. "success" proceeds; "pending" refuses (CI still running).
-    #
-    # "none" means the head has NO commit statuses. On a repo with NO CI
-    # configured that is a legitimate green ("nothing to wait for"); but on a
-    # repo WITH CI it can also mean CI has not registered its first status yet —
-    # proceeding then merges before any check runs. Because the adapter cannot
-    # distinguish the two, default behaviour treats "none" as proceed (the
-    # no-CI-configured assumption) and SGE_FORGEJO_REQUIRE_CI=1 flips it to
-    # fail-closed for repos that DO run CI and must never merge on an empty
-    # status set. "unknown" (an unrecognised/unresolvable status — see
-    # forgejo-adapter.sh pr-commit-status) ALWAYS refuses: it is never a
-    # confirmed green.
     if [[ "$AUTO_MERGE" == "true" ]]; then
-      if [[ "$_PRL_HOST" == "forgejo" ]]; then
-        _FJ_CI_STATUS=$("$_PRL_ADAPTER" pr-commit-status "$_PRL_ORIGIN" "$CONVERGED_HEAD" 2>/dev/null) \
-          || _FJ_CI_STATUS="unknown"
-        case "$_FJ_CI_STATUS" in
-          failure|error)
-            echo "refusing: PR #$PR Forgejo commit CI status is '${_FJ_CI_STATUS}' — will NOT merge (issue #885, Forgejo path, issue #1239)" >&2
-            exit 1 ;;
-          pending)
-            echo "refusing: PR #$PR Forgejo commit CI status is 'pending' — will NOT merge while CI is still running (issue #885, Forgejo path, issue #1239)" >&2
-            exit 1 ;;
-          none)
-            if [[ "${SGE_FORGEJO_REQUIRE_CI:-0}" == "1" ]]; then
-              echo "refusing: PR #$PR Forgejo commit status is 'none' (no CI statuses on the head) and SGE_FORGEJO_REQUIRE_CI=1 — will NOT merge; a required check may not have registered yet (issue #885, issue #1239)" >&2
-              exit 1
-            fi
-            echo "PR #$PR: Forgejo commit status = 'none' (no CI configured) — proceeding with merge (issue #1239)" >&2 ;;
-          success)
-            echo "PR #$PR: Forgejo commit status = 'success' — proceeding with merge (issue #1239)" >&2 ;;
-          *)
-            echo "refusing: PR #$PR Forgejo commit CI status is '${_FJ_CI_STATUS}' (unrecognised — never a confirmed green) — will NOT merge (issue #885, issue #1239)" >&2
-            exit 1 ;;
-        esac
-      else
-        assert_required_checks_green || exit 1
-      fi
+      assert_required_checks_green || exit 1
     fi
     # Race guard: a push landing between review and promotion means the gate
     # would open for UNREVIEWED commits — and auto-merge can squash the PR at
@@ -2234,35 +2047,27 @@ case "$CMD" in
     # a hold applied inside that window would otherwise be missed. One cheap
     # re-read here shrinks the TOCTOU window to a single API round-trip. Same
     # fail-closed semantics as the first check.
-    if [[ "${_PRL_HOST:-github}" != "forgejo" ]]; then
-      HOLD_STATUS=$(hold_status 2>/dev/null) || {
-        echo "refusing: PR #$PR — could not re-verify hold label state before the label swap; human-hold gate fails closed (issue #1393)" >&2
-        echo "To release the pr-reviewing claim without promoting, run: pr-labels.sh held $PR" >&2
-        exit 8
-      }
-      if [[ "$HOLD_STATUS" == *"hold=true"* ]]; then
-        echo "refusing: PR #$PR — the '$HOLD' label appeared during pass; the gate cannot open (issue #1393)" >&2
-        echo "To release the pr-reviewing claim without promoting, run: pr-labels.sh held $PR" >&2
-        exit 8
-      fi
+    HOLD_STATUS=$(hold_status 2>/dev/null) || {
+      echo "refusing: PR #$PR — could not re-verify hold label state before the label swap; human-hold gate fails closed (issue #1393)" >&2
+      echo "To release the pr-reviewing claim without promoting, run: pr-labels.sh held $PR" >&2
+      exit 8
+    }
+    if [[ "$HOLD_STATUS" == *"hold=true"* ]]; then
+      echo "refusing: PR #$PR — the '$HOLD' label appeared during pass; the gate cannot open (issue #1393)" >&2
+      echo "To release the pr-reviewing claim without promoting, run: pr-labels.sh held $PR" >&2
+      exit 8
     fi
     add_label "$REVIEWED"           # open the gate first…
     remove_label "$REVIEWING"       # …then drop the amber label
     remove_label "$CHANGES_REQUESTED" # mutually exclusive with pr-reviewed (#2238)
-    # Clear any prior excluded-reviewer state (issue #2293). Not Forgejo-gated:
-    # remove_label is fail-silent and the excluded-reviewer subcommand runs on
-    # both host types — consistent with how `held` and `remove_label` work.
+    # Clear any prior excluded-reviewer state (issue #2293).
     remove_label "$EXCLUDED_REVIEWER"
     # Retry the verify check: GitHub's API can lag a write by a few seconds.
-    # The Forgejo adapter writes synchronously (the label mutation has already
-    # committed when the POST returns), so the inter-attempt sleep is pure dead
-    # time there — skip it. The retry loop still runs (cheap re-read) as a
-    # defensive check; only the 2s wait is elided on the Forgejo path.
     STATUS=""
     for attempt in 1 2 3; do
       STATUS="$(label_status)" || { echo "error: could not read label state for PR #$PR after swap" >&2; exit 1; }
       [[ "$STATUS" == "reviewing=false reviewed=true" ]] && break
-      [[ $attempt -lt 3 && "$_PRL_HOST" != "forgejo" ]] && sleep 2
+      [[ $attempt -lt 3 ]] && sleep 2
     done
     if [[ "$STATUS" != "reviewing=false reviewed=true" ]]; then
       echo "error: label swap did not take on PR #$PR after 3 attempts ($STATUS)" >&2
@@ -2271,31 +2076,13 @@ case "$CMD" in
     # Best-effort verification that changes-requested actually cleared (#2238,
     # M2): remove_label tolerates failures as warnings, so unlike the
     # reviewing/reviewed swap above this is not re-verified by the retry loop.
-    # GitHub-only (mirrors the pass/status host-scoping used elsewhere here);
-    # a leftover label is reported, not fatal — the gate already opened.
-    if [[ "${_PRL_HOST:-github}" != "forgejo" ]]; then
-      CRS="$(changes_requested_status 2>/dev/null)" || CRS=""
-      if [[ "$CRS" == *"changes-requested=true"* ]]; then
-        echo "warning: PR #$PR — '$CHANGES_REQUESTED' label did not clear after pass (#2238); remove it manually" >&2
-      fi
+    CRS="$(changes_requested_status 2>/dev/null)" || CRS=""
+    if [[ "$CRS" == *"changes-requested=true"* ]]; then
+      echo "warning: PR #$PR — '$CHANGES_REQUESTED' label did not clear after pass (#2238); remove it manually" >&2
     fi
     echo "PR #$PR: gate passed ($STATUS)"
     if [[ "$AUTO_MERGE" == "true" ]]; then
-      if [[ "$_PRL_HOST" == "forgejo" ]]; then
-        # Forgejo path (issue #1239): squash-merge directly via the REST adapter.
-        # pr-merge-squash pins the merge to CONVERGED_HEAD via Gitea's
-        # head_commit_id, so a push landing between the convergence check above
-        # and this POST cannot ride into an unreviewed squash-merge — Gitea
-        # refuses if the head moved (TOCTOU close; GitHub's queued --auto gets
-        # the same server-side re-check for free, this path did not).
-        if merge_out=$(FORGEJO_ADAPTER_ALLOW_WRITE=1 "$_PRL_ADAPTER" \
-              pr-merge-squash "$_PRL_ORIGIN" "$PR" "$CONVERGED_HEAD" 2>&1); then
-          echo "PR #$PR: merged (squash, Forgejo, pinned to ${CONVERGED_HEAD:0:9})"
-        else
-          echo "PR #$PR: merge request failed — $merge_out" >&2
-          echo "PR #$PR: merge not triggered — leaving merge to be done manually"
-        fi
-      elif _repo_has_dedicated_automerge_bot; then
+      if _repo_has_dedicated_automerge_bot; then
         # issue #2079: this repo already runs its own dedicated Auto-Approve
         # & Merge bot workflow, which mints a proper GitHub App token and
         # does its own full approve+merge sequence once pr-reviewed lands.
@@ -2339,24 +2126,20 @@ case "$CMD" in
     # changes-requested next would fire that trigger on a PR still wearing
     # the merge-gate label — auto-merging a review that just failed. Re-read
     # label state on GitHub before arming changes-requested; abort loudly
-    # rather than proceed if pr-reviewed is still present. Forgejo has no
-    # labeled-event auto-merge trigger to race (#1419 carve-out), so this
-    # re-check is GitHub-only, same host-scoping used elsewhere here.
-    if [[ "${_PRL_HOST:-github}" != "forgejo" ]]; then
-      REMOVAL_STATUS="$(label_status)" || {
-        echo "error: PR #$PR — could not re-verify '$REVIEWED' removal before applying '$CHANGES_REQUESTED'; refusing to risk arming auto-merge on a failed review (issue #2238 Blocker 2)" >&2
-        exit 1
-      }
-      if [[ "$REMOVAL_STATUS" == *"reviewed=true"* ]]; then
-        echo "error: PR #$PR — '$REVIEWED' is still present after removal; refusing to add '$CHANGES_REQUESTED' (would arm sge-auto-merge.yml's labeled trigger on a PR that still carries the merge-gate label — issue #2238 Blocker 2)" >&2
-        echo "Retry 'pr-labels.sh fail $PR', or remove '$REVIEWED' manually, then re-run." >&2
-        exit 1
-      fi
+    # if pr-reviewed is still present.
+    REMOVAL_STATUS="$(label_status)" || {
+      echo "error: PR #$PR — could not re-verify '$REVIEWED' removal before applying '$CHANGES_REQUESTED'; refusing to risk arming auto-merge on a failed review (issue #2238 Blocker 2)" >&2
+      exit 1
+    }
+    if [[ "$REMOVAL_STATUS" == *"reviewed=true"* ]]; then
+      echo "error: PR #$PR — '$REVIEWED' is still present after removal; refusing to add '$CHANGES_REQUESTED' (would arm sge-auto-merge.yml's labeled trigger on a PR that still carries the merge-gate label — issue #2238 Blocker 2)" >&2
+      echo "Retry 'pr-labels.sh fail $PR', or remove '$REVIEWED' manually, then re-run." >&2
+      exit 1
     fi
     # Best-effort (#2238, M4): pr-reviewing is already released above, so a hard
     # failure here (transient API error) must not crash the script — the review
     # findings are already posted and the gate is already closed either way.
-    # Calls the (possibly Forgejo-overridden) add_label in a subshell so a
+    # Calls add_label in a subshell so a
     # non-zero exit under `set -e` cannot abort this script.
     if ! (add_label "$CHANGES_REQUESTED"); then
       echo "warning: failed to add label '$CHANGES_REQUESTED' to PR #$PR: add_label failed" >&2
@@ -2469,13 +2252,7 @@ case "$CMD" in
           || echo "warning: could not post the hold marker on PR #$PR (hold label stands; a human must release it)" >&2
       fi
     fi
-    # hold_status is gh-label-specific; keep the confirmation echo GitHub-only,
-    # matching the pass/status host-scoping (issues #1393 + #1419).
-    if [[ "${_PRL_HOST:-github}" != "forgejo" ]]; then
-      HOLD_ST="$(hold_status 2>/dev/null)" || HOLD_ST="(hold_status unavailable)"
-    else
-      HOLD_ST="(hold_status not wired on Forgejo — #1419)"
-    fi
+    HOLD_ST="$(hold_status 2>/dev/null)" || HOLD_ST="(hold_status unavailable)"
     echo "PR #$PR: '$HOLD' label applied — gate will not open until a human removes it ($HOLD_ST)"
     ;;
 
@@ -2894,20 +2671,12 @@ case "$CMD" in
     # hold=<bool> changes-requested=<bool> excluded-reviewer=<bool>" (issue
     # #1393 extends the original reviewing/reviewed pair with hold; issue
     # #2238 extends it again with changes-requested; issue #2293 adds
-    # excluded-reviewer). On Forgejo none of hold, changes-requested, or
-    # excluded-reviewer is wired (issue #1419's carve-out extends to both),
-    # so keep the original two-field output ("reviewing=<bool>
-    # reviewed=<bool>") — exact-match consumers on that host and
-    # pr-labels-forgejo-adapter.test.sh depend on it.
+    # excluded-reviewer).
     LS="$(label_status)" || { echo "error: could not read label state for PR #$PR" >&2; exit 1; }
-    if [[ "${_PRL_HOST:-github}" == "forgejo" ]]; then
-      printf '%s\n' "$LS"
-    else
-      HS="$(hold_status 2>/dev/null)" || HS="hold=unknown"
-      CRS="$(changes_requested_status 2>/dev/null)" || CRS="changes-requested=unknown"
-      EXCL_ST="$(excluded_reviewer_status 2>/dev/null)" || EXCL_ST="excluded-reviewer=unknown"
-      printf '%s %s %s %s\n' "$LS" "$HS" "$CRS" "$EXCL_ST"
-    fi
+    HS="$(hold_status 2>/dev/null)" || HS="hold=unknown"
+    CRS="$(changes_requested_status 2>/dev/null)" || CRS="changes-requested=unknown"
+    EXCL_ST="$(excluded_reviewer_status 2>/dev/null)" || EXCL_ST="excluded-reviewer=unknown"
+    printf '%s %s %s %s\n' "$LS" "$HS" "$CRS" "$EXCL_ST"
     ;;
 
   excluded-reviewer)

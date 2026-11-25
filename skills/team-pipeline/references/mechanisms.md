@@ -175,7 +175,7 @@ so before storing the queue drop any issue with a still-**open** — or
 `dependencies` verb, which recognises the canonical
 [dependency metadata grammar](../../decompose-issue/SKILL.md#dependency-metadata-grammar)
 (`DependsOn: #N`, `Depends on #N`, `Blocked by #N`, `Requires #N`) on
-GitHub/Forgejo and structural `is blocked by` links on Jira. Mirror
+GitHub and structural `is blocked by` links on Jira. Mirror
 [available-issues Phase 2](../../available-issues/SKILL.md#phase-2--dependency-gate):
 
 ```bash

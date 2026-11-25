@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # pr-labels-azdo.sh — the pr-labels.sh gate state machine on Azure Repos
 # (SPEC-110 S4, issue #2985). Sourced by pr-labels.sh ONLY when the origin
-# classifies as `azdo`; the GitHub/Forgejo paths never load it.
+# classifies as `azdo`.
 #
 # Mapping:
 #   labels          -> PR tags (pr-reviewing, pr-reviewed, changes-requested, hold)
@@ -73,8 +73,7 @@ _prl_azdo_main() {
   origin="$_PRL_ORIGIN"
   [ -f "$aa" ] || { _prl_azdo_err "azdo-adapter.sh not found"; return 1; }
   command -v jq >/dev/null 2>&1 || { _prl_azdo_err "jq is required"; return 1; }
-  # This script IS the review lane's explicit write path (the forgejo block in
-  # pr-labels.sh makes the same decision for FORGEJO_ADAPTER_ALLOW_WRITE).
+# This script is the review lane’s explicit Azure Repos write path.
   export AZDO_ADAPTER_ALLOW_WRITE=1
   # The shared follow-up scanner (followups-gate.sh, sourced by `pass` only)
   # reads these from its caller.

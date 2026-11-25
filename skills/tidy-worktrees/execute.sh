@@ -2,7 +2,7 @@
 # execute.sh: runs an approved tidy delete plan (issue #3621). Deterministic,
 # so every host (Claude Code, GitHub Copilot CLI or VS Code agent mode, with
 # or without subagents) gets the same safe outcome on any Git host (GitHub,
-# Azure DevOps, Forgejo). On Windows run it from Git Bash.
+# Azure DevOps). On Windows run it from Git Bash.
 #
 #   execute.sh --audit <audit.json> [--audit <file>...]
 #              (--select all | --select <token> ... | --select-file <file>)

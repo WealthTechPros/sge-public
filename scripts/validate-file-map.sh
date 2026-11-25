@@ -2,10 +2,8 @@
 # validate-file-map.sh — validate a decompose-issue file map against the real tree.
 #
 # Issue #1271: when /sge:decompose-issue emits a child's file map (the `Owns:`
-# footprint), the paths are not checked against the actual repository. In the
-# 2026-07-16 swarm, issue #1236's map named `skills/lib/forgejo-adapter.sh` and
-# `skills/**/with-repo-cwd.sh` — but `skills/lib/` does not exist and the
-# resolver lives at `scripts/with-repo-cwd.sh`. The Lean Agent Contract tells
+# footprint), the paths must resolve in the actual repository. For example,
+# the resolver lives at `scripts/with-repo-cwd.sh`. The Lean Agent Contract tells
 # lanes to orient ONLY from the file map (capped recon, no open-ended search),
 # so a phantom path sends a lane hunting for files that aren't there. A wrong
 # map is worse than none.

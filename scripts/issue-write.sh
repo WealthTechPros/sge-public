@@ -121,19 +121,18 @@ _iw_require_known_alm() {
   esac
 }
 
-# Classify the current checkout's git host: github | forgejo | unknown.
+# Classify the current checkout's git host: github | azdo | unknown.
 _iw_host() { "$_WRC" host 2>/dev/null | tr -d '\n' || printf 'unknown'; }
 
 # On the github ALM backend, mutating tracker ops are wired for the github git
-# host only. Forgejo/Gitea tracker WRITES are SPEC-094 scope, deliberately not
-# routed by this S3 seam — fail loud rather than mis-route.
+# host only. Refuse an unsupported host before calling gh.
 _iw_github_host_only() {
   local host
   host="$(_iw_host)"
   case "$host" in
     github) return 0 ;;
     *)
-      _iw_err "host kind '${host}' has no mutating issue-write adapter — SPEC-105 S3 wires the github (gh) and jira backends; forgejo/gitea tracker writes are SPEC-094 scope, not routed here"
+      _iw_err "host kind '${host}' has no mutating issue-write adapter on the GitHub tracker backend"
       return 1
       ;;
   esac

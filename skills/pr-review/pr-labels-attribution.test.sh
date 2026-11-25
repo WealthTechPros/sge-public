@@ -14,9 +14,8 @@
 #         the reverse, more consequential case: attribution must not be
 #         posted for a label change that never actually happened
 #
-# Only the function definitions (everything above the CMD dispatcher) are
-# sourced — the full script requires a subcommand + PR arg and ends in a
-# `case` that calls `exit`, which would kill the test shell if sourced whole.
+# The test loads the four production functions it exercises. The command
+# dispatcher and checkout-specific host routing run separately in integration tests.
 #
 # `gh` is stubbed as a shell function; GH_STUB_ADD_LABEL_RC /
 # GH_STUB_COMMENT_RC drive failure-path behaviour. Calls are logged to
@@ -33,16 +32,19 @@ FAILED=0
 pass() { echo "ok   - $1"; }
 fail() { echo "FAIL - $1"; FAILED=1; }
 
-# Only the functions (stop before the `case "$CMD" in` execution block —
-# add_label/remove_label are defined AFTER the CMD/PR arg-parsing lines but
-# BEFORE the case block, so the cut point is the case, not the arg parsing).
-DISPATCH_LINE=$(grep -n '^case "\$CMD" in' "$SCRIPT" | head -1 | cut -d: -f1)
-[ -n "$DISPATCH_LINE" ] || { echo "FAIL - could not find case-dispatch boundary in $SCRIPT"; exit 1; }
-FUNCS_ONLY="$(mktemp)"
-trap 'rm -f "$FUNCS_ONLY" "$CALL_LOG"' EXIT
-head -n "$((DISPATCH_LINE - 1))" "$SCRIPT" > "$FUNCS_ONLY"
+# A copied script prefix would execute host routing relative to the temporary
+# file. Extract the functions themselves, preserving their production bodies.
+FIXTURE="$(mktemp -d)"
+trap 'rm -rf "$FIXTURE"' EXIT
+FUNCS_ONLY="$FIXTURE/attribution.sh"
+sed -n -E '/^(_claim_repo_full|_post_label_attribution|add_label|remove_label)\(\) \{/,/^}/p' "$SCRIPT" > "$FUNCS_ONLY"
+# shellcheck disable=SC1090
+source "$FUNCS_ONLY"
+for helper in _claim_repo_full _post_label_attribution add_label remove_label; do
+  declare -F "$helper" >/dev/null || { echo "FAIL - could not load $helper"; exit 1; }
+done
 
-CALL_LOG="$(mktemp)"
+CALL_LOG="$FIXTURE/calls"
 GH_STUB_ADD_LABEL_RC="${GH_STUB_ADD_LABEL_RC:-0}"
 GH_STUB_COMMENT_RC="${GH_STUB_COMMENT_RC:-0}"
 
@@ -61,7 +63,7 @@ gh() {
 }
 
 run_with() {
-  # run_with <agent_id> <fn> <label> -- sources funcs-only, sets PR/GH_REPO,
+  # run_with <agent_id> <fn> <label> -- sets PR/GH_REPO,
   # calls <fn> <label>, resets CALL_LOG first.
   local _agent_id="$1" _fn="$2" _label="$3"
   : > "$CALL_LOG"
@@ -69,9 +71,7 @@ run_with() {
     PR=1
     GH_REPO="WealthTechPros/sge"
     SGE_AGENT_ID="$_agent_id"
-    set -- test 1
-    # shellcheck disable=SC1090
-    source "$FUNCS_ONLY"
+    set -e
     "$_fn" "$_label"
   )
 }
@@ -86,7 +86,7 @@ fi
 
 # AC-1b: the comment body actually names the agent and the label (re-run,
 # capturing the -f body= argument directly rather than just presence).
-BODY_CAPTURE="$(mktemp)"
+BODY_CAPTURE="$FIXTURE/body"
 gh() {
   if [ "$1 $2" = "pr edit" ]; then return 0; fi
   if [[ "$1 $2" == "api repos/"* ]]; then
@@ -101,9 +101,7 @@ gh() {
 }
 (
   PR=1; GH_REPO="WealthTechPros/sge"; SGE_AGENT_ID="review-lane-7"
-  set -- test 1
-  # shellcheck disable=SC1090
-  source "$FUNCS_ONLY"
+  set -e
   add_label "pr-reviewed"
 )
 BODY="$(cat "$BODY_CAPTURE" 2>/dev/null || true)"
@@ -117,9 +115,7 @@ fi
 : > "$BODY_CAPTURE"
 (
   PR=1; GH_REPO="WealthTechPros/sge"; SGE_AGENT_ID="fix-lane-3"
-  set -- test 1
-  # shellcheck disable=SC1090
-  source "$FUNCS_ONLY"
+  set -e
   remove_label "pr-reviewing"
 )
 BODY="$(cat "$BODY_CAPTURE" 2>/dev/null || true)"
@@ -134,9 +130,7 @@ fi
 (
   PR=1; GH_REPO="WealthTechPros/sge"
   unset SGE_AGENT_ID
-  set -- test 1
-  # shellcheck disable=SC1090
-  source "$FUNCS_ONLY"
+  set -e
   add_label "hold"
 )
 BODY="$(cat "$BODY_CAPTURE" 2>/dev/null || true)"
@@ -162,9 +156,7 @@ run_with_comment_fail() {
       esac
       return 0
     }
-    set -- test 1
-    # shellcheck disable=SC1090
-    source "$FUNCS_ONLY"
+    set -e
     add_label "pr-reviewed"
     echo "exit_code=$?" >> "$CALL_LOG"
   )
@@ -194,9 +186,7 @@ run_with_remove_failure() {
       esac
       return 0
     }
-    set -- test 1
-    # shellcheck disable=SC1090
-    source "$FUNCS_ONLY"
+    set -e
     remove_label "pr-reviewing" 2>/dev/null
     echo "exit_code=$?" >> "$CALL_LOG"
   )

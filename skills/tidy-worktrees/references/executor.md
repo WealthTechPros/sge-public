@@ -1,6 +1,6 @@
 # The executor (`execute.sh`)
 
-Runs an approved delete plan from `audit.sh` JSON. It is a script, so every host gets the same safe steps: Claude Code, GitHub Copilot CLI or VS Code agent mode, with or without subagents. It works the same on GitHub, Azure DevOps and Forgejo: deletions are plain `git`, and its only host call is a read-only open-PR lookup before remote deletion (`hpr_open_pr_heads`, which on Azure DevOps needs `SGE_AZDO_TOKEN`). On Windows, run it from Git Bash, which ships with Git for Windows (`bash` on PATH).
+Runs an approved delete plan from `audit.sh` JSON. It is a script, so every host gets the same safe steps: Claude Code, GitHub Copilot CLI or VS Code agent mode, with or without subagents. It works the same on GitHub and Azure DevOps: deletions are plain `git`, and its only host call is a read-only open-PR lookup before remote deletion (`hpr_open_pr_heads`, which on Azure DevOps needs `SGE_AZDO_TOKEN`). On Windows, run it from Git Bash, which ships with Git for Windows (`bash` on PATH).
 
 ```bash
 S="${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/tidy-worktrees"

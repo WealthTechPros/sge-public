@@ -23,16 +23,12 @@
 #       checkout's owner/name slug.
 #   scripts/with-repo-cwd.sh host [<target-or-checkout>]
 #       Classify the git host of a repo's `origin` remote and print a stable
-#       host-kind token on stdout: `github` | `forgejo` | `azdo` | `unknown`.
+#       host-kind token on stdout: `github` | `azdo` | `unknown`.
 #       (`azdo` = Azure DevOps / Azure Repos, matched by exact host, #2946.)
-#       (`forgejo` covers the Gitea-compatible family — Forgejo and Gitea share
-#       one REST surface, so callers route them through the same adapter; the
-#       token is `forgejo` because Forgejo is the repo we actually target.)
 #       With no argument the CURRENT checkout's origin is classified; with a
 #       <target> (name | owner/name | URL) the matching local checkout is
 #       resolved first (same rules as `resolve`) and ITS origin classified.
-#       This is the single point where a skill learns "is this GitHub?" before
-#       choosing gh vs the Forgejo/Gitea REST adapter (ADR-0010, #1236). It is
+#       Skills use this classifier when choosing their host adapter. It is
 #       intentionally NOT fail-loud on `unknown`: an unrecognised host is a
 #       real, nameable answer downstream code must branch on — resolving the
 #       checkout still fails loud if no checkout matches, exactly as before.
@@ -180,13 +176,6 @@ _wrc_url_host() {
 
 # Classify a git host into a stable adapter-routing token:
 #   github  — github.com (or a *.github.com subdomain)
-#   forgejo — anything we route through the Gitea-compatible REST adapter.
-#             Forgejo and Gitea share one API surface; the token is `forgejo`
-#             because Forgejo is the host the enabler targets (ADR-0010).
-#             We recognise it by host substring (forgejo/gitea) OR by the
-#             SGE_FORGEJO_HOSTS allow-list (';'-separated bare hosts) so a
-#             self-hosted instance with a vanity domain (e.g. git.example.com)
-#             classifies correctly without a code change.
 #   azdo    — Azure DevOps / Azure Repos (issue #2946, SPEC-094 §2.1). EXACT
 #             host match only, never a substring: dev.azure.com and
 #             ssh.dev.azure.com, vs-ssh.visualstudio.com, and the legacy
@@ -208,15 +197,10 @@ _wrc_host_kind() { # <host>
     local ghs=(); IFS=';' read -r -a ghs <<< "$(_wrc_lower "${SGE_GITHUB_HOSTS:-$SGD_GITHUB_HOSTS}")"
     for h in "${ghs[@]}"; do [ -n "$h" ] && [ "$host" = "$h" ] && { printf 'github'; return 0; }; done
   fi
-  if [ -n "${SGE_FORGEJO_HOSTS:-${SGD_FORGEJO_HOSTS:-}}" ]; then
-    local fjs=(); IFS=';' read -r -a fjs <<< "$(_wrc_lower "${SGE_FORGEJO_HOSTS:-$SGD_FORGEJO_HOSTS}")"
-    for h in "${fjs[@]}"; do [ -n "$h" ] && [ "$host" = "$h" ] && { printf 'forgejo'; return 0; }; done
-  fi
   case "$host" in
     github.com|*.github.com) printf 'github' ;;
     dev.azure.com|ssh.dev.azure.com|vs-ssh.visualstudio.com|*.visualstudio.com)
                              printf 'azdo' ;;
-    *forgejo*|*gitea*)       printf 'forgejo' ;;
     *)                       printf 'unknown' ;;
   esac
 }

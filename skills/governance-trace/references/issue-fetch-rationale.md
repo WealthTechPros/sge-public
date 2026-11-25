@@ -2,16 +2,7 @@
 
 Moved verbatim from `SKILL.md` (issue #2917, 24 KB size budget).
 
-Routed via `scripts/issue-read.sh` (not a bare `gh issue view`) so this
-headless, forked skill works against a Forgejo/Gitea-hosted target repo,
-exactly like `/sge:available-issues` and `/sge:sge-align` already do
-(ADR-0010, #1236) — a bare `gh` call here previously meant EVERY dispatch of
-`/sge:sge-implement` Phase 0.5 (which forks this skill unconditionally) would
-silently `NO_ISSUE_LOADED` on a non-GitHub target repo. `GH_REPO` was
-exported above so this resolves and reads against the target checkout
-(issue #2207) — `issue-read.sh`'s own host/ALM classification reads the
-CURRENT cwd, so `GH_REPO` alone (the prior, Forgejo/Jira-broken convention)
-is not enough on its own.
+Use `scripts/issue-read.sh` from the target checkout so host and ALM detection use the correct origin. Setting `GH_REPO` alone does not change the working directory (#2207).
 
 A `!`-preload injection line cannot safely carry `$ARGUMENTS` into this call
 — the harness substitutes `$ARGUMENTS` as raw, unescaped text before any

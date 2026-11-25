@@ -52,7 +52,7 @@ if ! OPEN_PRS="$(hpr_open_pr_heads)"; then   # "<number><TAB><head-branch>" per 
 fi
 ```
 
-`hpr_open_pr_heads` routes by host: `gh` on GitHub, the Forgejo adapter, or `azdo-adapter.sh list-prs` on Azure DevOps (needs `SGE_AZDO_TOKEN`, a read-only Code PAT). It fails closed on an unknown host, a failed call, a malformed payload or possible truncation; an empty result with exit 0 is a confirmed zero. On Azure DevOps squash-merges use `hpr_completed_pr_heads <branch>` (fail-closed too).
+`hpr_open_pr_heads` routes by host: `gh` on GitHub or `azdo-adapter.sh list-prs` on Azure DevOps (needs `SGE_AZDO_TOKEN`, a read-only Code PAT). It fails closed on an unknown host, a failed call, a malformed payload or possible truncation; an empty result with exit 0 is a confirmed zero. On Azure DevOps squash-merges use `hpr_completed_pr_heads <branch>` (fail-closed too).
 
 Then run the **engine**: `bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/tidy-worktrees/audit.sh" --summary [repo dirs…]` (drop `--summary` for the JSON, or add `--json-out <file>`; `--multi <parent-dir>` audits every repo under a folder and adds combined totals). It classifies local worktrees, branches, stashes **and** `origin/*` branches into A-D with PR state, ahead/behind, age, last author and supersession, and prints the delete plan as literal per-branch commands. Fields and rules: [`references/audit-engine.md`](audit-engine.md). Host without bash or jq: follow [`references/safety-audit-checks.md`](safety-audit-checks.md) by hand.
 
@@ -124,7 +124,7 @@ Use the [continuing ledger](sweep-layouts.md#scope-and-continuing-execution-ledg
 ## Key principles
 
 1. **Local audit before remote deletion;** a branch with no upstream is a single copy: record its SHA.
-2. **Squash merges hide behind phantom "ahead" commits:** trust the host's merged-PR record (`gh`, or `hpr_completed_pr_heads` on Azure DevOps) plus tip == recorded head; Forgejo has no such lookup, so there it stays on git evidence. Any lookup failure keeps.
+2. **Squash merges hide behind phantom "ahead" commits:** trust the host's merged-PR record (`gh`, or `hpr_completed_pr_heads` on Azure DevOps) plus tip == recorded head. Any lookup failure keeps.
 3. **Stashes are repo-global:** attribute them by subject; unattributed ones are a note, not a blocker.
 4. **Cleanup never opens PRs one-by-one or in unverified bulk** (#2866). On 2026-10-03 a cleanup session opened 8 PRs and all 8 duplicated work already on main. The maintainer relaxed the one-question-per-branch rule on 2026-11-07 to a single multi-select where each item is individually verified `live` with its issue open, draft-only, capped, never auto-merged, never force-pushed. `--force` never pushes or opens a PR.
 5. **Live claims, locks and the recency guard are sacrosanct** (#1759), including under `--force`. A lock is never cleared by the sweep: only the Phase 2b user-confirmed choice (never under `--force`) can release it.

@@ -282,8 +282,7 @@ auto-merge. Consumers treat a `mode: shadow` verdict (match the substring, so a
 `<mode> (shadow)` suffix also counts) as **not** satisfying the merge gate:
 `pr-labels.sh pass` refuses when `SGE_REVIEW_SHADOW=1` (exit 9) and when the
 latest trusted verdict at the current head is a shadow one (exit 10, #2653).
-That second, verdict-laundering guard is currently GitHub-only — skipped on
-Forgejo hosts until the adapter can read PR comments (#2657).
+That second guard checks trusted PR comments on GitHub (#2657).
 
 **`approval-carried`** — posted by PR Warden itself,
 never by a model: the head is a clean update from the base branch of a commit

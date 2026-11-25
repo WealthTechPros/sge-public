@@ -32,7 +32,7 @@ Which tool for which step (Cortex, depth/scope resolvers, fork register/join, Ba
 - `--unattended` (or `SGE_UNATTENDED=1`): never end a turn with a question; resolve by the SPEC-093 three-tier policy — [`unattended-contract.md`](references/unattended-contract.md).
 - `--sentry <ID>`: production-bug pre-context from Sentry — [`sentry-precontext.md`](references/sentry-precontext.md). The same readiness and governance controls apply.
 
-**Invocation notes.** Run from the target checkout or apply [`gh-repo`](../gh-repo/SKILL.md) (Forgejo needs `SGE_FORGEJO_HOSTS`); a dispatching orchestrator must not run a second `/sge:pr-review`; `SGE_GATE_OWNER=pod` skips Phases 7/8. [Detail](references/invocation-notes.md).
+**Invocation notes.** Run from the target checkout or apply [`gh-repo`](../gh-repo/SKILL.md); a dispatching orchestrator must not run a second `/sge:pr-review`; `SGE_GATE_OWNER=pod` skips Phases 7/8. [Detail](references/invocation-notes.md).
 
 **Issue context — fetched as your first action (issue #226, #2266 security review):**
 
