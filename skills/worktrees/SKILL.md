@@ -157,9 +157,16 @@ they are never applied for you.
 
 On resume/create, lease the worktree so a concurrent sibling backs off:
 `bash "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel)}/skills/worktrees/resume-or-create.sh" claim "$WT"`
-(the lease is `.sge-wt-claim` at the worktree root — refresh periodically for
-long runs; drop it with `release` when done). This is advisory, TTL-bounded, and
-never blocks `/sge:tidy-worktrees` (which owns real deletion).
+The lease is `.sge-wt-claim` at the worktree root. Tidy keeps worktrees with a
+fresh lease. Claude Code lanes must repeat the claim with the same owner before
+the 30-minute default expires. A single long tool call or idle turn can outlast
+the lease. Before starting one, set `SGE_WT_CLAIM_TTL_MIN` longer than the
+longest expected interval between refreshes in **both** the worker and every
+process that runs admission or tidy. An expired lease makes the worktree
+eligible for the usual cleanup checks. Release the lease when finished.
+
+Copilot refreshes at session start and each agent stop. It uses `SGE_AGENT_ID`
+when set and otherwise uses the Copilot session ID.
 
 **`SGE_AGENT_ID` MUST be set before `claim`/`decide` (issue #2214).** The
 lease records `$SGE_AGENT_ID`, not the session's PID or a shared session path —

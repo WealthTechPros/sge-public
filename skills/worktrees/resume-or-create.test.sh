@@ -73,6 +73,14 @@ check "backoff exit code 10"          "$rc_backoff" "10"
 # --- My own fresh claim -> resume (mine), not backoff ---
 # (the other agent's fresh lease is released first: roc_claim never steals it, sge#3697)
 rm -f "$WT/.sge-wt-claim"
+epoch=$(date +%s)
+limit_owner=$(printf '%0*d' "$((4096 - 2 - ${#epoch}))" 0)
+SGE_AGENT_ID="${limit_owner}x" roc_claim "$WT" 2>/dev/null
+check "oversize owner rejected" "$?" "1"
+check "rejected owner leaves no lease" "$([ -e "$WT/.sge-wt-claim" ] && echo present || echo absent)" "absent"
+SGE_AGENT_ID="$limit_owner" roc_claim "$WT"
+check "maximum-size lease is readable" "$(SGE_AGENT_ID="$limit_owner" roc_claim_state "$WT")" "mine"
+SGE_AGENT_ID="$limit_owner" roc_release "$WT"
 SGE_AGENT_ID="me" roc_claim "$WT"
 check "claim-state mine" "$(SGE_AGENT_ID=me roc_claim_state "$WT")" "mine"
 out="$(SGE_AGENT_ID=me roc_decide 42 "$ROOT" 2>/dev/null)"; rc_mine=$?

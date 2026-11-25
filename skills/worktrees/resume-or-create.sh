@@ -90,6 +90,7 @@ RG_WT_CLAIM_TTL_MIN="${SGE_WT_CLAIM_TTL_MIN:-30}"
 RG_CLAIM_FILE=".sge-wt-claim"
 # shellcheck source=/dev/null
 source "$(dirname "${BASH_SOURCE[0]}")/lease-lock.sh"
+RG_CLAIM_MAX_BYTES=4096
 
 # roc_find_worktree <id> <repo-root> [purpose=issue]
 # Prints the path of an existing worktree for <purpose>-<id>, or nothing.
@@ -155,7 +156,7 @@ roc_claim_state() {
   local shape=$'^([^[:space:]]+) (0|[1-9][0-9]{0,9})\n$'
   if [ -L "$f" ] || [ ! -f "$f" ]; then echo "held-fresh"; return 0; fi
   size=$(wc -c <"$f" 2>/dev/null) || { echo "held-fresh"; return 0; }
-  [ "$size" -le 4096 ] || { echo "held-fresh"; return 0; }
+  [ "$size" -le "$RG_CLAIM_MAX_BYTES" ] || { echo "held-fresh"; return 0; }
   record="$(cat "$f" 2>/dev/null && printf x)" || { echo "held-fresh"; return 0; }
   record="${record%x}"
   # Bash drops NUL bytes in command substitution. Protect records it could not read byte for byte.
@@ -187,6 +188,7 @@ roc_claim_state() {
 # directory that is not a git checkout has no lock to take and is written as before.
 roc_claim() {
   local wt="$1" rc=0 claim tmp epoch
+  local LC_ALL=C owner="${SGE_AGENT_ID:-unknown}"
   [ -d "$wt" ] || return 3
   sge_lease_lock "$wt"; rc=$?
   [ "$rc" -ne 1 ] || { echo "roc_claim: lease lock busy for $wt" >&2; return 4; }
@@ -197,8 +199,14 @@ roc_claim() {
   fi
   claim="$wt/$RG_CLAIM_FILE"
   epoch="$(date +%s)" || { sge_lease_unlock; return 1; }
+  # Count bytes, including the space and final newline, as the lease reader does.
+  if [[ "$owner" = *[[:space:]]* ]] || (( ${#owner} + ${#epoch} + 2 > RG_CLAIM_MAX_BYTES )); then
+    sge_lease_unlock
+    echo "roc_claim: owner cannot be stored in a valid lease record" >&2
+    return 1
+  fi
   tmp="$(mktemp "$claim.tmp.XXXXXX")" || { sge_lease_unlock; return 1; }
-  printf '%s %s\n' "${SGE_AGENT_ID:-unknown}" "$epoch" >"$tmp" && mv -f -- "$tmp" "$claim"
+  printf '%s %s\n' "$owner" "$epoch" >"$tmp" && mv -f -- "$tmp" "$claim"
   rc=$?
   if [ "$rc" -ne 0 ]; then rm -f -- "$tmp"; fi
   sge_lease_unlock
