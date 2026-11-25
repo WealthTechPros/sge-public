@@ -554,6 +554,10 @@ function reviewRecordViolations(file, text, schema) {
     if (hd.kind === "github-review" && hd.review_id === undefined) out.push({ field: "human_decision.review_id", message: "is required when kind is github-review" });
     if (hd.kind !== "github-review" && hd.review_id !== undefined) out.push({ field: "human_decision.review_id", message: "is only allowed when kind is github-review" });
   }
+  // S4 (SPEC-144) samples auto-merged T0/T1 PRs only; a T2 record is never sampled.
+  if (rec.sampled !== undefined && (rec.tier?.resolved === "T2" || rec.tier?.declared_floor === "T2")) {
+    out.push({ field: "sampled", message: "is set on a T2 record; S4 sampling covers auto-merged T0/T1 PRs only" });
+  }
   return out;
 }
 
