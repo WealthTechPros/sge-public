@@ -15,6 +15,12 @@ The full phase-by-phase procedure for [`/sge:tidy-worktrees`](../SKILL.md). SKIL
 
 ## Usage detail
 
+Use assessors only when delegation is authorized. If no agent tool is available, assess inline. If the structured question tool is unavailable, ask numbered questions.
+
+At the start, use `search_nodes` for the repository. At each terminal path, use `create_entities` for a qualifying pattern, convention or gotcha. Skip this step when sge-memory is unavailable. [Cortex review guidance](../../lib/cortex-review-lane.md)
+
+For a bulk reclaim, close all agent sessions and run the script from a plain terminal. It audits each repository, writes a recovery CSV, and asks for `RECLAIM <n>` before proceeding. Worktrees with staged changes or ignored files require manual preservation. [Bulk reclaim runbook](../../../docs/worktree-reclaim-runbook.md)
+
 For an explicitly requested fleet resume, use the
 [resumable runner](resumable-runner.md) with the existing queue:
 import once, then `next` / `audit` / `record` / `plan`. Prefer this durable

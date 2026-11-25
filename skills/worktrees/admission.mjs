@@ -182,12 +182,18 @@ function acquireLeaseLock(lock) {
   const staleMs = Number(process.env.SGE_LEASE_LOCK_STALE_S || 600) * 1000;
   const deadline = Date.now() + waitMs;
   const pause = new Int32Array(new SharedArrayBuffer(4));
-  const token = `h.${process.pid}.${Math.random().toString(36).slice(2)}`;
+  const holderName = `h.${process.pid}.${Math.random().toString(36).slice(2)}`;
   for (;;) {
     try {
       fs.mkdirSync(lock);
-      try { fs.writeFileSync(path.join(lock, token), ''); } catch { try { fs.rmdirSync(lock); } catch { /* */ } return null; }
-      return token;
+      try {
+        // Ownership is represented by an empty, exclusively created file.
+        fs.closeSync(fs.openSync(path.join(lock, holderName), 'wx', 0o600));
+      } catch {
+        try { fs.rmdirSync(lock); } catch { /* a competing holder owns its marker */ }
+        return null;
+      }
+      return holderName;
     } catch (error) { if (error.code !== 'EEXIST') return null; }
     if (breakStaleLeaseLock(lock, staleMs)) continue;
     if (Date.now() >= deadline) return null;

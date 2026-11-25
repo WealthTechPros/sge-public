@@ -290,7 +290,7 @@ ta_audit_repo() {
     local win=false
     case "$(uname -s 2>/dev/null)" in MINGW*|MSYS*|CYGWIN*) win=true ;; esac
     printf '%s\n' "$rows" | jq -R -s \
-      --arg repo "$top" --arg def "$def" --arg base "$base" --arg host "${_TA_HOST:-unknown}" \
+      --arg repo "$top" --arg default_branch "$def" --arg base "$base" --arg host "${_TA_HOST:-unknown}" \
       --arg base_tip "$(git rev-parse --verify --quiet "${base}^{commit}" 2>/dev/null)" \
       --argjson open_ok "$([ "${_TA_OPEN_OK:-0}" -eq 1 ] && echo true || echo false)" \
       --argjson win "$win" '
@@ -317,7 +317,7 @@ ta_audit_repo() {
             | {item: (.kind + ":" + .name), tip: .tip, pr_state: .pr_state, commands: .commands,
                needs_junction_guard: .needs_junction_guard}];
       {
-        repo: $repo, default_branch: $def, base: $base, base_tip: ($base_tip | nz), host: $host,
+        repo: $repo, default_branch: $default_branch, base: $base, base_tip: ($base_tip | nz), host: $host,
         open_pr_set_known: $open_ok, refused: ($open_ok | not),
         counts: ({A: 0, B: 0, C: 0, D: 0} + ($items | group_by(.bucket) | map({key: .[0].bucket, value: length}) | from_entries)
                  + {total: ($items | length)}),

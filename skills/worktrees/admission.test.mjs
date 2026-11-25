@@ -139,6 +139,29 @@ test('admission leaves a stale lock to a contender already breaking it (CodeRabb
   assert.equal(fs.existsSync(lock) || fs.existsSync(`${lock}.break`), false);
 });
 
+test('admission preserves an existing marker on a holder-name collision', async t => {
+  const f = fixture(t);
+  await admission(f.request);
+  const lock = path.join(f.git(['-C', f.worktree, 'rev-parse', '--absolute-git-dir']), 'sge-wt-claim.lock');
+  const previousHost = process.env.SGE_ROC_GH;
+  process.env.SGE_ROC_GH = path.join(path.dirname(f.request.store), 'host.sh');
+  t.after(() => {
+    if (previousHost === undefined) delete process.env.SGE_ROC_GH;
+    else process.env.SGE_ROC_GH = previousHost;
+  });
+  t.mock.method(Math, 'random', () => 0.5);
+  const marker = path.join(lock, `h.${process.pid}.${(0.5).toString(36).slice(2)}`);
+  const mkdir = fs.mkdirSync;
+  t.mock.method(fs, 'mkdirSync', (directory, options) => {
+    const result = mkdir(directory, options);
+    if (directory === lock) fs.writeFileSync(marker, 'first holder');
+    return result;
+  });
+  const result = await admission({ ...f.request, operation: 'admit' });
+  assert.equal(result.reasonCode, 'lease-lock-busy');
+  assert.equal(fs.readFileSync(marker, 'utf8'), 'first holder');
+});
+
 test('a fresh foreign lease written after discovery read the claim is seen at commit (sge#3697)',
   { skip: process.platform === 'win32' && 'SGE_BASH wrapper needs a POSIX exec' }, async t => {
     const f = fixture(t);
