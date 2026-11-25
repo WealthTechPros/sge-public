@@ -29,8 +29,9 @@
 #   captured. The result names the unsupported coverage (categories, counts and
 #   sanitised path names only; never contents), status is "partial", exit 10, and
 #   the output always carries retain-worktree:yes + safe-to-remove:no. This tool
-#   never authorises deletion of a worktree. Uncertain ownership (not a
-#   registered linked worktree of THIS session) is refused with nothing written.
+#   never authorises deletion of a worktree. Uncertain ownership (the main
+#   checkout, or a linked worktree registered to ANOTHER session) is refused
+#   with nothing written; an unregistered linked worktree is accepted (#3697).
 #
 # Atomicity: payload and manifest are built in a private temp dir inside the
 # store and renamed into place last; interrupted runs leave only a ".tmp.*" dir
@@ -260,12 +261,18 @@ ck_checkpoint() {
   common="$(_wl_common_dir "$wt")" || return 3
   abs="$(_wl_abs "$wt")" || return 3
 
-  # Ownership: only a registered linked worktree owned by THIS session. Anything
-  # else is uncertain ownership => refuse and write nothing.
+  # Ownership: a linked worktree (never the main checkout) that is either
+  # unregistered or registered to THIS session. Sessions stopped registering
+  # (sge#3697), so an unregistered linked worktree is captured: the capture is
+  # read-only and lands in this user's own store. A worktree still registered
+  # to another session is uncertain ownership => refuse and write nothing.
+  _wl_is_linked "$abs" || { _ck_refuse 4 ownership-uncertain-not-linked; return 4; }
   entry="$common/sge-worktrees/$(_wl_key "$abs").entry"
-  if [ ! -f "$entry" ]; then _ck_refuse 4 ownership-uncertain-not-registered; return 4; fi
-  owner="$(_wl_entry_field "$entry" session)"
-  if [ "$owner" != "$sid" ]; then _ck_refuse 4 ownership-uncertain-other-session; return 4; fi
+  if [ -e "$entry" ] || [ -L "$entry" ]; then
+    [ -f "$entry" ] && [ ! -L "$entry" ] || { _ck_refuse 4 ownership-uncertain-bad-registration; return 4; }
+    owner="$(_wl_entry_field "$entry" session)"
+    if [ "$owner" != "$sid" ]; then _ck_refuse 4 ownership-uncertain-other-session; return 4; fi
+  fi
 
   root="$(_ck_store_root)" || { _ck_refuse 6 store-unresolvable; return 6; }
   _ck_location_ok "$root" "$abs" "$common" || { _ck_refuse 6 store-location-unsafe; return 6; }
@@ -306,6 +313,8 @@ ck_checkpoint() {
   while IFS= read -r -d '' rec; do
     xy="${rec:0:2}"; p="${rec:3}"
     X="${xy:0:1}"; Y="${xy:1:1}"
+    # The root .sge-wt-claim lease is SGE's own metadata, not user work.
+    { [ "$xy" = '!!' ] || [ "$xy" = '??' ]; } && [ "$p" = .sge-wt-claim ] && continue
     case "$xy" in
       '!!') _ck_unsup ignored "$p"; continue ;;
       '??')

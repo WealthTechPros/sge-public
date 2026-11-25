@@ -15,7 +15,7 @@ disk failure.
 |---|---|---|
 | Registry and audit (`skills/lib/worktree-lifecycle.sh`) | Records which session owns which linked worktree; classifies each as KEEP, VALUABLE or `candidate`. | Delete anything. `candidate` only means "may be offered in a plan". |
 | Checkpoint store (`skills/worktrees/checkpoint.sh`) | Copies uncommitted work to a per-user store outside the checkout and writes a recovery ref. | Change the branch, index or working files. Describe a partial capture as complete. |
-| Hooks (`hooks/copilot/worktree-lifecycle.sh`) | Register, checkpoint at turn end, save a handoff at session end. | Delete, stash, reset, commit, push or open a PR. |
+| Hooks (`hooks/copilot/worktree-lifecycle.sh`) | Checkpoint at turn end; a one-line note at new-session start. No longer registers (sge#3697). | Delete, stash, reset, commit, push or open a PR. |
 | Tidy and inbox (`/sge:tidy-worktrees`, `skills/tidy-worktrees/inbox.sh`) | Fetch fresh remote state, audit, show the inbox, build one deletion plan. | Delete without you confirming the exact plan. |
 
 ## Full audit: `audit.sh`

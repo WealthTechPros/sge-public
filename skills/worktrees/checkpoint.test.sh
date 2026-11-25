@@ -227,8 +227,13 @@ check_has "ownership refusal retains worktree" "$out" "retain-worktree:yes"
 out="$(ck checkpoint "$ROOT" "$SID" 2>&1)"; rc=$?
 check "main checkout (not a registered linked worktree) refused" "$rc" "4"
 git -C "$ROOT" worktree add -q -b feat/unreg "$TMP/f8/unreg" 2>/dev/null
+echo wip >"$TMP/f8/unreg/wip.txt"
 out="$(ck checkpoint "$TMP/f8/unreg" "$SID" 2>&1)"; rc=$?
-check "unregistered worktree refused" "$rc" "4"
+# sge#3697: sessions no longer register, so an unregistered LINKED worktree is
+# checkpointed (read-only capture); the main checkout and a worktree registered
+# to another session are still refused above.
+check "unregistered linked worktree is checkpointed (sge#3697)" "$rc" "0"
+check "  ... and its checkout is unchanged" "$(git -C "$TMP/f8/unreg" status --porcelain | tr -d '\r')" "?? wip.txt"
 out="$(ck checkpoint "$WT" 'bad id;x' 2>&1)"; rc=$?
 check "bad session id rejected" "$rc" "5"
 before_count="$(find "$TMP/store" -mindepth 2 -maxdepth 2 -type d 2>/dev/null | wc -l | tr -d ' ')"

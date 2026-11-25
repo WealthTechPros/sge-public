@@ -76,8 +76,9 @@ export async function admission(request) {
       if (updated.changes !== 1) return result('backoff', 'concurrent-owner-change');
       return result('paused', 'original-retained', { worktree: current.path, head: pausedHead, generation: current.generation });
     }
-    const discovery = spawnSync(process.env.SGE_BASH || (process.platform === 'win32'
-      ? path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Git', 'bin', 'bash.exe') : 'bash'),
+    const bash = process.env.SGE_BASH || (process.platform === 'win32'
+      ? path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Git', 'bin', 'bash.exe') : 'bash');
+    const discovery = spawnSync(bash,
     [path.join(here, 'resume-or-create.sh'), 'decide-ref', task, root],
     { encoding: 'utf8', timeout: 60000, env: { ...process.env, SGE_AGENT_ID: session }, maxBuffer: 1024 * 1024 });
     if (discovery.error || discovery.status !== 0) return result('needs-review', 'host-or-task-discovery-incomplete');
@@ -91,57 +92,112 @@ export async function admission(request) {
     if (pathKey(git(worktree, ['rev-parse', '--path-format=absolute', '--git-common-dir'])) !== pathKey(common)) {
       return result('blocked', 'foreign-native-binding');
     }
-    const registry = path.join(common, 'sge-worktrees');
-    if (fs.existsSync(registry)) {
-      if (fs.lstatSync(registry).isSymbolicLink() || !fs.lstatSync(registry).isDirectory()) {
-        return result('needs-review', 'unsafe-legacy-registration');
-      }
-      const entries = fs.readdirSync(registry).filter(name => name.endsWith('.entry'));
-      if (entries.length > 1000) return result('needs-review', 'legacy-registration-budget-exceeded');
-      for (const name of entries) {
-        const entry = path.join(registry, name), stat = fs.lstatSync(entry);
-        if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 65536) return result('needs-review', 'unsafe-legacy-registration');
-        const record = Object.fromEntries(fs.readFileSync(entry, 'utf8').trim().split(/\r?\n/).map(line => {
-          const index = line.indexOf('='); return [line.slice(0, index), line.slice(index + 1)];
-        }));
-        if (!record.path || !record.session) return result('needs-review', 'incomplete-legacy-registration');
-        if (pathKey(record.path) === pathKey(worktree) && record.session !== session) {
-          return result('needs-review', 'foreign-legacy-registration');
-        }
-      }
-    }
+    // The lease is the only claim (sge#3697): the retired sge-worktrees registry
+    // never expired, so it no longer gates admission. decide-ref read the lease
+    // through roc_claim_state as this session, so a lease older than
+    // SGE_WT_CLAIM_TTL_MIN (default 30) is free and a fresh foreign one is not.
+    // A claim that is not a regular "<owner> <epoch>" file still needs review.
+    // Exactly one newline-terminated "<owner> <epoch>" line: roc_claim_state
+    // reads an unterminated or extra-field claim as free.
     const claimFile = path.join(worktree, '.sge-wt-claim');
-    const stat = fs.lstatSync(claimFile, { throwIfNoEntry: false });
-    if (stat) {
-      if (!stat.isFile() || stat.isSymbolicLink() || fs.readFileSync(claimFile, 'utf8').trim().split(/\s+/)[0] !== session) {
-        return result('needs-review', 'foreign-or-malformed-claim-no-expiry-takeover');
+    const claimVerdict = claim => {
+      const stat = fs.lstatSync(claimFile, { throwIfNoEntry: false });
+      if (stat && (!stat.isFile() || stat.isSymbolicLink() || stat.size > 4096
+        || !/^\S+ [0-9]+\n$/.test(fs.readFileSync(claimFile, 'utf8')))) {
+        return result('needs-review', 'malformed-claim');
       }
-    }
+      return ['free', 'mine'].includes(claim) ? null : result('backoff', 'live-claim-within-ttl');
+    };
+    const early = claimVerdict(fields.claim);
+    if (early) return early;
     const head = git(worktree, ['rev-parse', 'HEAD']);
     if (operation === 'inspect') return result('inspected', 'candidate-not-admitted', { worktree, head });
-    db.exec('BEGIN IMMEDIATE');
+    // The commit re-reads the lease under the shared lease lock (lease-lock.sh:
+    // same directory, same staleness), held until COMMIT, so no lease writer can
+    // publish a fresh foreign lease between that re-read and the binding.
+    const lock = path.join(git(worktree, ['rev-parse', '--absolute-git-dir']), 'sge-wt-claim.lock');
+    const leaseToken = acquireLeaseLock(lock);
+    if (!leaseToken) return result('backoff', 'lease-lock-busy');
     try {
-      const row = db.prepare('SELECT * FROM admissions WHERE repo=? AND task=?').get(identity, task);
-      if (row && (row.owner !== session || pathKey(row.path) !== pathKey(worktree)
-        || row.generation !== request.generation && row.request !== request.requestId)) {
-        db.exec('ROLLBACK');
-        return result('backoff', 'existing-owner-or-generation', { worktree: row.path });
-      }
-      if (!row) {
-        if (git(worktree, ['rev-parse', 'HEAD']) !== head || git(worktree, ['symbolic-ref', '--short', 'HEAD']) !== fields.branch) {
-          throw new Error('native binding changed during admission');
+      const recheck = spawnSync(bash, [path.join(here, 'resume-or-create.sh'), 'claim-state', worktree],
+        { encoding: 'utf8', timeout: 30000, env: { ...process.env, SGE_AGENT_ID: session } });
+      if (recheck.error || recheck.status !== 0) return result('needs-review', 'lease-recheck-failed');
+      const late = claimVerdict(recheck.stdout.trim());
+      if (late) return late;
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        const row = db.prepare('SELECT * FROM admissions WHERE repo=? AND task=?').get(identity, task);
+        if (row && (row.owner !== session || pathKey(row.path) !== pathKey(worktree)
+          || row.generation !== request.generation && row.request !== request.requestId)) {
+          db.exec('ROLLBACK');
+          return result('backoff', 'existing-owner-or-generation', { worktree: row.path });
         }
-        db.prepare('INSERT INTO admissions VALUES(?,?,?,?,?,1,?,?,?)')
-          .run(identity, task, worktree, origin, session, 'active', head, request.requestId);
-      } else {
-        db.prepare("UPDATE admissions SET state='active',head=?,request=? WHERE repo=? AND task=?")
-          .run(head, request.requestId, identity, task);
-      }
-      db.exec('COMMIT');
-      return result('resume', 'existing-task-bound', { worktree, head, generation: row?.generation || 1,
-        boundary: 'cooperating sessions only; native locks, permissions, rescue checks and unmanaged writers remain independent' });
-    } catch (error) { db.exec('ROLLBACK'); throw error; }
+        if (!row) {
+          if (git(worktree, ['rev-parse', 'HEAD']) !== head || git(worktree, ['symbolic-ref', '--short', 'HEAD']) !== fields.branch) {
+            throw new Error('native binding changed during admission');
+          }
+          db.prepare('INSERT INTO admissions VALUES(?,?,?,?,?,1,?,?,?)')
+            .run(identity, task, worktree, origin, session, 'active', head, request.requestId);
+        } else {
+          db.prepare("UPDATE admissions SET state='active',head=?,request=? WHERE repo=? AND task=?")
+            .run(head, request.requestId, identity, task);
+        }
+        db.exec('COMMIT');
+        return result('resume', 'existing-task-bound', { worktree, head, generation: row?.generation || 1,
+          boundary: 'cooperating sessions only; native locks, permissions, rescue checks and unmanaged writers remain independent' });
+      } catch (error) { db.exec('ROLLBACK'); throw error; }
+    } finally { releaseLeaseLock(lock, leaseToken); }
   } finally { db.close(); }
+}
+
+// The shared lease lock (skills/worktrees/lease-lock.sh): an atomic mkdir in the
+// worktree's git admin dir. Waits up to SGE_LEASE_LOCK_WAIT_MS (default 5000)
+// and breaks a lock older than SGE_LEASE_LOCK_STALE_S (default 600), a crashed
+// holder's. Same protocol as the shell: the holder's token file h.<pid>.<rand>
+// marks its own lock instance (release only removes that instance), and a break
+// is serialised by <lock>.break with the age re-read under it (CodeRabbit, #3701).
+function leaseAgeMs(p) {
+  try { return Date.now() - fs.statSync(p).mtimeMs; } catch { return -1; }
+}
+
+function breakStaleLeaseLock(lock, staleMs) {
+  if (leaseAgeMs(lock) < staleMs) return false;
+  const brk = `${lock}.break`;
+  try { fs.mkdirSync(brk); } catch {
+    if (leaseAgeMs(brk) >= 10000) { try { fs.rmdirSync(brk); } catch { /* another breaker */ } }
+    return false;
+  }
+  try {
+    if (leaseAgeMs(lock) < staleMs) return false;
+    for (const entry of fs.readdirSync(lock)) {
+      if (entry.startsWith('h.')) fs.rmSync(path.join(lock, entry), { force: true });
+    }
+    fs.rmdirSync(lock);
+    return true;
+  } catch { return false; } finally { try { fs.rmdirSync(brk); } catch { /* already gone */ } }
+}
+
+function acquireLeaseLock(lock) {
+  const waitMs = Number(process.env.SGE_LEASE_LOCK_WAIT_MS || 5000);
+  const staleMs = Number(process.env.SGE_LEASE_LOCK_STALE_S || 600) * 1000;
+  const deadline = Date.now() + waitMs;
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+  const token = `h.${process.pid}.${Math.random().toString(36).slice(2)}`;
+  for (;;) {
+    try {
+      fs.mkdirSync(lock);
+      try { fs.writeFileSync(path.join(lock, token), ''); } catch { try { fs.rmdirSync(lock); } catch { /* */ } return null; }
+      return token;
+    } catch (error) { if (error.code !== 'EEXIST') return null; }
+    if (breakStaleLeaseLock(lock, staleMs)) continue;
+    if (Date.now() >= deadline) return null;
+    Atomics.wait(pause, 0, 0, 100);
+  }
+}
+
+function releaseLeaseLock(lock, token) {
+  try { fs.unlinkSync(path.join(lock, token)); } catch { return; /* broken or removed with its worktree */ }
+  try { fs.rmdirSync(lock); } catch { /* removed with its worktree */ }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

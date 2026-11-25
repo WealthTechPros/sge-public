@@ -26,7 +26,8 @@
 #      or already exists, nothing runs (exit 4). Created exclusively.
 #   2. Per repo: worktrees, then local branches, then remote branches.
 #   3. Each item is re-checked immediately before acting: tip unchanged,
-#      tracked tree clean, not git-locked, no .sge-wt-claim, not the current
+#      tracked tree clean, not git-locked, no .sge-wt-claim lease within its TTL
+#      (roc_claim_state; an unreadable claim counts as live), not the current
 #      checkout, default branch or a protected name. Any failed check or failed
 #      lookup is a SKIP, never a deletion.
 #   4. Before each worktree removal the link guard unlinks every untracked
@@ -53,6 +54,8 @@
 set -u
 
 _TX_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "$_TX_HERE/../worktrees/lease-lock.sh"
 _TX_PROTECTED='^(main|master|develop|trunk|gh-pages|staging|production|prod|dev|stable|next|release/.*|hotfix/.*)$'
 [ -z "${SGE_AUDIT_PROTECTED_REGEX:-}" ] || _TX_PROTECTED="$SGE_AUDIT_PROTECTED_REGEX"
 
@@ -115,6 +118,46 @@ _tx_branch() {
   echo "DONE"
 }
 
+# <worktree> -> 0 only when its .sge-wt-claim lease is absent or older than the
+# lease TTL (sge#3697): the same roc_claim_state predicate resume-or-create uses,
+# so an abandoned session's lease no longer pins a worktree forever. A claim
+# file that is not a regular "<owner> <epoch>" file is NOT free (fail closed).
+_TX_CLAIM_SEEN=""
+_tx_claim_free() {
+  local f="$1/.sge-wt-claim" c state re=$'^[^[:space:]]+ [0-9]+\n$'
+  _TX_CLAIM_SEEN=""
+  if [ -e "$f" ] || [ -L "$f" ]; then
+    [ -f "$f" ] && [ ! -L "$f" ] || return 1
+    [ "$(wc -c <"$f" 2>/dev/null)" -le 4096 ] 2>/dev/null || return 1
+    # Exactly one "<owner> <epoch>\n" line: roc_claim_state reads only the first
+    # two fields of the first line, so a third field, a CR or a second line would
+    # make it misread a live or unknown record as expired, i.e. free.
+    c="$(cat "$f" 2>/dev/null; echo x)" || return 1
+    c="${c%x}"
+    [[ "$c" =~ $re ]] || return 1
+    _TX_CLAIM_SEEN="$(cat "$f" 2>/dev/null)" || return 1
+  fi
+  state="$(SGE_AGENT_ID= bash "$_TX_HERE/../worktrees/resume-or-create.sh" claim-state "$1" 2>/dev/null | tr -d '\r')"
+  [ "$state" = free ]
+}
+
+# <worktree> -> re-checks the lease under the shared lease lock (the caller holds
+# it, see worktrees/lease-lock.sh) and drops the EXPIRED lease _tx_claim_free just
+# read, so the no-force `git worktree remove` is not refused by that one marker.
+# It refuses when the file no longer holds exactly what was judged expired, or
+# when a lease has appeared where there was none. Lease writers take the same
+# lock, so nothing can refresh the lease between this check and the removal.
+# Any other untracked file keeps blocking `git worktree remove` as before.
+_tx_drop_expired_claim() {
+  local f="$1/.sge-wt-claim"
+  if [ -z "$_TX_CLAIM_SEEN" ]; then
+    [ ! -e "$f" ] && [ ! -L "$f" ]; return
+  fi
+  [ -f "$f" ] && [ ! -L "$f" ] || return 1
+  [ "$(cat "$f" 2>/dev/null)" = "$_TX_CLAIM_SEEN" ] || return 1
+  rm -f -- "$f"
+}
+
 _tx_worktree() { # <repo> <def> <name> <path> <tip>
   local repo="$1" def="$2" name="$3" path="$4" tip="$5" por blk="" line cur want st n r
   [ "$path" != - ] || { _tx_out SKIP "$repo" worktree "$name" "$tip" no-path; return 1; }
@@ -143,7 +186,7 @@ _tx_worktree() { # <repo> <def> <name> <path> <tip>
   done <<<"$por"
   [ -n "$blk" ] || { _tx_out SKIP "$repo" worktree "$name" "$tip" not-a-registered-worktree; return 1; }
   [ "$blk" != locked ] || { _tx_out SKIP "$repo" worktree "$name" "$tip" locked; return 1; }
-  [ ! -e "$path/.sge-wt-claim" ] || { _tx_out SKIP "$repo" worktree "$name" "$tip" live-claim; return 1; }
+  _tx_claim_free "$path" || { _tx_out SKIP "$repo" worktree "$name" "$tip" live-claim; return 1; }
   cur="$(git -C "$path" rev-parse --verify --quiet HEAD 2>/dev/null | tr -d '\r')"
   [ "$cur" = "$tip" ] || { _tx_out SKIP "$repo" worktree "$name" "$tip" tip-changed "now=${cur:-unreadable}"; return 1; }
   if [ "$name" != "(detached)" ]; then
@@ -153,9 +196,15 @@ _tx_worktree() { # <repo> <def> <name> <path> <tip>
   st="$(git -C "$path" status --porcelain --untracked-files=no 2>/dev/null)" || { _tx_out SKIP "$repo" worktree "$name" "$tip" status-failed; return 1; }
   [ -z "$st" ] || { _tx_out SKIP "$repo" worktree "$name" "$tip" dirty; return 1; }
   if [ "$_TX_DRY" -eq 1 ]; then _tx_out WOULD "$repo" worktree "$name" "$tip" remove-worktree-and-branch; return 0; fi
-  n="$(_tx_link_guard "$path")" || { _tx_out SKIP "$repo" worktree "$name" "$tip" link-guard-failed; return 1; }
+  # The lease lock is held from the re-check through `git worktree remove` (which
+  # deletes the admin dir and the lock with it), so no lease can be written or
+  # refreshed between the check and the removal.
+  sge_lease_lock "$path" || { _tx_out SKIP "$repo" worktree "$name" "$tip" lease-lock-busy; return 1; }
+  _tx_drop_expired_claim "$path" || { sge_lease_unlock; _tx_out SKIP "$repo" worktree "$name" "$tip" live-claim claim-changed; return 1; }
+  n="$(_tx_link_guard "$path")" || { sge_lease_unlock; _tx_out SKIP "$repo" worktree "$name" "$tip" link-guard-failed; return 1; }
   git -C "$repo" -c core.longpaths=true worktree remove "$path" >/dev/null 2>&1 \
-    || { _tx_out SKIP "$repo" worktree "$name" "$tip" git-refused "links unlinked: ${n:-0}"; return 1; }
+    || { sge_lease_unlock; _tx_out SKIP "$repo" worktree "$name" "$tip" git-refused "links unlinked: ${n:-0}"; return 1; }
+  sge_lease_unlock
   git -C "$repo" worktree prune >/dev/null 2>&1
   r="GONE"; [ "$name" = "(detached)" ] || r="$(_tx_branch "$repo" "$name" "$tip")"
   _tx_out DONE "$repo" worktree "$name" "$tip" removed "links unlinked: ${n:-0}; branch: $r"

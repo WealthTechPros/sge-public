@@ -36,7 +36,7 @@ function fixture(t) {
   return { request, invoke, worktree, git };
 }
 
-test('two fresh processes bind only one owner; a new session cannot create a duplicate or take over expired claims', async t => {
+test('two fresh processes bind only one owner; a new session cannot create a duplicate; only a lease past its TTL is free', async t => {
   const f = fixture(t);
   assert.equal((await admission(f.request)).outcome, 'initialized');
   const [a, b] = await Promise.all([
@@ -65,10 +65,27 @@ test('two fresh processes bind only one owner; a new session cannot create a dup
   fs.mkdirSync(registry);
   const entry = path.join(registry, 'legacy.entry');
   fs.writeFileSync(entry, `session=legacy-owner\npath=${f.worktree}\nbranch=feat/existing\n`);
-  assert.equal((await f.invoke({ ...f.request, operation: 'admit', session: 'successor', generation: 2 })).result.reasonCode, 'foreign-legacy-registration');
+  // sge#3697: the retired ownership registry no longer gates admission.
+  assert.equal((await f.invoke({ ...f.request, operation: 'admit', session: 'successor', generation: 2 })).result.outcome, 'resume');
   fs.unlinkSync(entry);
-  fs.writeFileSync(path.join(f.worktree, '.sge-wt-claim'), 'foreign-owner 1\n');
-  assert.equal((await f.invoke({ ...f.request, operation: 'admit', session: owner, generation: 1 })).result.outcome, 'needs-review');
+  // A fresh foreign lease still blocks; one older than the lease TTL is free.
+  const claim = path.join(f.worktree, '.sge-wt-claim');
+  const now = Math.floor(Date.now() / 1000);
+  fs.writeFileSync(claim, `foreign-owner ${now}\n`);
+  assert.notEqual((await f.invoke({ ...f.request, operation: 'admit', session: 'successor', requestId: 'fresh-claim', generation: 2 })).result.outcome, 'resume');
+  fs.writeFileSync(claim, `foreign-owner ${now - 7200}\n`);
+  assert.notEqual((await f.invoke({ ...f.request, operation: 'admit', session: 'successor', requestId: 'long-ttl', generation: 2 },
+    { SGE_WT_CLAIM_TTL_MIN: '600' })).result.outcome, 'resume');
+  assert.equal((await f.invoke({ ...f.request, operation: 'admit', session: 'successor', requestId: 'stale-claim', generation: 2 })).result.outcome, 'resume');
+  fs.writeFileSync(claim, `foreign-owner ${now}\r\n`);
+  assert.equal((await f.invoke({ ...f.request, operation: 'admit', session: 'successor', requestId: 'crlf-claim', generation: 2 })).result.outcome, 'needs-review');
+  fs.writeFileSync(claim, `impl 12 ${now}\n`);
+  assert.equal((await f.invoke({ ...f.request, operation: 'admit', session: 'successor', requestId: 'three-field-claim', generation: 2 })).result.outcome, 'needs-review');
+  fs.writeFileSync(claim, `foreign-owner ${now}`);
+  assert.equal((await f.invoke({ ...f.request, operation: 'admit', session: 'successor', requestId: 'unterminated-claim', generation: 2 })).result.outcome, 'needs-review');
+  fs.writeFileSync(claim, 'garbage\n');
+  assert.equal((await f.invoke({ ...f.request, operation: 'admit', session: 'successor', requestId: 'bad-claim', generation: 2 })).result.outcome, 'needs-review');
+  fs.unlinkSync(claim);
   assert.equal(f.git(['worktree', 'list', '--porcelain']).split('\n').filter(line => line.startsWith('worktree ')).length, 2);
 });
 
@@ -89,3 +106,49 @@ test('a GitHub repository named dev.azure.com is still a GitHub host', async t =
   await admission(f.request);
   await assert.rejects(admission({ ...f.request, operation: 'admit', task: 'azdo:wi/1' }), /host/);
 });
+
+test('admission re-reads the lease under the shared lease lock at commit (sge#3697)', async t => {
+  const f = fixture(t);
+  await admission(f.request);
+  const lock = path.join(f.git(['-C', f.worktree, 'rev-parse', '--absolute-git-dir']), 'sge-wt-claim.lock');
+  // A lease writer holding the lock: admission waits, then backs off rather than
+  // committing against a lease state it cannot re-check.
+  fs.mkdirSync(lock);
+  const busy = await f.invoke({ ...f.request, operation: 'admit', requestId: 'lock-busy' }, { SGE_LEASE_LOCK_WAIT_MS: '200' });
+  assert.equal(busy.result.outcome, 'backoff');
+  assert.equal(busy.result.reasonCode, 'lease-lock-busy');
+  fs.rmdirSync(lock);
+  const ok = await f.invoke({ ...f.request, operation: 'admit', requestId: 'lock-free' });
+  assert.equal(ok.result.outcome, 'resume');
+  assert.equal(fs.existsSync(lock), false, 'admission releases the lease lock');
+});
+
+test('admission leaves a stale lock to a contender already breaking it (CodeRabbit, #3701)', async t => {
+  const f = fixture(t);
+  await admission(f.request);
+  const lock = path.join(f.git(['-C', f.worktree, 'rev-parse', '--absolute-git-dir']), 'sge-wt-claim.lock');
+  fs.mkdirSync(lock);
+  fs.utimesSync(lock, 1, 1);
+  fs.mkdirSync(`${lock}.break`);
+  const busy = await f.invoke({ ...f.request, operation: 'admit', requestId: 'mid-break' }, { SGE_LEASE_LOCK_WAIT_MS: '200' });
+  assert.equal(busy.result.reasonCode, 'lease-lock-busy');
+  assert.equal(fs.existsSync(lock), true, 'the stale lock is left to the breaker that holds .break');
+  fs.utimesSync(`${lock}.break`, 1, 1);
+  const ok = await f.invoke({ ...f.request, operation: 'admit', requestId: 'after-crashed-break' }, { SGE_LEASE_LOCK_WAIT_MS: '1000' });
+  assert.equal(ok.result.outcome, 'resume');
+  assert.equal(fs.existsSync(lock) || fs.existsSync(`${lock}.break`), false);
+});
+
+test('a fresh foreign lease written after discovery read the claim is seen at commit (sge#3697)',
+  { skip: process.platform === 'win32' && 'SGE_BASH wrapper needs a POSIX exec' }, async t => {
+    const f = fixture(t);
+    await admission(f.request);
+    // The wrapper runs the real bash, then (after decide-ref has read the lease as
+    // free) publishes a fresh foreign lease: the race the commit re-check closes.
+    const wrapper = path.join(path.dirname(f.request.store), 'racy-bash.sh');
+    fs.writeFileSync(wrapper, `#!/usr/bin/env bash\nbash "$@"; rc=$?\n[ "$2" = decide-ref ] && printf 'racer %s\n' "$(date +%s)" >'${f.worktree}/.sge-wt-claim'\nexit $rc\n`);
+    fs.chmodSync(wrapper, 0o700);
+    const raced = await f.invoke({ ...f.request, operation: 'admit', requestId: 'raced' }, { SGE_BASH: wrapper });
+    assert.equal(raced.result.outcome, 'backoff');
+    assert.equal(raced.result.reasonCode, 'live-claim-within-ttl');
+  });

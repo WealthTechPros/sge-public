@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { pathKey } from '../lib/local-state.mjs';
 import { importQueue, packet, auditPacket, auditRepositories, applyAudit, counts, planItem, verifyIgnored, verifyRemoval, verifyApprovedIdentity, verifyPlanDisposition, main } from './fleet.mjs';
-import { checkConsent, compareRemoval } from './fleet-execution.mjs';
+import { checkConsent, compareRemoval, manageExecution } from './fleet-execution.mjs';
 
 const head = 'a'.repeat(40);
 const base = 'b'.repeat(40);
@@ -477,6 +477,25 @@ test('fresh process reconciles an interrupted removal without invoking the execu
       '--path', target]), /unresolved target blocker/);
     assert.equal(fs.existsSync(`${prefix}.operation.json`), false);
     fs.writeFileSync(state, original);
+    const lease = path.join(target, '.sge-wt-claim');
+    fs.writeFileSync(lease, `fixture-session ${Math.floor(Date.now() / 1000) - 7200}\n`);
+    const claimTargets = [];
+    await assert.rejects(manageExecution({
+      command: 'execute', file: state, state: JSON.parse(original),
+      options: { '--plan': planFile, '--fingerprint': fingerprint, '--approval': approval, '--path': target },
+      main: async () => ({ verified: true }),
+      run: (_program, args) => {
+        if (args.includes('status')) return `?? .sge-wt-claim\n`;
+        if (args.includes('claim-state')) {
+          claimTargets.push(args.at(-1));
+          return 'free\n';
+        }
+        throw new Error('expired lease passed the fleet precheck');
+      },
+    }), /expired lease passed the fleet precheck/);
+    assert.deepEqual(claimTargets, [target]);
+    assert.equal(fs.existsSync(`${prefix}.operation.json`), false);
+    fs.unlinkSync(lease);
     const before = { registry: git(['worktree', 'list', '--porcelain']),
       refs: git(['for-each-ref', '--format=%(refname) %(objectname)']), stashes: git(['stash', 'list', '--format=%H']) };
     fs.writeFileSync(`${prefix}.operation.json`, JSON.stringify({ fingerprint, path: target, head: current, before }));
