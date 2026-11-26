@@ -208,9 +208,9 @@ Extended rationale: [`gate-and-termination.md`](references/gate-and-termination.
 
 **Fix-inline gate (#981)** — every "fix inline" finding fixed in Phase 6.5 or re-classified comment-only — and **security MAJOR → hold (#1393)**: [`gate-and-termination.md`](references/gate-and-termination.md).
 
-End the summary with the machine-readable verdict block ([field/grammar contract](../../docs/schemas/sge-verdict-block.md)) — `/sge:pr-monitor` and delta mode both parse it:
+End the summary with one [verdict block](../../docs/schemas/sge-verdict-block.md) for pr-monitor and delta review. For Warden outside-diff dispatches only, check each outstanding finding on the live head, record its disposition and include the system prompt's `outside_diff_evidence` digest in the full verdict.
 
-**One verdict, one fence (SPEC-090):** outside this block, never write `verdict` followed by a colon in any form or script (lane summaries say `Result:`), never a second `sge-verdict` fence, and only the listed keys inside it, each `key: value` once in plain ASCII — otherwise every gate reads the body `malformed` and the PR cannot merge.
+**SPEC-090:** Use one `sge-verdict` fence. Only listed ASCII `key: value` lines are valid, with no duplicate keys. Outside it, never write `verdict` followed by a colon, even in scripts. Use `Result:` in lane summaries.
 
 ````markdown
 ```sge-verdict
