@@ -6,7 +6,7 @@ useDefault = true
 [[rules]]
 id = "sge-credential-assignment"
 description = "Credential-named literal assignment, including typed configuration"
-regex = '''(?i)[a-z0-9_.-]*(?:secret|token|passw(?:or)?d|passwd|pwd|api[_-]?key|apikey|private[_-]?key|credential|access[_-]?key|auth[_-]?key)[a-z0-9_.-]*["'`]?(?:[ \t]*:[ \t]*[a-z_][a-z0-9_.]*(?:\[[a-z0-9_. ,]+\])?)?[ \t]*(?::=|=>|=|:)[ \t]*("[^"\r\n ]{8,}"|'[^'\r\n ]{8,}'|`[^`\r\n ]{8,}`|[a-z0-9][a-z0-9!@#$%^&*_.:/+=?~-]{7,})(?:[ \t\r\n;,]|\}|\]|\)|$)'''
+regex = '''(?i)[a-z0-9_.-]*(?:secret|token|passw(?:or)?d|passwd|pwd|api[_-]?key|apikey|private[_-]?key|credential|access[_-]?key|auth[_-]?key)[a-z0-9_.-]*["'`]?(?:[ \t]*:[ \t]*[a-z_][a-z0-9_.]*(?:\[[a-z0-9_. ,]+\])?)?[ \t]*(?::=|=>|=|:)[ \t]*("[^"\r\n ]{8,}"|'[^'\r\n ]{8,}'|`[^`\r\n ]{8,}`|[a-z0-9][a-z0-9!@#$%^&*_.:/+=?~-]{7,})(?:[ \t\r\n;,"'\x60]|\}|\]|\)|$)'''
 secretGroup = 1
 
 [[rules.allowlists]]
@@ -36,6 +36,15 @@ description = "Quoted credential value in a command argument or explicit prose a
 regex = '''(?i)(?:password|passwd|pwd|token|secret|api[_-]?key|credential)[ \t]+(?:(?:is|was|equals?|set[ \t]+to)[ \t]+)?["']([^"' \t\r\n]{8,})["']'''
 secretGroup = 1
 
+[[rules.allowlists]]
+description = "Bicep resource declaration types are not credential arguments"
+condition = "AND"
+paths = ['''(?i)\.bicep$''']
+regexTarget = "line"
+regexes = [
+  '''(?i)^[ \t]*resource[ \t]+[a-z_][a-z0-9_]*[ \t]+'[a-z][a-z0-9.]*\.[a-z0-9.]+(?:/[a-z][a-z0-9]*)+@[0-9]{4}-[0-9]{2}-[0-9]{2}(?:-preview)?'[ \t]+(?:existing[ \t]+)?=[ \t]*\{[ \t]*$''',
+]
+
 [[rules]]
 id = "sge-credential-prose"
 description = "Unquoted mixed-character credential after an explicit assignment phrase"
@@ -45,7 +54,7 @@ secretGroup = 1
 description = "Ordinary words, references and numbers are not credential evidence"
 regexTarget = "secret"
 regexes = [
-  '''^[a-zA-Z]+$''',
+  '''^[a-zA-Z]+[.,;:!?]?$''',
   '''^[0-9]+$''',
   '''^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$''',
 ]
@@ -65,3 +74,15 @@ secretGroup = 1
 id = "sge-private-key-header"
 description = "Private-key material begins here, even if the staged block is incomplete"
 regex = '''-----BEGIN [A-Z0-9 -]*PRIVATE KEY-----'''
+
+[[allowlists]]
+targetRules = ["sge-credential-assignment", "generic-api-key"]
+description = "Code metadata fields have resource-name, API-version or ARM-resource-ID syntax"
+condition = "AND"
+paths = ['''(?i)\.(?:[cm]?[jt]s|[jt]sx|bicep)$''']
+regexTarget = "match"
+regexes = [
+  '''(?i)^[a-z0-9_.-]*(?:secret[_-]?name|module[_-]?name|resource[_-]?group)["'`]?[ \t]*(?:=|:)[ \t]*["'][a-z0-9-]{1,127}["'][ \t\r\n;,}\])]*$''',
+  '''(?i)^[a-z0-9_.-]*api[_-]?version["'`]?[ \t]*(?:=|:)[ \t]*["'][0-9]{4}-[0-9]{2}-[0-9]{2}(?:-preview)?["'][ \t\r\n;,}\])]*$''',
+  '''(?i)^[a-z0-9_.-]*(?:role|deployment)[_-]?id["'`]?[ \t]*(?:=|:)[ \t]*["'`]/subscriptions/(?:[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}|\$\{[a-z_$][a-z0-9_$.]*\})(?:/(?:[a-z0-9_.-]+|\$\{[a-z_$][a-z0-9_$.]*\}))+["'`][ \t\r\n;,}\])]*$''',
+]
