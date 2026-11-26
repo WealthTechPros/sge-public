@@ -20,7 +20,8 @@ Every commit must carry exactly one of these trailers — enforced by the
 `commit-msg` hook (`.githooks/commit-msg`, or `.husky/commit-msg` where this
 repo uses husky):
 
-- `Spec: SPEC-NNN` (or `SGD-NNN`) — the feature spec this commit implements.
+- `Spec: SPEC-NNN` (also `SGE-NNN`, `SGD-NNN` or a configured prefix) — the feature spec this commit implements.
+- `Spec: <repo>#NN` — the repository issue this commit implements, e.g. `Spec: payments-api#85`.
 - `SGE-Override: <STEP>; <reason ≥10 chars>` — an intentional bypass, for a
   governance / infra / docs change that maps to no single feature spec.
   `STEP ∈ { LOCATE, READ, IMPACT, PROPOSE, IMPLEMENT, TEST, UPDATE, ALL }`.

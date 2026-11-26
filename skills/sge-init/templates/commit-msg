@@ -2,10 +2,9 @@
 # SGE change protocol: commit-msg hook, enforcement-profile aware (SPEC-128).
 # sge-commit-msg: enforcement-profile-aware (SPEC-128)
 #
-# Every commit should carry either a `Spec: <SPEC|SGD|SGE>-NNN` trailer or an
-# `SGE-Override: <STEP>; <reason>` trailer, so each commit traces back to an
-# approved spec (or records an intentional bypass). What happens when neither
-# is present depends on the repo's enforcement profile in .sge/posture.yaml:
+# A Spec: trailer can identify a spec or a repository issue. An
+# SGE-Override: trailer records an intentional bypass. The response to a missing trailer
+# depends on the repo's enforcement profile in .sge/posture.yaml:
 #
 #   onboarding (the default: no file, or no `enforcement:` key)
 #       warns and lets the commit through.
@@ -148,7 +147,13 @@ else
   fi
 fi
 SPEC_ALT="SPEC|SGD|SGE$(printf '%s\n' "$SPEC_EXTRA" | tr ', \t\r' '\n\n\n\n' | { LC_ALL=C grep -E '^[A-Z][A-Z0-9]{0,15}$' || :; } | sed 's/^/|/' | tr -d '\n')"
-if grep -qE "^Spec:[[:space:]]*(${SPEC_ALT})-[0-9]+" "$COMMIT_MSG_FILE"; then
+# A hash in the first token belongs to the issue grammar below. Legacy
+# spec annotations following whitespace may still mention an issue.
+if grep -qE "^Spec:[[:space:]]*(${SPEC_ALT})-[0-9]+[^#[:space:]]*([[:space:]]|$)" "$COMMIT_MSG_FILE"; then
+  exit 0
+fi
+# Accept a bare repository name and decimal issue number, as in .githooks/commit-msg.
+if grep -qE '^Spec:[[:space:]]*[A-Za-z0-9._-]+#[0-9]+[[:space:]]*$' "$COMMIT_MSG_FILE"; then
   exit 0
 fi
 # Accept the SGE-Override trailer (and the legacy SGD-Override spelling, so
@@ -159,8 +164,11 @@ fi
 
 TRAILER_HELP='Add one of the following trailers to the commit message:
 
-  Spec: SPEC-NNN          (or SGD-NNN)
+  Spec: SPEC-NNN          (or SGE-NNN, SGD-NNN, or a configured prefix)
     Link this commit to the feature spec it implements.
+
+  Spec: <repo>#NN
+    Link this commit to a repository issue, e.g. payments-api#85.
 
   SGE-Override: <STEP>; <reason, ≥10 chars>
     Intentional bypass (governance/infra/docs change with no single spec).

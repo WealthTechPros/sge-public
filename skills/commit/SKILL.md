@@ -43,7 +43,7 @@ This skill runs **inline** in the main conversation — do not fork it into a su
 `$ARGUMENTS` may contain, in any order:
 
 - `--no-push` — commit-only mode (see Modes).
-- A `SPEC-NNN` / `SGD-NNN` reference — use it for the `Spec:` trailer without asking.
+- A spec ID or `<repo>#NN` issue reference — use it for the `Spec:` trailer without asking.
 - Anything else is a **message hint** — guidance for the subject line, not the verbatim message. You still write a proper conventional commit from the actual diff.
 
 Example: `/sge:commit retry backoff fix SPEC-031 --no-push` → message hint "retry backoff fix", spec `SPEC-031`, no push.
@@ -134,12 +134,13 @@ If none of these hold, the repo is not SGE-governed: skip the trailer (step 5) e
 
 Every commit in an SGE-governed repo carries **exactly one** change-protocol trailer so it is traceable through the governance cascade and passes the commit-msg hook:
 
-- `Spec: SPEC-NNN` (or `SGD-NNN`) — the feature spec this commit implements. Use when the work traces to a single spec.
+- `Spec: SPEC-NNN` (also `SGE-NNN`, `SGD-NNN` or a configured prefix) — the feature spec this commit implements.
+- `Spec: <repo>#NN` — the repository issue this commit implements, e.g. `Spec: payments-api#85`.
 - `SGE-Override: <STEP>; <reason>` — for governance / infra / docs / tooling changes that map to no single spec. `STEP ∈ { LOCATE, READ, IMPACT, PROPOSE, IMPLEMENT, TEST, UPDATE, ALL }` (the protocol step being overridden; `ALL` when no single step applies). The reason must be ≥ 10 characters and say *why* no spec applies — not boilerplate.
 
 Rules:
 
-- One trailer, not both; a parenthetical `(SPEC-NNN)` in the subject line does **not** satisfy the hook — the trailer line is required.
+- One change-protocol trailer; a parenthetical `(SPEC-NNN)` in the subject line does **not** satisfy the hook — the trailer line is required.
 - The trailer goes in the trailer block at the end of the message, alongside the co-author line.
 
 #### Agent-Id attribution trailer (every commit, SGE repo or not)
@@ -181,14 +182,14 @@ Agent-Id: agent-<ulid>
 
 **This skill derives the trailer itself, every time, from the work — not from the dispatch prompt.** A dispatch prompt that never mentions trailers MUST still produce commits that pass the repo's commit-msg hook and `require-commit-trailer` CI gate on the first run. Resolve in order; first hit wins:
 
-1. **Explicit spec ref** — a `SPEC-NNN` / `SGD-NNN` in `$ARGUMENTS` → `Spec: <id>`.
+1. **Explicit reference** — a supported spec ID or repository issue reference in `$ARGUMENTS` → `Spec: <reference>`.
 2. **Contextual spec ref** — exactly one `SPEC-NNN` / `SGD-NNN` named by the issue being implemented (title/body), the branch name, or a spec file in the staged diff → `Spec: <id>`.
-3. **No spec anywhere** → construct `SGE-Override: <STEP>; <reason>` from the work itself:
+3. **No spec anywhere** → when tracing the change to a repository issue, you can use `Spec: <repo>#NN`. Otherwise construct `SGE-Override: <STEP>; <reason>` from the work itself:
    - `<STEP>` from the conventional commit type / branch prefix: `docs` → `UPDATE`; `test` → `TEST`; `feat` / `fix` / `refactor` / `perf` → `IMPLEMENT`; `chore` / `ci` / `build` / anything else → `ALL`.
    - `<reason>` — ≥ 10 characters, concrete, never boilerplate: say what the change is and *why no spec governs it*, citing the issue when one exists. Example: `SGE-Override: IMPLEMENT; process fix for #1173, no governing spec`.
 4. **Genuinely ambiguous** (multiple candidate specs, no single one named by the issue): in an **interactive** session use **AskUserQuestion** — *Provide Spec-Ref* / *SGE-Override* (user gives or approves step + justification) / *Abort*. In a **headless/unattended** session (subagent lane — no user to ask), never stall on a question: fall back to step 3's override, naming the candidate specs in the reason so a human can re-trace it.
 
-**Hard gate — validate before committing.** In an SGE-governed repo, before running `git commit`, check the drafted message contains a line matching `^Spec: *(SPEC|SGD|SGE)-[0-9]+` **or** `^(SGD|SGE)-Override: *[A-Z]+; *.{10,}` — the exact patterns the commit-msg hook and the `require-commit-trailer.yml` CI check enforce (note the STEP token is UPPERCASE and the `;` is required; `SGD-Override` is still accepted so historical commits keep validating, but new commits should mint `SGE-Override`). No match → do **not** commit; fix the trailer first. This skill never hands a trailer-less commit to a repo that has the trailer gate.
+**Hard gate — validate before committing.** In an SGE-governed repo, before running `git commit`, check the drafted message contains a line matching a supported spec ID, `^Spec:[[:space:]]*[A-Za-z0-9._-]+#[0-9]+[[:space:]]*$`, or `^(SGD|SGE)-Override: *[A-Z]+; *.{10,}` (note the STEP token is UPPERCASE and the `;` is required; `SGD-Override` is still accepted so historical commits keep validating, but new commits should mint `SGE-Override`). No match → do **not** commit; fix the trailer first. This skill never hands a trailer-less commit to a repo that has the trailer gate.
 
 ### 6. Commit
 
