@@ -165,6 +165,10 @@ longest expected interval between refreshes in **both** the worker and every
 process that runs admission or tidy. An expired lease makes the worktree
 eligible for the usual cleanup checks. Release the lease when finished.
 
+For qualified admission or handoff through `admission.mjs`, keep the admission
+store outside Git worktrees and synchronised folders. The shared
+[local state validator](../lib/local-state.mjs) checks the store path before use.
+
 Copilot refreshes at session start and each agent stop. It uses `SGE_AGENT_ID`
 when set and otherwise uses the Copilot session ID.
 
