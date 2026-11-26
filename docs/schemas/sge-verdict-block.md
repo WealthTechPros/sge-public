@@ -211,6 +211,7 @@ applied_order: <id>[,<id>...] | none
 |---|---|
 | **Required by the independence gate** (fails closed if absent) | `verdict`, and one of `commit` / `sha` / `head` |
 | **Always emitted by `/sge:pr-review`** | all 31 fields above |
+| **Outside-diff review dispatched by PR Warden** | `outside_diff_evidence`, the 64-character SHA-256 digest supplied at dispatch. A full review records it after checking all outstanding reports. A new or edited report requires a fresh review. |
 
 Unrecognised fields are ignored by existing parsers; do not remove or rename
 existing fields without updating both parser implementations (see

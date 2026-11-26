@@ -179,7 +179,7 @@ GL_COMMENT_MARKER_FILTER='(((.body // "") | split("\n") | map(sub("\r$"; ""))) a
 # sources sort into one timeline (sge#2729 item 2).
 GL_VERDICT_JQ='
     def gl_raw_tag: "([pP][rR][eE]|[sS][cC][rR][iI][pP][tT]|[sS][tT][yY][lL][eE]|[tT][eE][xX][tT][aA][rR][eE][aA])";
-    def gl_known: ["verdict", "recommendation", "pr", "commit", "sha", "head", "reviewed_at", "plugin_ref",
+    def gl_known: ["verdict", "recommendation", "pr", "commit", "sha", "head", "reviewed_at", "plugin_ref", "outside_diff_evidence",
       "mode", "session", "governance_tier", "blockers", "majors", "minors", "traceability", "quality_gates",
       "quality_gates_scope", "diff_coverage", "qa_evidence", "unresolved_threads", "tool_call_count",
       "diff_risk", "suite_order", "mutation_gate", "specialist_dispatch", "review_tier",
