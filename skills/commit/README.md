@@ -42,6 +42,19 @@ values have a narrow test/fixture-path exception; recognisable provider tokens
 remain blocked in all paths. The old repository-wide history-scanning policy
 is a different control and is not reused here.
 
+Bicep resource declaration types have a bounded metadata exception. Literal secret/module names and resource groups
+must have resource-name syntax (1–127 alphanumeric/hyphen characters); API
+versions must have date syntax; role/deployment IDs must have subscription
+resource-path syntax, allowing identifier interpolation. These metadata
+exceptions target only the assignment and inherited generic-key rules, not
+provider token detection, and do not exempt dotenv/YAML values or whole files.
+
+The scanner examines staged text and cannot distinguish bare identifiers or PowerShell
+commands from credential-looking assignments embedded in strings. Ambiguous assignments
+remain reportable in scripts and test files. Ordinary
+alphabetic prose words may end with sentence punctuation; quoted prose values
+and mixed-character credentials remain scanned.
+
 Only staged added textual lines are scanned. Existing history, deleted and
 unstaged content, binaries and archive contents are not a full scan target.
 Use a separate full-repository/history scan when investigating prior exposure.
